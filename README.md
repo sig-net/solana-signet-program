@@ -88,7 +88,7 @@ npx ts-node deploy.ts
 ```bash
 # In a new terminal window
 cd clients/response-server
-npx ts-node server.ts
+npx ts-node sig-server.ts
 ```
 
 The responder will start listening for signature requests on the Solana blockchain and automatically respond using your Responder private key.
@@ -98,5 +98,5 @@ The responder will start listening for signature requests on the Solana blockcha
 ```bash
 # In a new terminal window
 cd clients/request-client
-npx ts-node request.ts
+npx ts-node sig-request.ts
 ```
