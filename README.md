@@ -24,7 +24,6 @@
    cd ../request-client
    yarn
    cd ../response-server
-   npm install
    yarn
    ```
 
