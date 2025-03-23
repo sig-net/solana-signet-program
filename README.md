@@ -20,12 +20,12 @@
    
    # Client dependencies
    cd clients/deploy-client
-   npm install
+   yarn
    cd ../request-client
-   npm install
+   yarn
    cd ../response-server
    npm install
-   cd ../../
+   yarn
    ```
 
 3. **Build the Solana program**
@@ -72,7 +72,7 @@
 
 ## Running the System
 
-### 1. Deploy the Solana Program
+### 1. Deploy the Solana Program (Optional)
 
 ```bash
 # Deploy the program with your specified Program ID
