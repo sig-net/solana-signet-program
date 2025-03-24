@@ -1,0 +1,1 @@
+web: cd clients/response-server && yarn && npx ts-node sig-server.ts
