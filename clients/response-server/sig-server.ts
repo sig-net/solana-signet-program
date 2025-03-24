@@ -1,8 +1,8 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { Connection, Keypair } from "@solana/web3.js";
-import { ChainSignaturesProject } from "../../chain-signatures-project/target/types/chain_signatures_project";
-import IDL from "../../chain-signatures-project/target/idl/chain_signatures_project.json";
+import { ChainSignaturesProject } from "./types/chain_signatures_project";
+import IDL from "./idl/chain_signatures_project.json";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
