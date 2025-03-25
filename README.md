@@ -42,6 +42,11 @@
    - `programs/chain-signatures/src/lib.rs` (in `declare_id!` macro)
    - `Anchor.toml` (under `[programs.testnet]`)
 
+   After updating the Program ID, build the contract again
+   ```bash
+   anchor build
+   ```
+
 ### Configuration
 
 1. **Create a .env file in the project root**
@@ -59,6 +64,9 @@
 
 2. **Prepare your Solana wallet**
    ```bash
+   # Set the Solana RPC URL
+   solana config set --url https://api.devnet.solana.com
+   
    # Check if you have a Solana keypair
    solana address
    
@@ -97,5 +105,5 @@ The responder will start listening for signature requests on the Solana blockcha
 ```bash
 # In a new terminal window
 cd clients/request-client
-npx ts-node sig-request.ts
+npx ts-node sig-client.ts
 ```
