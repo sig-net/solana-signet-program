@@ -1,5 +1,5 @@
+#![allow(unexpected_cfgs)]
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token};
 
 declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 
@@ -18,6 +18,45 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    pub fn update_deposit(ctx: Context<AdminOnly>, new_deposit: u64) -> Result<()> {
+        let program_state = &mut ctx.accounts.program_state;
+        program_state.signature_deposit = new_deposit;
+
+        emit!(DepositUpdatedEvent {
+            old_deposit: program_state.signature_deposit,
+            new_deposit,
+        });
+
+        Ok(())
+    }
+
+    pub fn withdraw_funds(ctx: Context<WithdrawFunds>, amount: u64) -> Result<()> {
+        let program_state = &ctx.accounts.program_state;
+        let recipient = &ctx.accounts.recipient;
+
+        let program_state_info = program_state.to_account_info();
+        require!(
+            program_state_info.lamports() >= amount,
+            ChainSignaturesError::InsufficientFunds
+        );
+
+        require!(
+            recipient.key() != Pubkey::default(),
+            ChainSignaturesError::InvalidRecipient
+        );
+
+        // Transfer funds from program_state to recipient
+        **program_state_info.try_borrow_mut_lamports()? -= amount;
+        **recipient.try_borrow_mut_lamports()? += amount;
+
+        emit!(FundsWithdrawnEvent {
+            amount,
+            recipient: recipient.key(),
+        });
+
+        Ok(())
+    }
+
     pub fn sign(
         ctx: Context<Sign>,
         payload: [u8; 32],
@@ -30,25 +69,27 @@ pub mod chain_signatures_project {
         let program_state = &ctx.accounts.program_state;
         let requester = &ctx.accounts.requester;
         let system_program = &ctx.accounts.system_program;
-        
+
+        let payer = match &ctx.accounts.fee_payer {
+            Some(fee_payer) => fee_payer.to_account_info(),
+            None => requester.to_account_info(),
+        };
+
         require!(
-            ctx.accounts.requester.lamports() >= program_state.signature_deposit,
+            payer.lamports() >= program_state.signature_deposit,
             ChainSignaturesError::InsufficientDeposit
         );
-        
+
         let transfer_instruction = anchor_lang::system_program::Transfer {
-            from: requester.to_account_info(),
+            from: payer,
             to: program_state.to_account_info(),
         };
-        
+
         anchor_lang::system_program::transfer(
-            CpiContext::new(
-                system_program.to_account_info(),
-                transfer_instruction,
-            ),
+            CpiContext::new(system_program.to_account_info(), transfer_instruction),
             program_state.signature_deposit,
         )?;
-        
+
         emit!(SignatureRequestedEvent {
             sender: *requester.key,
             payload,
@@ -59,8 +100,12 @@ pub mod chain_signatures_project {
             algo,
             dest,
             params,
+            fee_payer: match &ctx.accounts.fee_payer {
+                Some(payer) => Some(*payer.key),
+                None => None,
+            },
         });
-        
+
         Ok(())
     }
 
@@ -73,7 +118,7 @@ pub mod chain_signatures_project {
             request_ids.len() == signatures.len(),
             ChainSignaturesError::InvalidInputLength
         );
-        
+
         for i in 0..request_ids.len() {
             emit!(SignatureRespondedEvent {
                 request_id: request_ids[i],
@@ -81,7 +126,7 @@ pub mod chain_signatures_project {
                 signature: signatures[i].clone(),
             });
         }
-        
+
         Ok(())
     }
 }
@@ -121,11 +166,48 @@ pub struct Initialize<'info> {
 }
 
 #[derive(Accounts)]
+pub struct AdminOnly<'info> {
+    #[account(
+        mut,
+        seeds = [b"program-state"],
+        bump,
+        has_one = admin @ ChainSignaturesError::Unauthorized
+    )]
+    pub program_state: Account<'info, ProgramState>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawFunds<'info> {
+    #[account(
+        mut,
+        seeds = [b"program-state"],
+        bump,
+        has_one = admin @ ChainSignaturesError::Unauthorized
+    )]
+    pub program_state: Account<'info, ProgramState>,
+
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    /// CHECK: The safety check is performed in the withdraw_funds
+    /// function by checking it is not the zero address.
+    #[account(mut)]
+    pub recipient: AccountInfo<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct Sign<'info> {
     #[account(mut, seeds = [b"program-state"], bump)]
     pub program_state: Account<'info, ProgramState>,
     #[account(mut)]
     pub requester: Signer<'info>,
+    #[account(mut)]
+    pub fee_payer: Option<Signer<'info>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -145,6 +227,7 @@ pub struct SignatureRequestedEvent {
     pub algo: String,
     pub dest: String,
     pub params: String,
+    pub fee_payer: Option<Pubkey>,
 }
 
 #[event]
@@ -154,10 +237,28 @@ pub struct SignatureRespondedEvent {
     pub signature: Signature,
 }
 
+#[event]
+pub struct DepositUpdatedEvent {
+    pub old_deposit: u64,
+    pub new_deposit: u64,
+}
+
+#[event]
+pub struct FundsWithdrawnEvent {
+    pub amount: u64,
+    pub recipient: Pubkey,
+}
+
 #[error_code]
 pub enum ChainSignaturesError {
     #[msg("Insufficient deposit amount")]
     InsufficientDeposit,
     #[msg("Arrays must have the same length")]
     InvalidInputLength,
+    #[msg("Unauthorized access")]
+    Unauthorized,
+    #[msg("Insufficient funds for withdrawal")]
+    InsufficientFunds,
+    #[msg("Invalid recipient address")]
+    InvalidRecipient,
 }

@@ -70,6 +70,18 @@ async function main() {
 
   const program = new Program<ChainSignaturesProject>(IDL, provider);
 
+  const updTx = await program.methods
+    .updateDeposit(new anchor.BN(0.011 * anchor.web3.LAMPORTS_PER_SOL))
+    .rpc();
+
+  const latestUpdBlockhash = await connection.getLatestBlockhash();
+
+  await connection.confirmTransaction({
+    signature: updTx,
+    blockhash: latestUpdBlockhash.blockhash,
+    lastValidBlockHeight: latestUpdBlockhash.lastValidBlockHeight,
+  });
+
   const [programStatePDA, bump] = PublicKey.findProgramAddressSync(
     [Buffer.from("program-state")],
     program.programId
@@ -100,8 +112,10 @@ async function main() {
   const dest = "";
   const params = "";
 
+  const requesterKeypair = Keypair.generate();
+
   const requestId = generateRequestId(
-    wallet.publicKey.toString(),
+    requesterKeypair.publicKey.toString(),
     Array.from(payload),
     path,
     keyVersion,
@@ -116,18 +130,28 @@ async function main() {
     const tx = await program.methods
       .sign(Array.from(payload), keyVersion, path, algo, dest, params)
       .accounts({
-        requester: wallet.publicKey,
+        requester: requesterKeypair.publicKey,
+        feePayer: wallet.publicKey,
       })
-      .rpc();
+      .transaction();
+
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = wallet.publicKey;
+
+    tx.partialSign(wallet.payer);
+    tx.partialSign(requesterKeypair);
+
+    const signature = await connection.sendRawTransaction(tx.serialize());
 
     console.log("Transaction sent, waiting for confirmation...");
-    console.log("Transaction signature:", tx);
+    console.log("Transaction signature:", signature);
 
-    const latestBlockhash = await connection.getLatestBlockhash();
     const confirmation = await connection.confirmTransaction({
-      signature: tx,
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      signature,
+      blockhash,
+      lastValidBlockHeight,
     });
 
     if (confirmation.value.err) {
@@ -137,7 +161,7 @@ async function main() {
       await pollForSignatureResponse(
         program,
         requestId,
-        wallet,
+        requesterKeypair.publicKey,
         payload,
         path,
         basePublicKey
@@ -151,7 +175,7 @@ async function main() {
 async function pollForSignatureResponse(
   program: Program<ChainSignaturesProject>,
   requestId: string,
-  wallet: anchor.Wallet,
+  walletPubKey: PublicKey,
   payload: Buffer,
   path: string,
   basePublicKey: string
@@ -202,7 +226,7 @@ async function pollForSignatureResponse(
           try {
             const derivedPublicKey = derivePublicKey(
               path,
-              wallet.publicKey.toString(),
+              walletPubKey.toString(),
               basePublicKey
             );
 
@@ -245,7 +269,11 @@ async function pollForSignatureResponse(
                 recoveredAddress,
                 derivedAddress,
               });
-              process.exit(recoveredAddress.toLowerCase() === derivedAddress.toLowerCase() ? 0 : 1);
+              process.exit(
+                recoveredAddress.toLowerCase() === derivedAddress.toLowerCase()
+                  ? 0
+                  : 1
+              );
             } catch (error: any) {
               console.log("⚠️ Error recovering address:", error.message);
 
