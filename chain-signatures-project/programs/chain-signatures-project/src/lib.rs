@@ -7,10 +7,7 @@ declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 pub mod chain_signatures_project {
     use super::*;
 
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        signature_deposit: u64,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, signature_deposit: u64) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         program_state.admin = ctx.accounts.admin.key();
         program_state.signature_deposit = signature_deposit;
@@ -129,6 +126,26 @@ pub mod chain_signatures_project {
 
         Ok(())
     }
+
+    pub fn respond_error(
+        ctx: Context<Respond>,
+        request_ids: Vec<[u8; 32]>,
+        errors: Vec<String>,
+    ) -> Result<()> {
+        require!(
+            request_ids.len() == errors.len(),
+            ChainSignaturesError::InvalidInputLength
+        );
+
+        for i in 0..request_ids.len() {
+            emit!(SignatureErrorEvent {
+                request_id: request_ids[i],
+                responder: *ctx.accounts.responder.key,
+                error: errors[i].clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[account]
@@ -228,6 +245,13 @@ pub struct SignatureRequestedEvent {
     pub dest: String,
     pub params: String,
     pub fee_payer: Option<Pubkey>,
+}
+
+#[event]
+pub struct SignatureErrorEvent {
+    pub request_id: [u8; 32],
+    pub responder: Pubkey,
+    pub error: String,
 }
 
 #[event]
