@@ -70,17 +70,17 @@ async function main() {
 
   const program = new Program<ChainSignaturesProject>(IDL, provider);
 
-  const updTx = await program.methods
-    .updateDeposit(new anchor.BN(0.011 * anchor.web3.LAMPORTS_PER_SOL))
-    .rpc();
+  // const updTx = await program.methods
+  //   .updateDeposit(new anchor.BN(0.00001 * anchor.web3.LAMPORTS_PER_SOL))
+  //   .rpc();
 
-  const latestUpdBlockhash = await connection.getLatestBlockhash();
+  // const latestUpdBlockhash = await connection.getLatestBlockhash();
 
-  await connection.confirmTransaction({
-    signature: updTx,
-    blockhash: latestUpdBlockhash.blockhash,
-    lastValidBlockHeight: latestUpdBlockhash.lastValidBlockHeight,
-  });
+  // await connection.confirmTransaction({
+  //   signature: updTx,
+  //   blockhash: latestUpdBlockhash.blockhash,
+  //   lastValidBlockHeight: latestUpdBlockhash.lastValidBlockHeight,
+  // });
 
   const [programStatePDA, bump] = PublicKey.findProgramAddressSync(
     [Buffer.from("program-state")],
