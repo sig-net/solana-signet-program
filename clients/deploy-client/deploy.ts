@@ -6,8 +6,8 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
-import { ChainSignaturesProject } from "../../chain-signatures-project/target/types/chain_signatures_project";
-import IDL from "../../chain-signatures-project/target/idl/chain_signatures_project.json";
+import { ChainSignaturesProject } from "../../signet-program/target/types/chain_signatures_project";
+import IDL from "../../signet-program/target/idl/chain_signatures_project.json";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";

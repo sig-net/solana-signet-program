@@ -1,7 +1,7 @@
 [package]
-name = "chain-signatures-project"
+name = "signet"
 version = "0.1.0"
-description = "Created with Anchor"
+description = "SigNet program to request signatures from the network"
 edition = "2021"
 
 [lib]

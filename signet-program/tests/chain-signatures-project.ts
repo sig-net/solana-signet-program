@@ -1,8 +1,8 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
+import { ChainSignaturesProject } from "../target/types/signet-program";
 
-describe("chain-signatures-project", () => {
+describe("signet-program", () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env());
 
