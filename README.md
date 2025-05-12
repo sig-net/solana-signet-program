@@ -1,3 +1,7 @@
+# SigNet Solana program
+This repository contains Solana Anchor program that is deployed on Solana blockchain. It allows to request signatures from SigNet MPC network.
+
+
 ### Prerequisites
 
 - Node.js v16+ and npm 
@@ -11,8 +15,8 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/sig-net/chain-signatures-solana-stub.git
-   cd chain-signatures-solana-stub
+   git clone https://github.com/sig-net/signet-solana-program.git
+   cd signet-solana-program
    ```
 
 2. **Install project dependencies**
@@ -39,7 +43,7 @@
 4. **Update Program ID**
    
    Update the Program ID in the following files:
-   - `programs/chain-signatures/src/lib.rs` (in `declare_id!` macro)
+   - `programs/signet/src/lib.rs` (in `declare_id!` macro)
    - `Anchor.toml` (under `[programs.testnet]`)
 
    After updating the Program ID, build the contract again
