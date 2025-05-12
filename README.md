@@ -1,3 +1,7 @@
+# SigNet Solana program
+This repository contains Solana Anchor program that is deployed on Solana blockchain. It allows to request signatures from SigNet MPC network.
+
+
 ### Prerequisites
 
 - Node.js v16+ and npm 
