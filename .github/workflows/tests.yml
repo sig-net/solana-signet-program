@@ -33,6 +33,10 @@ jobs:
         run: |
           cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked
 
+      - name: Install cargo-build-sbf
+        run: |
+          cargo install cargo-build-sbf
+
       - name: Build project
         run: cd signet-program && anchor build
 
