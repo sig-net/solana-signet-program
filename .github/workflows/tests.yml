@@ -33,11 +33,8 @@ jobs:
         run: |
           cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked
 
-      - name: Enter program folder
-        run: cd signet-program
-
       - name: Build project
-        run: anchor build
+        run: cd signet-program && anchor build
 
       - name: Run tests
-        run: anchor test
+        run: cd signet-program && anchor test
