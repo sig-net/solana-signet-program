@@ -39,10 +39,10 @@ jobs:
 
       - name: Check setup
         run: |
-          solana --version
-          anchor --version
-          rustc --version
           cargo --version
+          rustc --version
+          anchor --version
+          solana --version
 
       - name: Build project
         run: cd signet-program && anchor build
