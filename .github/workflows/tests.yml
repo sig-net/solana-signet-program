@@ -26,7 +26,7 @@ jobs:
 
       - name: Install Solana CLI
         run: |
-          sh -c "$(curl -sSfL https://release.solana.com/v.2.1.21/install)"
+          sh -c "$(curl -sSfL https://release.solana.com/v2.1.21/install)"
           export PATH="/home/gitpod/.local/share/solana/install/active_release/bin:$PATH"
 
       - name: Install AVM
