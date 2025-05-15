@@ -27,7 +27,7 @@ jobs:
       - name: Install Solana CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
-          export PATH="/home/gitpod/.local/share/solana/install/active_release/bin:$PATH"
+          export PATH="/home/runner/.local/share/solana/install/active_release/bin:$PATH"
 
       - name: Install AVM
         run: cargo install --git https://github.com/coral-xyz/anchor avm --force
