@@ -32,6 +32,7 @@ fn test_initialize() {
         })
         .args(signet::instruction::Initialize {
             signature_deposit: 1,
+            network_id: "solana:localnet".to_string(),
         })
         .send()
         .expect("");
