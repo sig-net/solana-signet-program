@@ -1,7 +1,7 @@
 #![allow(unexpected_cfgs)]
 use anchor_lang::prelude::*;
 
-declare_id!("AmSnVnUEp4v9nuFiBWFqjsgsEzSXWSWJWD99rCUTfomM");
+declare_id!("FeHnvX9LPVHtATNN2XssgiVVLYhPf3wLBoAzfYrgkEbp");
 
 #[program]
 pub mod signet {
@@ -17,10 +17,11 @@ pub mod signet {
 
     pub fn update_deposit(ctx: Context<AdminOnly>, new_deposit: u64) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
+        let old_deposit = program_state.signature_deposit;
         program_state.signature_deposit = new_deposit;
 
         emit!(DepositUpdatedEvent {
-            old_deposit: program_state.signature_deposit,
+            old_deposit,
             new_deposit,
         });
 

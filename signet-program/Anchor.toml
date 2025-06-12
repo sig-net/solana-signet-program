@@ -2,10 +2,10 @@
 seeds = false
 
 [programs.localnet]
-signet = "AmSnVnUEp4v9nuFiBWFqjsgsEzSXWSWJWD99rCUTfomM"
+signet = "FeHnvX9LPVHtATNN2XssgiVVLYhPf3wLBoAzfYrgkEbp"
 
 [programs.devnet]
-signet = "AmSnVnUEp4v9nuFiBWFqjsgsEzSXWSWJWD99rCUTfomM"
+signet = "FeHnvX9LPVHtATNN2XssgiVVLYhPf3wLBoAzfYrgkEbp"
 
 [registry]
 url = "https://anchor.projectserum.com"
