@@ -127,6 +127,11 @@ pub mod signet {
 
         Ok(())
     }
+
+    pub fn get_signature_deposit(ctx: Context<GetSignatureDeposit>) -> Result<u64> {
+        let program_state = &ctx.accounts.program_state;
+        Ok(program_state.signature_deposit)
+    }
 }
 
 #[account]
@@ -212,6 +217,12 @@ pub struct Sign<'info> {
 #[derive(Accounts)]
 pub struct Respond<'info> {
     pub responder: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct GetSignatureDeposit<'info> {
+    #[account(seeds = [b"program-state"], bump)]
+    pub program_state: Account<'info, ProgramState>,
 }
 
 #[event]
