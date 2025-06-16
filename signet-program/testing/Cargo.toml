@@ -7,3 +7,6 @@ edition = "2021"
 [dependencies]
 anchor-client = "0.31.1"
 signet = { version = "0.1.0", path = "../programs/signet" }
+litesvm = "0.6.1"
+solana-program = "2.2.1"
+solana-sdk = "2.2.1"
