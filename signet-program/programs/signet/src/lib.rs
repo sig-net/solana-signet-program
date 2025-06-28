@@ -7,10 +7,7 @@ declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 pub mod chain_signatures_project {
     use super::*;
 
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        signature_deposit: u64,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, signature_deposit: u64) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         program_state.admin = ctx.accounts.admin.key();
         program_state.signature_deposit = signature_deposit;
@@ -90,7 +87,8 @@ pub mod chain_signatures_project {
             program_state.signature_deposit,
         )?;
 
-        emit_cpi!(SignatureRequestedEvent {
+        // TODO: Change to use emit_cpi!, currently emit! to test the old implementation
+        emit!(SignatureRequestedEvent {
             sender: *requester.key,
             payload,
             key_version,

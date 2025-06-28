@@ -14,7 +14,7 @@ chain_signatures_project = "4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU"
 url = "https://anchor.projectserum.com"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
