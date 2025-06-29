@@ -11,7 +11,6 @@ interface SignatureResponse {
 
 export class SignatureRespondedSubscriber {
   private program: Program<ChainSignaturesProject>;
-  private activeListeners: Set<number> = new Set();
 
   constructor(program: Program<ChainSignaturesProject>) {
     this.program = program;
@@ -31,29 +30,18 @@ export class SignatureRespondedSubscriber {
     return new Promise((resolve, reject) => {
       let listener: number;
       let timeoutId: NodeJS.Timeout;
-      let completed = false;
 
       const cleanup = async () => {
-        if (completed) return;
-        completed = true;
-
         if (timeoutId) clearTimeout(timeoutId);
 
         if (listener !== undefined) {
-          try {
-            await this.program.removeEventListener(listener);
-            this.activeListeners.delete(listener);
-          } catch (error) {
-            // Ignore cleanup errors
-          }
+          await this.program.removeEventListener(listener);
         }
       };
 
       listener = this.program.addEventListener(
         "signatureRespondedEvent",
         async (event) => {
-          if (completed) return;
-
           try {
             const eventRequestIdHex =
               "0x" + Buffer.from(event.requestId).toString("hex");
@@ -96,26 +84,10 @@ export class SignatureRespondedSubscriber {
         }
       );
 
-      this.activeListeners.add(listener);
-
       timeoutId = setTimeout(async () => {
         await cleanup();
         reject(new Error("Timeout waiting for signature response"));
       }, timeoutMs);
     });
-  }
-
-  async cleanup(): Promise<void> {
-    // Clean up all active listeners
-    const listeners = Array.from(this.activeListeners);
-    this.activeListeners.clear();
-
-    for (const listener of listeners) {
-      try {
-        await this.program.removeEventListener(listener);
-      } catch (error) {
-        console.warn(`Failed to remove listener ${listener}:`, error);
-      }
-    }
   }
 }
