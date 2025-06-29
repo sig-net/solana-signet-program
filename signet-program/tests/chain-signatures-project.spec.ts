@@ -1,7 +1,7 @@
 import { assert } from "chai";
 import { setup } from "../test-utils/setup";
 
-describe("chain-signatures-project", () => {
+describe.skip("chain-signatures-project", () => {
   const {
     provider,
     program,

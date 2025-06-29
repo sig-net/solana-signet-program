@@ -118,7 +118,7 @@ describe("Configuration Functions", () => {
   });
 
   describe("withdraw_funds", () => {
-    const newDeposit = new BN("5000");
+    const newDeposit = new BN("50000");
 
     beforeEach(async () => {
       const txSignature = await program.methods.updateDeposit(newDeposit).rpc();
@@ -137,7 +137,6 @@ describe("Configuration Functions", () => {
     });
 
     it("Should successfully withdraw funds when called by admin", async () => {
-      const withdrawAmount = new BN("50000");
       const recipient = provider.wallet.publicKey;
 
       const programStateInfoBefore = await connection.getAccountInfo(
@@ -150,7 +149,7 @@ describe("Configuration Functions", () => {
       }
 
       const txSignature = await program.methods
-        .withdrawFunds(withdrawAmount)
+        .withdrawFunds(newDeposit)
         .accountsPartial({ recipient })
         .rpc();
 
@@ -168,7 +167,7 @@ describe("Configuration Functions", () => {
 
       assert.ok(
         programStateInfoAfter.lamports ===
-          programStateInfoBefore.lamports - withdrawAmount.toNumber(),
+          programStateInfoBefore.lamports - newDeposit.toNumber(),
         "Program state should have less lamports"
       );
 
@@ -182,7 +181,7 @@ describe("Configuration Functions", () => {
 
       const eventData = fundsWithdrawnEvents[0].data;
       assert.ok(
-        eventData.amount.eq(withdrawAmount),
+        eventData.amount.eq(newDeposit),
         "Event should contain withdrawal amount"
       );
       assert.ok(

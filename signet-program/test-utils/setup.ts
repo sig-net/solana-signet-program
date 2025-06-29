@@ -46,7 +46,7 @@ export function setup() {
       program.programId
     );
 
-    // Anchor shares the context among all tests, so we can initialize the program state only once
+    // Make sure we initialize the program only once as Anchor shares the execution environment with all tests
     try {
       await program.account.programState.fetch(programStatePda);
 

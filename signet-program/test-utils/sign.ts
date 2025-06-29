@@ -5,16 +5,21 @@ import {
   SECP256K1_CURVE_ORDER,
 } from "./constants";
 
-/**
- * Derives a signing key for a specific path and predecessor using epsilon derivation.
- */
+export interface SignatureResult {
+  bigR: {
+    x: number[];
+    y: number[];
+  };
+  s: number[];
+  recoveryId: number;
+}
+
 export async function deriveSigningKey(
   path: string,
   predecessor: string,
   basePrivateKey: string
 ): Promise<string> {
   const derivationPath = `${EPSILON_DERIVATION_PREFIX},${SOLANA_CHAIN_ID},${predecessor},${path}`;
-
   const epsilonHash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
   const epsilon = BigInt(epsilonHash);
 
@@ -28,7 +33,7 @@ export async function deriveSigningKey(
 export async function signMessage(
   msgHash: number[] | string,
   privateKeyHex: string
-): Promise<any> {
+): Promise<SignatureResult> {
   const msgHashHex =
     typeof msgHash === "string"
       ? msgHash
