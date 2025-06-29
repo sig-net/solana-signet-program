@@ -121,8 +121,10 @@ describe("Configuration Functions", () => {
     const newDeposit = new BN("50000");
 
     beforeEach(async () => {
-      const txSignature = await program.methods.updateDeposit(newDeposit).rpc();
-      await confirmTransaction(connection, txSignature);
+      const updateDepositTx = await program.methods
+        .updateDeposit(newDeposit)
+        .rpc();
+      await confirmTransaction(connection, updateDepositTx);
 
       const programStateInfoBefore = await connection.getAccountInfo(
         programStatePda,
@@ -157,7 +159,7 @@ describe("Configuration Functions", () => {
         // Program not initialized, skip withdrawal
       }
 
-      await program.methods
+      const signTx = await program.methods
         .sign(
           Array.from({ length: 32 }, (_, i) => i + 1),
           0,
@@ -167,6 +169,8 @@ describe("Configuration Functions", () => {
           ""
         )
         .rpc();
+
+      await confirmTransaction(connection, signTx);
     });
 
     it("Should successfully withdraw funds when called by admin", async () => {
