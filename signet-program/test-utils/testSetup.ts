@@ -10,6 +10,7 @@ import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
 export function testSetup() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
+
   const program = anchor.workspace
     .chainSignaturesProject as Program<ChainSignaturesProject>;
 

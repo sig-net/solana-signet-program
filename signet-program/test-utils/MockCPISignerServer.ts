@@ -86,7 +86,6 @@ export class MockCPISignerServer {
   private readonly wallet: anchor.Wallet;
   private readonly provider: anchor.AnchorProvider;
   private readonly signetProgramId: anchor.web3.PublicKey;
-  private subscriptionActive = false;
   private logSubscriptionId: number | null = null;
 
   constructor({
@@ -107,13 +106,10 @@ export class MockCPISignerServer {
   }
 
   async start(): Promise<void> {
-    this.subscriptionActive = true;
     await this.subscribeToEvents();
   }
 
   async stop(): Promise<void> {
-    this.subscriptionActive = false;
-
     if (this.logSubscriptionId !== null) {
       await this.provider.connection.removeOnLogsListener(
         this.logSubscriptionId
@@ -126,8 +122,6 @@ export class MockCPISignerServer {
     this.logSubscriptionId = this.provider.connection.onLogs(
       this.signetProgramId,
       async (logs) => {
-        if (!this.subscriptionActive) return;
-
         try {
           const events = await parseCPIEvents(
             this.provider.connection,
