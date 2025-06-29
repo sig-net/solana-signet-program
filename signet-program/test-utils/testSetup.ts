@@ -8,16 +8,15 @@ import { chainAdapters, contracts } from "signet.js";
 import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
 
 // Must be a function to get the correct context
-export function setup() {
+export function testSetup() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
+  const program = anchor.workspace
+    .chainSignaturesProject as Program<ChainSignaturesProject>;
 
   const connection = new anchor.web3.Connection(
     provider.connection.rpcEndpoint
   );
-
-  const program = anchor.workspace
-    .chainSignaturesProject as Program<ChainSignaturesProject>;
 
   const env = getEnv();
 
@@ -40,12 +39,12 @@ export function setup() {
     program
   );
 
-  before(async () => {
-    const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("program-state")],
-      program.programId
-    );
+  const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("program-state")],
+    program.programId
+  );
 
+  before(async () => {
     // Make sure we initialize the program only once as Anchor shares the execution environment with all tests
     try {
       await program.account.programState.fetch(programStatePda);

@@ -1,6 +1,7 @@
 import { Program } from "@coral-xyz/anchor";
 import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
 import { ethers } from "ethers";
+import { eventNames } from "./constants";
 
 interface SignatureResponse {
   isValid: boolean;
@@ -40,7 +41,7 @@ export class SignatureRespondedSubscriber {
       };
 
       listener = this.program.addEventListener(
-        "signatureRespondedEvent",
+        eventNames.signatureResponded,
         async (event) => {
           try {
             const eventRequestIdHex =

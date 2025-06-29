@@ -2,13 +2,9 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
 import { contracts } from "signet.js";
-import { getEnv } from "./utils";
-import { deriveSigningKey, signMessage } from "./sign";
-
-const eventNames = {
-  signatureRequestedEvent: "signatureRequestedEvent",
-  signatureResponseEvent: "signatureResponseEvent",
-} as const;
+import { getEnv, deriveSigningKey, signMessage } from "./utils";
+import { eventNames } from "./constants";
+import { SignatureRequestedEvent } from "./types";
 
 const env = getEnv();
 
@@ -33,8 +29,8 @@ export class MockSignerServer {
 
   async start(): Promise<void> {
     this.eventListenerId = this.program.addEventListener(
-      eventNames.signatureRequestedEvent,
-      async (event, slot) => {
+      eventNames.signatureRequested,
+      async (event: SignatureRequestedEvent) => {
         try {
           const requestId = this.solContract.getRequestId(
             {

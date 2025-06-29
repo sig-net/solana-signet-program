@@ -2,7 +2,7 @@ import { assert } from "chai";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ProxyTestCpi } from "../target/types/proxy_test_cpi";
-import { setup } from "../test-utils/setup";
+import { testSetup } from "../test-utils/testSetup";
 import { MockCPISignerServer } from "../test-utils/MockCPISignerServer";
 
 interface SignArgs {
@@ -14,14 +14,14 @@ interface SignArgs {
   params: string;
 }
 
-describe("proxy-cpi-test", () => {
+describe("Sign/Respond CPI tests", () => {
   const {
     provider,
     program: signetProgram,
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
-  } = setup();
+  } = testSetup();
 
   let proxyProgram: Program<ProxyTestCpi>;
   let mockCPISignerServer: MockCPISignerServer;
