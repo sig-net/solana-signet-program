@@ -3,12 +3,15 @@ seeds = false
 
 [programs.localnet]
 chain_signatures_project = "4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU"
+proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.devnet]
 chain_signatures_project = "4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU"
+proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.testnet]
 chain_signatures_project = "4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU"
+proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [registry]
 url = "https://anchor.projectserum.com"
