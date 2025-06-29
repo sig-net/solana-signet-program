@@ -2,7 +2,7 @@ import { assert } from "chai";
 import { testSetup } from "../test-utils/testSetup";
 import { MockCPISignerServer } from "../test-utils/MockCPISignerServer";
 
-describe("Sign/Respond wallet transaction tests", () => {
+describe("Sign/Respond wallet tests", () => {
   const {
     provider,
     program,
