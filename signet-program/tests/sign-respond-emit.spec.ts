@@ -1,7 +1,8 @@
 import { assert } from "chai";
 import { testSetup } from "../test-utils/testSetup";
+import { MockCPISignerServer } from "../test-utils/MockCPISignerServer";
 
-describe.skip("Sign/Respond emit! tests", () => {
+describe("Sign/Respond wallet transaction tests", () => {
   const {
     provider,
     program,
@@ -9,6 +10,20 @@ describe.skip("Sign/Respond emit! tests", () => {
     evmChainAdapter,
     signatureRespondedSubscriber,
   } = testSetup();
+
+  const mockServer = new MockCPISignerServer({
+    provider,
+    signetSolContract,
+    signetProgramId: program.programId,
+  });
+
+  before(async () => {
+    await mockServer.start();
+  });
+
+  after(async () => {
+    await mockServer.stop();
+  });
 
   it("Can request a signature", async () => {
     const signArgs = {

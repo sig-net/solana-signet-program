@@ -23,9 +23,18 @@ describe("Sign/Respond CPI tests", () => {
     signatureRespondedSubscriber,
   } = testSetup();
 
-  let proxyProgram: Program<ProxyTestCpi>;
-  let mockCPISignerServer: MockCPISignerServer;
-  let eventAuthorityPda: anchor.web3.PublicKey;
+  const proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
+
+  const [eventAuthorityPda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("__event_authority")],
+    signetProgram.programId
+  );
+
+  const mockCPISignerServer = new MockCPISignerServer({
+    provider,
+    signetSolContract,
+    signetProgramId: signetProgram.programId,
+  });
 
   const createSignArgs = (
     pathSuffix: string = "",
@@ -80,19 +89,6 @@ describe("Sign/Respond CPI tests", () => {
   };
 
   before(async () => {
-    proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
-
-    [eventAuthorityPda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("__event_authority")],
-      signetProgram.programId
-    );
-
-    mockCPISignerServer = new MockCPISignerServer({
-      provider,
-      signetSolContract,
-      signetProgramId: signetProgram.programId,
-    });
-
     await mockCPISignerServer.start();
   });
 
