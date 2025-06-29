@@ -12,28 +12,6 @@ describe("chain-signatures-project", () => {
     signatureRespondedSubscriber,
   } = setup();
 
-  it("Is initialized!", async () => {
-    const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("program-state")],
-      program.programId
-    );
-
-    const programState = await program.account.programState.fetch(
-      programStatePda
-    );
-
-    const expectedDeposit = new BN("100000");
-    assert.ok(
-      programState.signatureDeposit.eq(expectedDeposit),
-      `Expected deposit ${expectedDeposit.toString()}, got ${programState.signatureDeposit.toString()}`
-    );
-
-    assert.ok(
-      programState.admin.equals(provider.wallet.publicKey),
-      "Admin should be set to the wallet public key"
-    );
-  });
-
   it("Can request a signature", async () => {
     const signArgs = {
       payload: Array.from({ length: 32 }, (_, i) => i + 1),

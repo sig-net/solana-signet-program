@@ -1,5 +1,4 @@
 import { Program } from "@coral-xyz/anchor";
-import { Connection } from "@solana/web3.js";
 import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
 import { MockSignerServer } from "./MockSignerServer";
 import { SignatureRespondedSubscriber } from "./SignatureRespondedSubscriber";
@@ -13,7 +12,9 @@ export function setup() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const connection = new Connection(provider.connection.rpcEndpoint);
+  const connection = new anchor.web3.Connection(
+    provider.connection.rpcEndpoint
+  );
 
   const program = anchor.workspace
     .chainSignaturesProject as Program<ChainSignaturesProject>;
@@ -31,7 +32,7 @@ export function setup() {
   const mockServer = new MockSignerServer({ provider, signetSolContract });
 
   const evmChainAdapter = new chainAdapters.evm.EVM({
-    publicClient: {} as any, // Don't care, EVM chain adapter only used to derive address
+    publicClient: {} as any,
     contract: signetSolContract,
   });
 
@@ -40,18 +41,30 @@ export function setup() {
   );
 
   before(async () => {
-    const tx = await program.methods.initialize(new BN("100000")).rpc();
-
-    const latestBlockhash = await connection.getLatestBlockhash();
-
-    await connection.confirmTransaction(
-      {
-        signature: tx,
-        blockhash: latestBlockhash.blockhash,
-        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      },
-      "confirmed"
+    const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("program-state")],
+      program.programId
     );
+
+    // Anchor shares the context among all tests, so we can initialize the program state only once
+    try {
+      await program.account.programState.fetch(programStatePda);
+
+      return;
+    } catch (error) {
+      const tx = await program.methods.initialize(new BN("100000")).rpc();
+
+      const latestBlockhash = await connection.getLatestBlockhash();
+
+      await connection.confirmTransaction(
+        {
+          signature: tx,
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+    }
   });
 
   beforeEach(async () => {

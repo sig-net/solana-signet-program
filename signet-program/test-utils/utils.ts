@@ -1,13 +1,8 @@
-import * as anchor from "@coral-xyz/anchor";
 import * as path from "path";
 import * as dotenv from "dotenv";
 import { z } from "zod";
-import { contracts } from "signet.js";
-import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
-import { Program } from "@coral-xyz/anchor";
 import { ethers } from "ethers";
 import bs58 from "bs58";
-import { chainAdapters } from "signet.js";
 
 // Load environment variables from the root .env file
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
