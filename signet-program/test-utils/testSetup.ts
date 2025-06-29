@@ -1,6 +1,5 @@
 import { Program } from "@coral-xyz/anchor";
 import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
-import { MockSignerServer } from "./MockSignerServer";
 import { SignatureRespondedSubscriber } from "./SignatureRespondedSubscriber";
 import { BN } from "@coral-xyz/anchor";
 import * as anchor from "@coral-xyz/anchor";
@@ -27,8 +26,6 @@ export function testSetup() {
     programId: program.programId,
     rootPublicKey,
   });
-
-  const mockServer = new MockSignerServer({ provider, signetSolContract });
 
   const evmChainAdapter = new chainAdapters.evm.EVM({
     publicClient: {} as any,
@@ -66,20 +63,11 @@ export function testSetup() {
     }
   });
 
-  beforeEach(async () => {
-    await mockServer.start();
-  });
-
-  afterEach(async () => {
-    await mockServer.stop();
-  });
-
   return {
     provider,
     connection,
     program,
     signetSolContract,
-    mockServer,
     evmChainAdapter,
     signatureRespondedSubscriber,
   };

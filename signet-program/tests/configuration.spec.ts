@@ -124,6 +124,39 @@ describe("Configuration Functions", () => {
       const txSignature = await program.methods.updateDeposit(newDeposit).rpc();
       await confirmTransaction(connection, txSignature);
 
+      const programStateInfoBefore = await connection.getAccountInfo(
+        programStatePda,
+        "confirmed"
+      );
+
+      // Withdraw all existing funds to start with a clean state
+      try {
+        await program.account.programState.fetch(programStatePda);
+
+        if (
+          programStateInfoBefore.data &&
+          programStateInfoBefore &&
+          programStateInfoBefore.lamports > 0
+        ) {
+          const rentExemptAmount =
+            await connection.getMinimumBalanceForRentExemption(
+              programStateInfoBefore.data.length
+            );
+          const availableFunds = new BN(
+            programStateInfoBefore.lamports - rentExemptAmount
+          );
+
+          if (availableFunds.gt(new BN(0))) {
+            await program.methods
+              .withdrawFunds(availableFunds)
+              .accountsPartial({ recipient: provider.wallet.publicKey })
+              .rpc();
+          }
+        }
+      } catch (error) {
+        // Program not initialized, skip withdrawal
+      }
+
       await program.methods
         .sign(
           Array.from({ length: 32 }, (_, i) => i + 1),
