@@ -143,9 +143,8 @@ export class MockSignerServer {
   }
 
   async stop(): Promise<void> {
-    // Remove all event listeners
     if (this.eventListenerId !== null) {
-      this.program.removeEventListener(this.eventListenerId);
+      await this.program.removeEventListener(this.eventListenerId);
       this.eventListenerId = null;
     }
   }
