@@ -1,0 +1,74 @@
+import { Program } from "@coral-xyz/anchor";
+import { Connection } from "@solana/web3.js";
+import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
+import { MockSignerServer } from "./MockSignerServer";
+import { SignatureRespondedSubscriber } from "./SignatureRespondedSubscriber";
+import { BN } from "@coral-xyz/anchor";
+import * as anchor from "@coral-xyz/anchor";
+import { chainAdapters, contracts } from "signet.js";
+import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
+
+// Must be a function to get the correct context
+export function setup() {
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+
+  const connection = new Connection(provider.connection.rpcEndpoint);
+
+  const program = anchor.workspace
+    .chainSignaturesProject as Program<ChainSignaturesProject>;
+
+  const env = getEnv();
+
+  const rootPublicKey = bigintPrivateKeyToNajPublicKey(env.PRIVATE_KEY_TESTNET);
+
+  const signetSolContract = new contracts.solana.ChainSignatureContract({
+    provider,
+    programId: program.programId,
+    rootPublicKey,
+  });
+
+  const mockServer = new MockSignerServer({ provider, signetSolContract });
+
+  const evmChainAdapter = new chainAdapters.evm.EVM({
+    publicClient: {} as any, // Don't care, EVM chain adapter only used to derive address
+    contract: signetSolContract,
+  });
+
+  const signatureRespondedSubscriber = new SignatureRespondedSubscriber(
+    program
+  );
+
+  before(async () => {
+    const tx = await program.methods.initialize(new BN("100000")).rpc();
+
+    const latestBlockhash = await connection.getLatestBlockhash();
+
+    await connection.confirmTransaction(
+      {
+        signature: tx,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      "confirmed"
+    );
+  });
+
+  beforeEach(async () => {
+    await mockServer.start();
+  });
+
+  afterEach(async () => {
+    await mockServer.stop();
+  });
+
+  return {
+    provider,
+    connection,
+    program,
+    signetSolContract,
+    mockServer,
+    evmChainAdapter,
+    signatureRespondedSubscriber,
+  };
+}
