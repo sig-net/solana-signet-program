@@ -1,8 +1,6 @@
 import { Program } from "@coral-xyz/anchor";
-import { Connection } from "@solana/web3.js";
 import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
 import { ethers } from "ethers";
-import { getSolanaProgram } from "./utils";
 
 interface SignatureResponse {
   isValid: boolean;
@@ -14,19 +12,21 @@ interface SignatureResponse {
 export class SignatureRespondedSubscriber {
   private program: Program<ChainSignaturesProject>;
 
-  constructor(
-    program: Program<ChainSignaturesProject>,
-    connection: Connection
-  ) {
+  constructor(program: Program<ChainSignaturesProject>) {
     this.program = program;
   }
 
-  async waitForSignatureResponse(
-    requestId: string,
-    expectedPayload: Buffer,
-    expectedDerivedAddress: string,
-    timeoutMs: number = 60000
-  ): Promise<SignatureResponse> {
+  async waitForSignatureResponse({
+    requestId,
+    expectedPayload,
+    expectedDerivedAddress,
+    timeoutMs = 60000,
+  }: {
+    requestId: string;
+    expectedPayload: Buffer;
+    expectedDerivedAddress: string;
+    timeoutMs?: number;
+  }): Promise<SignatureResponse> {
     return new Promise((resolve, reject) => {
       let listener: number;
 
@@ -58,30 +58,25 @@ export class SignatureRespondedSubscriber {
               v: recoveryId + 27,
             };
 
-            try {
-              const payloadHex = "0x" + expectedPayload.toString("hex");
-              const recoveredAddress = ethers.recoverAddress(payloadHex, sig);
+            const payloadHex = "0x" + expectedPayload.toString("hex");
+            const recoveredAddress = ethers.recoverAddress(payloadHex, sig);
 
-              const isValid =
-                recoveredAddress.toLowerCase() ===
-                expectedDerivedAddress.toLowerCase();
+            const isValid =
+              recoveredAddress.toLowerCase() ===
+              expectedDerivedAddress.toLowerCase();
 
-              await cleanup();
-              resolve({
-                isValid,
-                recoveredAddress,
-                derivedAddress: expectedDerivedAddress,
-              });
-            } catch (error: any) {
-              await cleanup();
-              resolve({
-                isValid: false,
-                error: error.message,
-              });
-            }
-          } catch (error) {
             await cleanup();
-            reject(error);
+            resolve({
+              isValid,
+              recoveredAddress,
+              derivedAddress: expectedDerivedAddress,
+            });
+          } catch (error: any) {
+            await cleanup();
+            resolve({
+              isValid: false,
+              error: error.message,
+            });
           }
         }
       );

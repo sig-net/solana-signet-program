@@ -1,22 +1,42 @@
 import * as anchor from "@coral-xyz/anchor";
 import { BN, Program } from "@coral-xyz/anchor";
-import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
+import type { ChainSignaturesProject } from "../target/types/chain_signatures_project";
 import { MockSignerServer } from "../test-utils/MockSignerServer";
 import { Connection } from "@solana/web3.js";
 import { assert } from "chai";
 import { SignatureRespondedSubscriber } from "../test-utils/SignatureRespondedSubscriber";
-import { getEVMChainAdapter, getSolanaProgram } from "../test-utils/utils";
-import { chainAdapters } from "signet.js";
+import { bigintPrivateKeyToNajPublicKey, getEnv } from "../test-utils/utils";
+import { chainAdapters, contracts } from "signet.js";
 
 describe("chain-signatures-project", () => {
-  anchor.setProvider(anchor.AnchorProvider.env());
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
 
-  const connection = new Connection(
-    anchor.getProvider().connection.rpcEndpoint
-  );
+  const connection = new Connection(provider.connection.rpcEndpoint);
 
   const program = anchor.workspace
     .chainSignaturesProject as Program<ChainSignaturesProject>;
+
+  const env = getEnv();
+
+  const rootPublicKey = bigintPrivateKeyToNajPublicKey(env.PRIVATE_KEY_TESTNET);
+
+  const signetSolContract = new contracts.solana.ChainSignatureContract({
+    provider,
+    programId: program.programId,
+    rootPublicKey,
+  });
+
+  const mockServer = new MockSignerServer({ provider, signetSolContract });
+
+  const evmChainAdapter = new chainAdapters.evm.EVM({
+    publicClient: {} as any, // Don't care, EVM chain adapter only used to derive address
+    contract: signetSolContract,
+  });
+
+  const signatureRespondedSubscriber = new SignatureRespondedSubscriber(
+    program
+  );
 
   before(async () => {
     const tx = await program.methods.initialize(new BN("100000")).rpc();
@@ -34,14 +54,11 @@ describe("chain-signatures-project", () => {
   });
 
   beforeEach(async () => {
-    // Initialize the mock server to response requests locally
-    const server = new MockSignerServer();
-    await server.start();
+    await mockServer.start();
   });
 
   afterEach(async () => {
-    const server = new MockSignerServer();
-    await server.stop();
+    await mockServer.stop();
   });
 
   it("Is initialized!", async () => {
@@ -60,7 +77,6 @@ describe("chain-signatures-project", () => {
       `Expected deposit ${expectedDeposit.toString()}, got ${programState.signatureDeposit.toString()}`
     );
 
-    const provider = anchor.getProvider();
     assert.ok(
       programState.admin.equals(provider.wallet.publicKey),
       "Admin should be set to the wallet public key"
@@ -68,8 +84,6 @@ describe("chain-signatures-project", () => {
   });
 
   it("Can request a signature", async () => {
-    const subscriber = new SignatureRespondedSubscriber(program, connection);
-
     const signArgs = {
       payload: Array.from({ length: 32 }, (_, i) => i + 1),
       keyVersion: 0,
@@ -90,7 +104,7 @@ describe("chain-signatures-project", () => {
       )
       .rpc();
 
-    const requestId = getSolanaProgram().getRequestId(
+    const requestId = signetSolContract.getRequestId(
       {
         payload: signArgs.payload,
         path: signArgs.path,
@@ -103,16 +117,17 @@ describe("chain-signatures-project", () => {
       }
     );
 
-    const derivedAddress = await getEVMChainAdapter().deriveAddressAndPublicKey(
-      anchor.getProvider().wallet.publicKey.toString(),
+    const derivedAddress = await evmChainAdapter.deriveAddressAndPublicKey(
+      provider.wallet.publicKey.toString(),
       signArgs.path
     );
 
-    const response = await subscriber.waitForSignatureResponse(
-      requestId,
-      Buffer.from(signArgs.payload),
-      derivedAddress.address
-    );
+    const response =
+      await signatureRespondedSubscriber.waitForSignatureResponse({
+        requestId,
+        expectedPayload: Buffer.from(signArgs.payload),
+        expectedDerivedAddress: derivedAddress.address,
+      });
 
     assert.ok(response.isValid, "Signature should be valid");
   });
