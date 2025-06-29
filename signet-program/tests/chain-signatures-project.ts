@@ -1,5 +1,3 @@
-import * as anchor from "@coral-xyz/anchor";
-import { BN } from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { setup } from "../test-utils/setup";
 
