@@ -2,21 +2,14 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
 import { contracts } from "signet.js";
-import { getEnv } from "./utils";
-import { deriveSigningKey, signMessage } from "./sign";
-import { ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR } from "./constants";
+import { getEnv, deriveSigningKey, signMessage } from "./utils";
+import {
+  ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR,
+  eventNames,
+} from "./constants";
+import { SignatureRequestedEvent } from "./types";
 
 const env = getEnv();
-
-export interface SignatureRequestedEvent {
-  sender: anchor.web3.PublicKey;
-  payload: number[];
-  keyVersion: number;
-  path: string;
-  algo: string;
-  dest: string;
-  params: string;
-}
 
 export async function parseCPIEvents(
   connection: anchor.web3.Connection,
@@ -74,7 +67,7 @@ export async function parseCPIEvents(
           );
           const event = program.coder.events.decode(eventData);
 
-          if (event?.name === "signatureRequestedEvent") {
+          if (event?.name === eventNames.signatureRequested) {
             events.push(event.data as SignatureRequestedEvent);
           }
         } catch {

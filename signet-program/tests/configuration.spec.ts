@@ -2,11 +2,11 @@ import * as anchor from "@coral-xyz/anchor";
 import { BN } from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
-import { setup } from "../test-utils/setup";
-import { confirmTransaction } from "../test-utils/solana";
+import { testSetup } from "../test-utils/testSetup";
+import { confirmTransaction } from "../test-utils/utils";
 
 describe("Configuration Functions", () => {
-  const { program, connection, provider } = setup();
+  const { program, connection, provider } = testSetup();
 
   let programStatePda: PublicKey;
   let nonAdminKeypair: Keypair;

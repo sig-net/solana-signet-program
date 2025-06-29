@@ -1,14 +1,14 @@
 import { assert } from "chai";
-import { setup } from "../test-utils/setup";
+import { testSetup } from "../test-utils/testSetup";
 
-describe.skip("chain-signatures-project", () => {
+describe.skip("Sign/Respond emit! tests", () => {
   const {
     provider,
     program,
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
-  } = setup();
+  } = testSetup();
 
   it("Can request a signature", async () => {
     const signArgs = {
