@@ -8,7 +8,7 @@ import {
   SOLANA_CHAIN_ID,
   SECP256K1_CURVE_ORDER,
 } from "./constants";
-import { getEnv, bigIntPrivateKeyToNajKey } from "./utils";
+import { getEnv } from "./utils";
 
 const eventNames = {
   signatureRequestedEvent: "signatureRequestedEvent",
@@ -31,10 +31,8 @@ async function deriveSigningKey(
   predecessor: string,
   basePrivateKey: string
 ): Promise<string> {
-  // Create the derivation path for epsilon calculation
   const derivationPath = `${EPSILON_DERIVATION_PREFIX},${SOLANA_CHAIN_ID},${predecessor},${path}`;
 
-  // Calculate epsilon from the derivation path
   const epsilonHash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
   const epsilon = BigInt(epsilonHash);
 
@@ -43,7 +41,6 @@ async function deriveSigningKey(
   const derivedPrivateKey =
     (basePrivateKeyBigInt + epsilon) % SECP256K1_CURVE_ORDER;
 
-  // Return as padded hex string
   return "0x" + derivedPrivateKey.toString(16).padStart(64, "0");
 }
 
@@ -86,18 +83,17 @@ export class MockSignerServer {
   private wallet: any;
   private eventListenerId: number | null = null;
 
-  constructor() {
-    anchor.setProvider(anchor.AnchorProvider.env());
-    this.wallet = anchor.getProvider().wallet;
-
+  constructor({
+    provider,
+    signetSolContract,
+  }: {
+    provider: anchor.AnchorProvider;
+    signetSolContract: contracts.solana.ChainSignatureContract;
+  }) {
+    this.wallet = provider.wallet;
     this.program = anchor.workspace
       .chainSignaturesProject as Program<ChainSignaturesProject>;
-
-    this.solContract = new contracts.solana.ChainSignatureContract({
-      provider: anchor.AnchorProvider.env(),
-      programId: this.program.programId,
-      rootPublicKey: bigIntPrivateKeyToNajKey(env.PRIVATE_KEY_TESTNET),
-    });
+    this.solContract = signetSolContract;
   }
 
   async start(): Promise<void> {

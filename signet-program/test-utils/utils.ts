@@ -28,50 +28,34 @@ export const getEnv = () => {
   return result.data;
 };
 
-export const bigIntPrivateKeyToNajKey = (
+/**
+ * Converts a private key to a NEAR Account JSON (NAJ) formatted public key.
+ *
+ * @param privateKey - The private key in hex format (with or without 0x prefix)
+ * @returns A NEAR-formatted public key string in the format `secp256k1:{base58_encoded_coordinates}`
+ *
+ * @example
+ * ```typescript
+ * const privateKey = "0x1234567890abcdef...";
+ * const najPublicKey = bigintPrivateKeyToNajPublicKey(privateKey);
+ * // Returns: "secp256k1:ABC123..." where ABC123... is the base58-encoded x,y coordinates
+ * ```
+ */
+export const bigintPrivateKeyToNajPublicKey = (
   privateKey: string
 ): `secp256k1:${string}` => {
-  // Get the public key from the private key and encode as base58 x + y coordinates
   const signingKey = new ethers.SigningKey(privateKey);
   const publicKeyPoint = signingKey.publicKey;
 
-  // Remove the '0x04' prefix (uncompressed format indicator) and get x, y coordinates
   const publicKeyHex = publicKeyPoint.slice(4); // Remove '0x04' prefix
   const xCoord = publicKeyHex.slice(0, 64); // First 32 bytes (64 hex chars)
   const yCoord = publicKeyHex.slice(64, 128); // Second 32 bytes (64 hex chars)
 
-  // Convert to bytes and concatenate x + y
   const xBytes = Buffer.from(xCoord, "hex");
   const yBytes = Buffer.from(yCoord, "hex");
   const publicKeyBytes = Buffer.concat([xBytes, yBytes]);
 
-  // Encode as base58
   const publicKeyBase58 = bs58.encode(publicKeyBytes);
 
   return `secp256k1:${publicKeyBase58}`;
-};
-
-export const getSolanaProgram = () => {
-  const env = getEnv();
-  anchor.setProvider(anchor.AnchorProvider.env());
-
-  const program = anchor.workspace
-    .chainSignaturesProject as Program<ChainSignaturesProject>;
-
-  const solContract = new contracts.solana.ChainSignatureContract({
-    provider: anchor.AnchorProvider.env(),
-    programId: program.programId,
-    rootPublicKey: bigIntPrivateKeyToNajKey(env.PRIVATE_KEY_TESTNET),
-  });
-
-  return solContract;
-};
-
-export const getEVMChainAdapter = () => {
-  const EVM = new chainAdapters.evm.EVM({
-    publicClient: {} as any, // Mock viem public client
-    contract: getSolanaProgram(),
-  });
-
-  return EVM;
 };
