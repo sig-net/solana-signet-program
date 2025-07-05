@@ -3,16 +3,12 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ProxyTestCpi } from "../target/types/proxy_test_cpi";
 import { testSetup } from "../test-utils/testSetup";
-import { MockCPISignerServer } from "../test-utils/MockCPISignerServer";
-
-interface SignArgs {
-  payload: number[];
-  keyVersion: number;
-  path: string;
-  algo: string;
-  dest: string;
-  params: string;
-}
+import {
+  createSignArgs,
+  callProxySign,
+  waitForSignatureResponse,
+  getPayloadDescription,
+} from "../test-utils/signingUtils";
 
 describe("Sign/Respond CPI tests", () => {
   const {
@@ -21,7 +17,6 @@ describe("Sign/Respond CPI tests", () => {
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
-    useMockSigner,
   } = testSetup();
 
   const proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
@@ -31,102 +26,64 @@ describe("Sign/Respond CPI tests", () => {
     signetProgram.programId
   );
 
-  const mockCPISignerServer = new MockCPISignerServer({
-    provider,
-    signetSolContract,
-    signetProgramId: signetProgram.programId,
-  });
-
-  const createSignArgs = (
-    pathSuffix: string = "",
-    offset: number = 1
-  ): SignArgs => ({
-    payload: Array.from({ length: 32 }, (_, i) => i + offset),
-    keyVersion: 0,
-    path: `test-cpi-path${pathSuffix}`,
-    algo: "secp256k1",
-    dest: "ethereum",
-    params: "{}",
-  });
-
-  const callProxySign = async (signArgs: SignArgs) => {
-    return proxyProgram.methods
-      .callSign(
-        signArgs.payload,
-        signArgs.keyVersion,
-        signArgs.path,
-        signArgs.algo,
-        signArgs.dest,
-        signArgs.params
-      )
-      .accounts({
-        feePayer: provider.wallet.publicKey,
-        eventAuthority: eventAuthorityPda,
-      })
-      .rpc();
-  };
-
-  const waitForSignatureResponse = async (signArgs: SignArgs) => {
-    const requestId = signetSolContract.getRequestId(
-      {
-        payload: signArgs.payload,
-        path: signArgs.path,
-        key_version: signArgs.keyVersion,
-      },
-      {
-        algo: signArgs.algo,
-        dest: signArgs.dest,
-        params: signArgs.params,
-      }
-    );
-
-    const derivedAddress = await evmChainAdapter.deriveAddressAndPublicKey(
-      provider.wallet.publicKey.toString(),
-      signArgs.path
-    );
-
-    return signatureRespondedSubscriber.waitForSignatureResponse({
-      requestId,
-      expectedPayload: Buffer.from(signArgs.payload),
-      expectedDerivedAddress: derivedAddress.address,
-    });
-  };
-
-  before(async () => {
-    if (useMockSigner) {
-      await mockCPISignerServer.start();
-    }
-  });
-
-  after(async () => {
-    if (useMockSigner) {
-      await mockCPISignerServer?.stop();
-    }
-  });
-
   it("Can call signet program via CPI and receive signature response", async () => {
-    const signArgs = createSignArgs();
+    const signArgs = createSignArgs("CPI_TEST");
 
-    await callProxySign(signArgs);
-    const response = await waitForSignatureResponse(signArgs);
+    await callProxySign(
+      proxyProgram,
+      signArgs,
+      provider.wallet.publicKey,
+      eventAuthorityPda
+    );
+    const response = await waitForSignatureResponse(
+      signArgs,
+      signetSolContract,
+      evmChainAdapter,
+      signatureRespondedSubscriber,
+      provider.wallet.publicKey
+    );
 
     assert.ok(response.isValid, "Signature should be valid");
   });
 
   it("Can handle multiple concurrent CPI calls", async () => {
-    const signRequests = [
-      createSignArgs("-1", 10),
-      createSignArgs("-2", 20),
-      createSignArgs("-3", 30),
-    ];
+    const signArgs1 = createSignArgs("CONCURRENT_TEST", "1", 1);
+    const signArgs2 = createSignArgs("CONCURRENT_TEST", "2", 2);
 
-    await Promise.all(signRequests.map(callProxySign));
-    const responses = await Promise.all(
-      signRequests.map(waitForSignatureResponse)
-    );
+    const [response1, response2] = await Promise.all([
+      (async () => {
+        await callProxySign(
+          proxyProgram,
+          signArgs1,
+          provider.wallet.publicKey,
+          eventAuthorityPda
+        );
+        return waitForSignatureResponse(
+          signArgs1,
+          signetSolContract,
+          evmChainAdapter,
+          signatureRespondedSubscriber,
+          provider.wallet.publicKey
+        );
+      })(),
+      (async () => {
+        await callProxySign(
+          proxyProgram,
+          signArgs2,
+          provider.wallet.publicKey,
+          eventAuthorityPda
+        );
+        return waitForSignatureResponse(
+          signArgs2,
+          signetSolContract,
+          evmChainAdapter,
+          signatureRespondedSubscriber,
+          provider.wallet.publicKey
+        );
+      })(),
+    ]);
 
-    responses.forEach((response, index) => {
-      assert.ok(response.isValid, `Response ${index + 1} should be valid`);
-    });
+    assert.ok(response1.isValid, "First signature should be valid");
+    assert.ok(response2.isValid, "Second signature should be valid");
   });
 });

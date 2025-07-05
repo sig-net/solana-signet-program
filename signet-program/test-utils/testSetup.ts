@@ -6,6 +6,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { chainAdapters, contracts } from "signet.js";
 import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
 import { detectNetwork, shouldUseMockSigner } from "./networkConfig";
+import { MockCPISignerServer } from "./MockCPISignerServer";
 
 // Must be a function to get the correct context
 export function testSetup() {
@@ -38,12 +39,22 @@ export function testSetup() {
     program
   );
 
+  const mockCPISignerServer = new MockCPISignerServer({
+    provider,
+    signetSolContract,
+    signetProgramId: program.programId,
+  });
+
   const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("program-state")],
     program.programId
   );
 
   before(async () => {
+    if (useMockSigner) {
+      await mockCPISignerServer.start();
+    }
+
     // Make sure we initialize the program only once as Anchor shares the execution environment with all tests
     try {
       await program.account.programState.fetch(programStatePda);
@@ -65,6 +76,12 @@ export function testSetup() {
     }
   });
 
+  after(async () => {
+    if (useMockSigner) {
+      await mockCPISignerServer?.stop();
+    }
+  });
+
   const network = detectNetwork(provider);
   const useMockSigner = shouldUseMockSigner(network);
 
@@ -75,6 +92,5 @@ export function testSetup() {
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
-    useMockSigner,
   };
 }
