@@ -9,6 +9,7 @@ describe("Sign/Respond wallet tests", () => {
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
+    useMockSigner,
   } = testSetup();
 
   const mockServer = new MockCPISignerServer({
@@ -18,11 +19,15 @@ describe("Sign/Respond wallet tests", () => {
   });
 
   before(async () => {
-    await mockServer.start();
+    if (useMockSigner) {
+      await mockServer.start();
+    }
   });
 
   after(async () => {
-    await mockServer.stop();
+    if (useMockSigner) {
+      await mockServer.stop();
+    }
   });
 
   it("Can request a signature", async () => {

@@ -21,6 +21,7 @@ describe("Sign/Respond CPI tests", () => {
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
+    useMockSigner,
   } = testSetup();
 
   const proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
@@ -58,7 +59,10 @@ describe("Sign/Respond CPI tests", () => {
         signArgs.dest,
         signArgs.params
       )
-      .accounts({ eventAuthority: eventAuthorityPda })
+      .accounts({
+        feePayer: provider.wallet.publicKey,
+        eventAuthority: eventAuthorityPda,
+      })
       .rpc();
   };
 
@@ -89,11 +93,15 @@ describe("Sign/Respond CPI tests", () => {
   };
 
   before(async () => {
-    await mockCPISignerServer.start();
+    if (useMockSigner) {
+      await mockCPISignerServer.start();
+    }
   });
 
   after(async () => {
-    await mockCPISignerServer?.stop();
+    if (useMockSigner) {
+      await mockCPISignerServer?.stop();
+    }
   });
 
   it("Can call signet program via CPI and receive signature response", async () => {
