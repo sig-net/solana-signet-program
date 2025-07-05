@@ -5,6 +5,7 @@ import { BN } from "@coral-xyz/anchor";
 import * as anchor from "@coral-xyz/anchor";
 import { chainAdapters, contracts } from "signet.js";
 import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
+import { detectNetwork, shouldUseMockSigner } from "./networkConfig";
 
 // Must be a function to get the correct context
 export function testSetup() {
@@ -64,6 +65,9 @@ export function testSetup() {
     }
   });
 
+  const network = detectNetwork(provider);
+  const useMockSigner = shouldUseMockSigner(network);
+
   return {
     provider,
     connection,
@@ -71,5 +75,6 @@ export function testSetup() {
     signetSolContract,
     evmChainAdapter,
     signatureRespondedSubscriber,
+    useMockSigner,
   };
 }

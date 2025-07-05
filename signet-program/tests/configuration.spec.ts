@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { BN } from "@coral-xyz/anchor";
 import { assert } from "chai";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import { testSetup } from "../test-utils/testSetup";
 import { confirmTransaction } from "../test-utils/utils";
 
@@ -34,20 +34,9 @@ describe("Configuration Functions", () => {
       program.programId
     );
 
+    // Generate keypairs without funding - we only need their public keys for authorization tests
     nonAdminKeypair = Keypair.generate();
     recipientKeypair = Keypair.generate();
-
-    const airdrop1 = await connection.requestAirdrop(
-      nonAdminKeypair.publicKey,
-      LAMPORTS_PER_SOL
-    );
-    const airdrop2 = await connection.requestAirdrop(
-      recipientKeypair.publicKey,
-      LAMPORTS_PER_SOL
-    );
-
-    await confirmTransaction(connection, airdrop1);
-    await confirmTransaction(connection, airdrop2);
   });
 
   it("Is initialized", async () => {
