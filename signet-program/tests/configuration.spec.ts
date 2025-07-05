@@ -4,6 +4,11 @@ import { assert } from "chai";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { testSetup } from "../test-utils/testSetup";
 import { confirmTransaction } from "../test-utils/utils";
+import {
+  createSignArgs,
+  callDirectSign,
+  getPayloadDescription,
+} from "../test-utils/signingUtils";
 
 describe("Configuration Functions", () => {
   const { program, connection, provider } = testSetup();
@@ -148,16 +153,9 @@ describe("Configuration Functions", () => {
         // Program not initialized, skip withdrawal
       }
 
-      const signTx = await program.methods
-        .sign(
-          Array.from({ length: 32 }, (_, i) => i + 1),
-          0,
-          "",
-          "",
-          "",
-          ""
-        )
-        .rpc();
+      const signArgs = createSignArgs("CONFIG_TEST", "deposit", 1);
+
+      const signTx = await callDirectSign(program, signArgs);
 
       await confirmTransaction(connection, signTx);
     });
