@@ -1,6 +1,6 @@
 /**
  * Common signing utilities for tests
- * 
+ *
  * This module provides reusable functions for:
  * - Creating unique sign arguments with identifiable payloads
  * - Calling sign functions via CPI proxy or direct calls
@@ -23,11 +23,10 @@ export interface SignArgs {
 
 // Unique payload prefixes for easy identification in logs/subscriber
 export const PAYLOAD_PREFIXES = {
-  CPI_TEST: 0x10,           // 16
-  WALLET_TEST: 0x20,        // 32
-  CONFIG_TEST: 0x30,        // 48
-  CONCURRENT_TEST: 0x40,    // 64
-  NETWORK_TEST: 0x50,       // 80
+  CPI_TEST: 0x10, // 16
+  WALLET_TEST: 0x20, // 32
+  CONFIG_TEST: 0x30, // 48
+  CONCURRENT_TEST: 0x40, // 64
 } as const;
 
 /**
@@ -39,15 +38,17 @@ export function createSignArgs(
   offset: number = 0
 ): SignArgs {
   const prefix = PAYLOAD_PREFIXES[testType];
-  
+
   return {
     payload: Array.from({ length: 32 }, (_, i) => {
-      if (i === 0) return prefix;           // First byte identifies test type
-      if (i === 1) return offset;           // Second byte for test iteration/offset
-      return (i + offset) % 256;            // Remaining bytes with pattern
+      if (i === 0) return prefix; // First byte identifies test type
+      if (i === 1) return offset; // Second byte for test iteration/offset
+      return (i + offset) % 256; // Remaining bytes with pattern
     }),
     keyVersion: 0,
-    path: pathSuffix ? `test-${testType.toLowerCase()}-path-${pathSuffix}` : `test-${testType.toLowerCase()}-path`,
+    path: pathSuffix
+      ? `test-${testType.toLowerCase()}-path-${pathSuffix}`
+      : `test-${testType.toLowerCase()}-path`,
     algo: "secp256k1",
     dest: "ethereum",
     params: "{}",
@@ -138,15 +139,15 @@ export async function waitForSignatureResponse(
  */
 export function getPayloadDescription(payload: number[]): string {
   if (payload.length === 0) return "empty";
-  
+
   const prefix = payload[0];
   const offset = payload[1] || 0;
-  
+
   for (const [type, value] of Object.entries(PAYLOAD_PREFIXES)) {
     if (value === prefix) {
       return `${type}_${offset}`;
     }
   }
-  
+
   return `unknown_${prefix}_${offset}`;
 }
