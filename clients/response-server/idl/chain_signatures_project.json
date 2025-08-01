@@ -4,21 +4,12 @@
     "name": "chain_signatures_project",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "description": "SigNet program to request signatures from the network"
   },
   "instructions": [
     {
       "name": "initialize",
-      "discriminator": [
-        175,
-        175,
-        109,
-        31,
-        13,
-        152,
-        155,
-        237
-      ],
+      "discriminator": [175, 175, 109, 31, 13, 152, 155, 237],
       "accounts": [
         {
           "name": "program_state",
@@ -28,19 +19,7 @@
               {
                 "kind": "const",
                 "value": [
-                  112,
-                  114,
-                  111,
-                  103,
-                  114,
-                  97,
-                  109,
-                  45,
-                  115,
-                  116,
-                  97,
-                  116,
-                  101
+                  112, 114, 111, 103, 114, 97, 109, 45, 115, 116, 97, 116, 101
                 ]
               }
             ]
@@ -65,16 +44,7 @@
     },
     {
       "name": "respond",
-      "discriminator": [
-        72,
-        65,
-        227,
-        97,
-        42,
-        255,
-        147,
-        12
-      ],
+      "discriminator": [72, 65, 227, 97, 42, 255, 147, 12],
       "accounts": [
         {
           "name": "responder",
@@ -86,10 +56,7 @@
           "name": "request_ids",
           "type": {
             "vec": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           }
         },
@@ -107,16 +74,7 @@
     },
     {
       "name": "sign",
-      "discriminator": [
-        5,
-        221,
-        155,
-        46,
-        237,
-        91,
-        28,
-        236
-      ],
+      "discriminator": [5, 221, 155, 46, 237, 91, 28, 236],
       "accounts": [
         {
           "name": "program_state",
@@ -126,19 +84,7 @@
               {
                 "kind": "const",
                 "value": [
-                  112,
-                  114,
-                  111,
-                  103,
-                  114,
-                  97,
-                  109,
-                  45,
-                  115,
-                  116,
-                  97,
-                  116,
-                  101
+                  112, 114, 111, 103, 114, 97, 109, 45, 115, 116, 97, 116, 101
                 ]
               }
             ]
@@ -150,18 +96,38 @@
           "signer": true
         },
         {
+          "name": "fee_payer",
+          "writable": true,
+          "signer": true,
+          "optional": true
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95, 95, 101, 118, 101, 110, 116, 95, 97, 117, 116, 104, 111,
+                  114, 105, 116, 121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
         }
       ],
       "args": [
         {
           "name": "payload",
           "type": {
-            "array": [
-              "u8",
-              32
-            ]
+            "array": ["u8", 32]
           }
         },
         {
@@ -185,49 +151,107 @@
           "type": "string"
         }
       ]
+    },
+    {
+      "name": "update_deposit",
+      "discriminator": [126, 116, 15, 164, 238, 179, 155, 59],
+      "accounts": [
+        {
+          "name": "program_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112, 114, 111, 103, 114, 97, 109, 45, 115, 116, 97, 116, 101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": ["program_state"]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "new_deposit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_funds",
+      "discriminator": [241, 36, 29, 111, 208, 31, 104, 217],
+      "accounts": [
+        {
+          "name": "program_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112, 114, 111, 103, 114, 97, 109, 45, 115, 116, 97, 116, 101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": ["program_state"]
+        },
+        {
+          "name": "recipient",
+          "docs": ["function by checking it is not the zero address."],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
     {
       "name": "ProgramState",
-      "discriminator": [
-        77,
-        209,
-        137,
-        229,
-        149,
-        67,
-        167,
-        230
-      ]
+      "discriminator": [77, 209, 137, 229, 149, 67, 167, 230]
     }
   ],
   "events": [
     {
+      "name": "DepositUpdatedEvent",
+      "discriminator": [215, 193, 53, 27, 221, 101, 249, 108]
+    },
+    {
+      "name": "FundsWithdrawnEvent",
+      "discriminator": [86, 232, 194, 4, 211, 69, 172, 202]
+    },
+    {
       "name": "SignatureRequestedEvent",
-      "discriminator": [
-        171,
-        129,
-        105,
-        91,
-        154,
-        49,
-        160,
-        34
-      ]
+      "discriminator": [171, 129, 105, 91, 154, 49, 160, 34]
     },
     {
       "name": "SignatureRespondedEvent",
-      "discriminator": [
-        118,
-        146,
-        248,
-        151,
-        194,
-        93,
-        18,
-        86
-      ]
+      "discriminator": [118, 146, 248, 151, 194, 93, 18, 86]
     }
   ],
   "errors": [
@@ -240,6 +264,21 @@
       "code": 6001,
       "name": "InvalidInputLength",
       "msg": "Arrays must have the same length"
+    },
+    {
+      "code": 6002,
+      "name": "Unauthorized",
+      "msg": "Unauthorized access"
+    },
+    {
+      "code": 6003,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds for withdrawal"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidRecipient",
+      "msg": "Invalid recipient address"
     }
   ],
   "types": [
@@ -251,20 +290,46 @@
           {
             "name": "x",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
             "name": "y",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DepositUpdatedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_deposit",
+            "type": "u64"
+          },
+          {
+            "name": "new_deposit",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundsWithdrawnEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
           }
         ]
       }
@@ -301,10 +366,7 @@
           {
             "name": "s",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
@@ -326,10 +388,7 @@
           {
             "name": "payload",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
@@ -359,6 +418,12 @@
           {
             "name": "params",
             "type": "string"
+          },
+          {
+            "name": "fee_payer",
+            "type": {
+              "option": "pubkey"
+            }
           }
         ]
       }
@@ -371,10 +436,7 @@
           {
             "name": "request_id",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
