@@ -7,10 +7,7 @@ declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 pub mod chain_signatures_project {
     use super::*;
 
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        signature_deposit: u64,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, signature_deposit: u64) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         program_state.admin = ctx.accounts.admin.key();
         program_state.signature_deposit = signature_deposit;
@@ -130,6 +127,11 @@ pub mod chain_signatures_project {
 
         Ok(())
     }
+
+    pub fn get_signature_deposit(ctx: Context<GetSignatureDeposit>) -> Result<u64> {
+        let program_state = &ctx.accounts.program_state;
+        Ok(program_state.signature_deposit)
+    }
 }
 
 #[account]
@@ -215,6 +217,12 @@ pub struct Sign<'info> {
 #[derive(Accounts)]
 pub struct Respond<'info> {
     pub responder: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct GetSignatureDeposit<'info> {
+    #[account(seeds = [b"program-state"], bump)]
+    pub program_state: Account<'info, ProgramState>,
 }
 
 #[event]
