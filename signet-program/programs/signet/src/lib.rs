@@ -7,10 +7,15 @@ declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 pub mod chain_signatures_project {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>, signature_deposit: u64) -> Result<()> {
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        signature_deposit: u64,
+        network_id: String,
+    ) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         program_state.admin = ctx.accounts.admin.key();
         program_state.signature_deposit = signature_deposit;
+        program_state.network_id = network_id;
 
         Ok(())
     }
@@ -93,7 +98,7 @@ pub mod chain_signatures_project {
             payload,
             key_version,
             deposit: program_state.signature_deposit,
-            chain_id: 0,
+            network_id: program_state.network_id.clone(),
             path,
             algo,
             dest,
@@ -138,6 +143,8 @@ pub mod chain_signatures_project {
 pub struct ProgramState {
     pub admin: Pubkey,
     pub signature_deposit: u64,
+    /// CAIP-2 Network identifier, e.g. "solana:mainnet", "solana:devnet"
+    pub network_id: String,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -231,7 +238,7 @@ pub struct SignatureRequestedEvent {
     pub payload: [u8; 32],
     pub key_version: u32,
     pub deposit: u64,
-    pub chain_id: u64,
+    pub network_id: String,
     pub path: String,
     pub algo: String,
     pub dest: String,
