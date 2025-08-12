@@ -189,7 +189,7 @@ pub mod chain_signatures_project {
             program_state.signature_deposit,
         )?;
 
-        emit!(SignRespondRequestedEvent {
+        emit_cpi!(SignRespondRequestedEvent {
             sender: *requester.key,
             transaction_data: serialized_transaction,
             slip44_chain_id,
@@ -370,6 +370,7 @@ pub struct Sign<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct SignRespond<'info> {
     #[account(mut, seeds = [b"program-state"], bump)]
