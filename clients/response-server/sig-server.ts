@@ -9,23 +9,11 @@ import * as os from "os";
 import * as dotenv from "dotenv";
 import { ethers } from "ethers";
 import bs58 from "bs58";
+import { ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR } from "../../signet-program/test-utils/constants";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const EPSILON_DERIVATION_PREFIX = "sig.network v1.0.0 epsilon derivation";
-
-// CPI Event Structure:
-// When emit_cpi! is used in an Anchor program, it creates an instruction with this format:
-// [0-8]:   EMIT_CPI_INSTRUCTION_DISCRIMINATOR - identifies this as an emit_cpi! instruction
-// [8-16]:  Event discriminator - identifies which specific event (from IDL)
-// [16+]:   Event data - the serialized event fields
-
-// EMIT_CPI_INSTRUCTION_DISCRIMINATOR - identifies that this is an emit_cpi! instruction
-// This is a constant from Anchor that identifies the instruction type
-// Value: e445a52e51cb9a1d
-const EMIT_CPI_INSTRUCTION_DISCRIMINATOR = Buffer.from([
-  0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d,
-]);
 
 function generateRequestId(
   addr: string,
@@ -201,7 +189,7 @@ async function parseCpiEvents(
               ixData.length >= 16 &&
               Buffer.compare(
                 ixData.subarray(0, 8),
-                EMIT_CPI_INSTRUCTION_DISCRIMINATOR
+                ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR
               ) === 0
             ) {
               // Extract the event discriminator (bytes 8-16)
