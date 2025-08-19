@@ -87,7 +87,6 @@ pub mod chain_signatures_project {
             program_state.signature_deposit,
         )?;
 
-        // TODO: Change to use emit_cpi!, currently emit! to test the old implementation
         emit_cpi!(SignatureRequestedEvent {
             sender: *requester.key,
             payload,
