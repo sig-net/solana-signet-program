@@ -132,6 +132,18 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    pub fn respond_error(ctx: Context<RespondError>, errors: Vec<ErrorResponse>) -> Result<()> {
+        for error in errors {
+            emit!(SignatureErrorEvent {
+                request_id: error.request_id,
+                responder: *ctx.accounts.responder.key,
+                error: error.error_message,
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn get_signature_deposit(ctx: Context<GetSignatureDeposit>) -> Result<u64> {
         let program_state = &ctx.accounts.program_state;
         Ok(program_state.signature_deposit)
@@ -157,6 +169,12 @@ pub struct Signature {
     pub big_r: AffinePoint,
     pub s: [u8; 32],
     pub recovery_id: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct ErrorResponse {
+    pub request_id: [u8; 32],
+    pub error_message: String,
 }
 
 #[derive(Accounts)]
@@ -227,6 +245,11 @@ pub struct Respond<'info> {
 }
 
 #[derive(Accounts)]
+pub struct RespondError<'info> {
+    pub responder: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct GetSignatureDeposit<'info> {
     #[account(seeds = [b"program-state"], bump)]
     pub program_state: Account<'info, ProgramState>,
@@ -251,6 +274,13 @@ pub struct SignatureRespondedEvent {
     pub request_id: [u8; 32],
     pub responder: Pubkey,
     pub signature: Signature,
+}
+
+#[event]
+pub struct SignatureErrorEvent {
+    pub request_id: [u8; 32],
+    pub responder: Pubkey,
+    pub error: String,
 }
 
 #[event]
