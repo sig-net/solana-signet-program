@@ -6,21 +6,26 @@ declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 #[program]
 pub mod chain_signatures_project {
     use super::*;
-
-    pub fn initialize(ctx: Context<Initialize>, signature_deposit: u64) -> Result<()> {
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        signature_deposit: u64,
+        chain_id: String,
+    ) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         program_state.admin = ctx.accounts.admin.key();
         program_state.signature_deposit = signature_deposit;
+        program_state.chain_id = chain_id;
 
         Ok(())
     }
 
     pub fn update_deposit(ctx: Context<AdminOnly>, new_deposit: u64) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
+        let old_deposit = program_state.signature_deposit;
         program_state.signature_deposit = new_deposit;
 
         emit!(DepositUpdatedEvent {
-            old_deposit: program_state.signature_deposit,
+            old_deposit,
             new_deposit,
         });
 
@@ -92,7 +97,7 @@ pub mod chain_signatures_project {
             payload,
             key_version,
             deposit: program_state.signature_deposit,
-            chain_id: 0,
+            chain_id: program_state.chain_id.clone(),
             path,
             algo,
             dest,
@@ -126,12 +131,19 @@ pub mod chain_signatures_project {
 
         Ok(())
     }
+
+    pub fn get_signature_deposit(ctx: Context<GetSignatureDeposit>) -> Result<u64> {
+        let program_state = &ctx.accounts.program_state;
+        Ok(program_state.signature_deposit)
+    }
 }
 
 #[account]
 pub struct ProgramState {
     pub admin: Pubkey,
     pub signature_deposit: u64,
+    /// CAIP-2 chain identifier, e.g. "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "eip155:1"
+    pub chain_id: String,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -214,13 +226,19 @@ pub struct Respond<'info> {
     pub responder: Signer<'info>,
 }
 
+#[derive(Accounts)]
+pub struct GetSignatureDeposit<'info> {
+    #[account(seeds = [b"program-state"], bump)]
+    pub program_state: Account<'info, ProgramState>,
+}
+
 #[event]
 pub struct SignatureRequestedEvent {
     pub sender: Pubkey,
     pub payload: [u8; 32],
     pub key_version: u32,
     pub deposit: u64,
-    pub chain_id: u64,
+    pub chain_id: String,
     pub path: String,
     pub algo: String,
     pub dest: String,
