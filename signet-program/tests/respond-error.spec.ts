@@ -4,16 +4,13 @@ import { testSetup } from "../test-utils/testSetup";
 import { createSignArgs } from "../test-utils/signingUtils";
 
 describe("Respond Error tests", () => {
-  const {
-    provider,
-    program,
-  } = testSetup();
+  const { provider, program } = testSetup();
 
   it("Can respond with single error", async () => {
     const signArgs = createSignArgs("CONFIG_TEST");
-    
+
     const requestId = Array.from({ length: 32 }, (_, i) => i % 256);
-    
+
     const errorResponse = {
       requestId,
       errorMessage: "Test error message",
@@ -22,10 +19,13 @@ describe("Respond Error tests", () => {
     let errorEventReceived = false;
     let capturedEvent: any = null;
 
-    const listener = program.addEventListener("signatureErrorEvent", (event) => {
-      errorEventReceived = true;
-      capturedEvent = event;
-    });
+    const listener = program.addEventListener(
+      "signatureErrorEvent",
+      (event) => {
+        errorEventReceived = true;
+        capturedEvent = event;
+      }
+    );
 
     try {
       const tx = await program.methods
@@ -35,7 +35,7 @@ describe("Respond Error tests", () => {
         })
         .rpc();
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       assert.ok(tx, "Transaction should succeed");
 
@@ -57,7 +57,6 @@ describe("Respond Error tests", () => {
         "Test error message",
         "Error message should match"
       );
-
     } finally {
       await program.removeEventListener(listener);
     }
@@ -66,7 +65,7 @@ describe("Respond Error tests", () => {
   it("Can respond with multiple errors", async () => {
     const requestId1 = Array.from({ length: 32 }, (_, i) => (i + 1) % 256);
     const requestId2 = Array.from({ length: 32 }, (_, i) => (i + 2) % 256);
-    
+
     const errorResponses = [
       {
         requestId: requestId1,
@@ -80,9 +79,12 @@ describe("Respond Error tests", () => {
 
     const capturedEvents: any[] = [];
 
-    const listener = program.addEventListener("signatureErrorEvent", (event) => {
-      capturedEvents.push(event);
-    });
+    const listener = program.addEventListener(
+      "signatureErrorEvent",
+      (event) => {
+        capturedEvents.push(event);
+      }
+    );
 
     try {
       const tx = await program.methods
@@ -92,34 +94,45 @@ describe("Respond Error tests", () => {
         })
         .rpc();
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       assert.ok(tx, "Transaction should succeed");
 
-      assert.equal(capturedEvents.length, 2, "Two signatureErrorEvents should be emitted");
+      assert.equal(
+        capturedEvents.length,
+        2,
+        "Two signatureErrorEvents should be emitted"
+      );
 
-      const event1 = capturedEvents.find(e => 
-        Array.from(e.requestId).join(',') === requestId1.join(',')
+      const event1 = capturedEvents.find(
+        (e) => Array.from(e.requestId).join(",") === requestId1.join(",")
       );
       assert.ok(event1, "First error event should be found");
-      assert.equal(event1.error, "First error message", "First error message should match");
+      assert.equal(
+        event1.error,
+        "First error message",
+        "First error message should match"
+      );
       assert.equal(
         event1.responder.toString(),
         provider.wallet.publicKey.toString(),
         "First responder should match"
       );
 
-      const event2 = capturedEvents.find(e => 
-        Array.from(e.requestId).join(',') === requestId2.join(',')
+      const event2 = capturedEvents.find(
+        (e) => Array.from(e.requestId).join(",") === requestId2.join(",")
       );
       assert.ok(event2, "Second error event should be found");
-      assert.equal(event2.error, "Second error message", "Second error message should match");
+      assert.equal(
+        event2.error,
+        "Second error message",
+        "Second error message should match"
+      );
       assert.equal(
         event2.responder.toString(),
         provider.wallet.publicKey.toString(),
         "Second responder should match"
       );
-
     } finally {
       await program.removeEventListener(listener);
     }
@@ -127,19 +140,23 @@ describe("Respond Error tests", () => {
 
   it("Can respond with error containing special characters", async () => {
     const requestId = Array.from({ length: 32 }, (_, i) => (i + 100) % 256);
-    
+
     const errorResponse = {
       requestId,
-      errorMessage: "Error with special chars: àáâãäå æç èéêë ìíîï ñ òóôõö ùúûü ý 🚨⚠️💥",
+      errorMessage:
+        "Error with special chars: àáâãäå æç èéêë ìíîï ñ òóôõö ùúûü ý 🚨⚠️💥",
     };
 
     let errorEventReceived = false;
     let capturedEvent: any = null;
 
-    const listener = program.addEventListener("signatureErrorEvent", (event) => {
-      errorEventReceived = true;
-      capturedEvent = event;
-    });
+    const listener = program.addEventListener(
+      "signatureErrorEvent",
+      (event) => {
+        errorEventReceived = true;
+        capturedEvent = event;
+      }
+    );
 
     try {
       const tx = await program.methods
@@ -149,7 +166,7 @@ describe("Respond Error tests", () => {
         })
         .rpc();
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       assert.ok(tx, "Transaction should succeed");
 
@@ -161,7 +178,6 @@ describe("Respond Error tests", () => {
         errorResponse.errorMessage,
         "Error message with special characters should match"
       );
-
     } finally {
       await program.removeEventListener(listener);
     }
@@ -169,7 +185,7 @@ describe("Respond Error tests", () => {
 
   it("Can handle empty error message", async () => {
     const requestId = Array.from({ length: 32 }, (_, i) => (i + 200) % 256);
-    
+
     const errorResponse = {
       requestId,
       errorMessage: "",
@@ -178,10 +194,13 @@ describe("Respond Error tests", () => {
     let errorEventReceived = false;
     let capturedEvent: any = null;
 
-    const listener = program.addEventListener("signatureErrorEvent", (event) => {
-      errorEventReceived = true;
-      capturedEvent = event;
-    });
+    const listener = program.addEventListener(
+      "signatureErrorEvent",
+      (event) => {
+        errorEventReceived = true;
+        capturedEvent = event;
+      }
+    );
 
     try {
       const tx = await program.methods
@@ -191,7 +210,7 @@ describe("Respond Error tests", () => {
         })
         .rpc();
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       assert.ok(tx, "Transaction should succeed");
 
@@ -202,7 +221,6 @@ describe("Respond Error tests", () => {
         "",
         "Empty error message should be handled correctly"
       );
-
     } finally {
       await program.removeEventListener(listener);
     }

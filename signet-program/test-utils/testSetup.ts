@@ -64,7 +64,9 @@ export function testSetup() {
 
       return;
     } catch (error) {
-      const tx = await program.methods.initialize(new BN("100000"), "solana:localnet").rpc();
+      const tx = await program.methods
+        .initialize(new BN("100000"), "solana:localnet")
+        .rpc();
 
       const latestBlockhash = await connection.getLatestBlockhash();
 
