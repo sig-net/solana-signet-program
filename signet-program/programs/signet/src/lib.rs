@@ -6,7 +6,6 @@ declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 #[program]
 pub mod chain_signatures_project {
     use super::*;
-
     pub fn initialize(
         ctx: Context<Initialize>,
         signature_deposit: u64,
@@ -93,7 +92,7 @@ pub mod chain_signatures_project {
             program_state.signature_deposit,
         )?;
 
-        emit!(SignatureRequestedEvent {
+        emit_cpi!(SignatureRequestedEvent {
             sender: *requester.key,
             payload,
             key_version,
@@ -210,6 +209,7 @@ pub struct WithdrawFunds<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct Sign<'info> {
     #[account(mut, seeds = [b"program-state"], bump)]

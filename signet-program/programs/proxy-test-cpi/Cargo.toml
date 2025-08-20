@@ -1,12 +1,12 @@
 [package]
-name = "signet"
+name = "proxy_test_cpi"
 version = "0.1.0"
-description = "SigNet program to request signatures from the network"
+description = "Proxy CPI program to test Signet program"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "chain_signatures_project"
+name = "proxy_test_cpi"
 
 [features]
 default = []
@@ -19,4 +19,5 @@ idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
 anchor-lang = { version = "0.31.1", features = ["event-cpi"] }
+signet = { path = "../signet", features = ["cpi"] }
 
