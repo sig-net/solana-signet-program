@@ -111,3 +111,36 @@ The responder will start listening for signature requests on the Solana blockcha
 cd clients/request-client
 npx ts-node sig-client.ts
 ```
+
+## Testing
+
+The project includes tests for all program functionality including configuration, signature requests, CPI calls, and error handling.
+
+### Prerequisites for Testing
+
+1. **Environment Setup**
+   - Ensure you have the `.env` file configured (see Configuration section above)
+   - Node.js dependencies installed (`yarn install` in the signet-program directory)
+   - Anchor framework installed
+
+2. **Required Environment Variables**
+   ```bash
+   # In your .env file at project root
+   PRIVATE_KEY_TESTNET=0x... # Your test private key
+   RESPONDER_BASE_PUBLIC_KEY=0x... # Corresponding public key
+   KEYPAIR_PATH=~/.config/solana/id.json
+   ```
+
+### Running Tests
+
+#### **Run All Tests (Recommended)**
+```bash
+cd signet-program
+anchor test
+```
+
+This command will:
+- Start a local Solana test validator
+- Deploy the program to the test network
+- Run all test suites
+- Clean up automatically
