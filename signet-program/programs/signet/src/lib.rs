@@ -1,11 +1,22 @@
+//! Sig.Network signing program for accepting signature requests and providing responses from the Sig.Network.
+
 #![allow(unexpected_cfgs)]
 use anchor_lang::prelude::*;
 
 declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 
+/**
+ * @title Sig.Network signing program
+ * @dev Program for accepting signature requests and providing responses from the Sig.Network.
+ */
 #[program]
 pub mod chain_signatures_project {
     use super::*;
+    /**
+     * @dev Function to initialize the program state.
+     * @param signature_deposit The deposit required for signature requests.
+     * @param chain_id The CAIP-2 chain identifier.
+     */
     pub fn initialize(
         ctx: Context<Initialize>,
         signature_deposit: u64,
@@ -19,6 +30,10 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    /**
+     * @dev Function to set the signature deposit amount.
+     * @param new_deposit The new deposit amount.
+     */
     pub fn update_deposit(ctx: Context<AdminOnly>, new_deposit: u64) -> Result<()> {
         let program_state = &mut ctx.accounts.program_state;
         let old_deposit = program_state.signature_deposit;
@@ -32,6 +47,10 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    /**
+     * @dev Function to withdraw funds from the program.
+     * @param amount The amount to withdraw.
+     */
     pub fn withdraw_funds(ctx: Context<WithdrawFunds>, amount: u64) -> Result<()> {
         let program_state = &ctx.accounts.program_state;
         let recipient = &ctx.accounts.recipient;
@@ -59,6 +78,15 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    /**
+     * @dev Function to request a signature.
+     * @param payload The payload to be signed.
+     * @param key_version The version of the key used for signing.
+     * @param path The derivation path for the user account.
+     * @param algo The algorithm used for signing.
+     * @param dest The response destination.
+     * @param params Additional parameters.
+     */
     pub fn sign(
         ctx: Context<Sign>,
         payload: [u8; 32],
@@ -111,6 +139,11 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    /**
+     * @dev Function to respond to signature requests.
+     * @param request_ids The array of request IDs.
+     * @param signatures The array of signature responses.
+     */
     pub fn respond(
         ctx: Context<Respond>,
         request_ids: Vec<[u8; 32]>,
@@ -132,6 +165,26 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    /**
+     * @dev Function to emit signature generation errors.
+     * @param errors The array of signature generation errors.
+     */
+    pub fn respond_error(ctx: Context<RespondError>, errors: Vec<ErrorResponse>) -> Result<()> {
+        for error in errors {
+            emit!(SignatureErrorEvent {
+                request_id: error.request_id,
+                responder: *ctx.accounts.responder.key,
+                error: error.error_message,
+            });
+        }
+
+        Ok(())
+    }
+
+    /**
+     * @dev Function to get the current signature deposit amount.
+     * @return The current signature deposit amount.
+     */
     pub fn get_signature_deposit(ctx: Context<GetSignatureDeposit>) -> Result<u64> {
         let program_state = &ctx.accounts.program_state;
         Ok(program_state.signature_deposit)
@@ -142,7 +195,6 @@ pub mod chain_signatures_project {
 pub struct ProgramState {
     pub admin: Pubkey,
     pub signature_deposit: u64,
-    /// CAIP-2 chain identifier, e.g. "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "eip155:1"
     pub chain_id: String,
 }
 
@@ -159,12 +211,18 @@ pub struct Signature {
     pub recovery_id: u8,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct ErrorResponse {
+    pub request_id: [u8; 32],
+    pub error_message: String,
+}
+
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(
         init,
         payer = admin,
-        space = 8 + 32 + 8,
+        space = 8 + 32 + 8 + 4 + 128, // discriminator + admin + deposit + string length + max chain_id length
         seeds = [b"program-state"],
         bump
     )]
@@ -227,11 +285,29 @@ pub struct Respond<'info> {
 }
 
 #[derive(Accounts)]
+pub struct RespondError<'info> {
+    pub responder: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct GetSignatureDeposit<'info> {
     #[account(seeds = [b"program-state"], bump)]
     pub program_state: Account<'info, ProgramState>,
 }
 
+/**
+ * @dev Emitted when a signature is requested.
+ * @param sender The address of the sender.
+ * @param payload The payload to be signed.
+ * @param key_version The version of the key used for signing.
+ * @param deposit The deposit amount.
+ * @param chain_id The CAIP-2 ID of the blockchain.
+ * @param path The derivation path for the user account.
+ * @param algo The algorithm used for signing.
+ * @param dest The response destination.
+ * @param params Additional parameters.
+ * @param fee_payer Optional fee payer account.
+ */
 #[event]
 pub struct SignatureRequestedEvent {
     pub sender: Pubkey,
@@ -246,6 +322,13 @@ pub struct SignatureRequestedEvent {
     pub fee_payer: Option<Pubkey>,
 }
 
+/**
+ * @dev Emitted when a signature response is received.
+ * @notice Any address can emit this event. Clients should always verify the validity of the signature.
+ * @param request_id The ID of the request. Must be calculated off-chain.
+ * @param responder The address of the responder.
+ * @param signature The signature response.
+ */
 #[event]
 pub struct SignatureRespondedEvent {
     pub request_id: [u8; 32],
@@ -253,12 +336,36 @@ pub struct SignatureRespondedEvent {
     pub signature: Signature,
 }
 
+/**
+ * @dev Emitted when a signature error is received.
+ * @notice Any address can emit this event. Do not rely on it for business logic.
+ * @param request_id The ID of the request. Must be calculated off-chain.
+ * @param responder The address of the responder.
+ * @param error The error message.
+ */
+#[event]
+pub struct SignatureErrorEvent {
+    pub request_id: [u8; 32],
+    pub responder: Pubkey,
+    pub error: String,
+}
+
+/**
+ * @dev Emitted when the deposit amount is updated.
+ * @param old_deposit The previous deposit amount.
+ * @param new_deposit The new deposit amount.
+ */
 #[event]
 pub struct DepositUpdatedEvent {
     pub old_deposit: u64,
     pub new_deposit: u64,
 }
 
+/**
+ * @dev Emitted when a withdrawal is made.
+ * @param amount The amount withdrawn.
+ * @param recipient The address of the recipient.
+ */
 #[event]
 pub struct FundsWithdrawnEvent {
     pub amount: u64,
