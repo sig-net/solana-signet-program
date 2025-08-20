@@ -50,6 +50,9 @@ export function testSetup() {
     program.programId
   );
 
+  const network = detectNetwork(provider);
+  const useMockSigner = shouldUseMockSigner(network);
+
   before(async () => {
     if (useMockSigner) {
       await mockCPISignerServer.start();
@@ -61,7 +64,7 @@ export function testSetup() {
 
       return;
     } catch (error) {
-      const tx = await program.methods.initialize(new BN("100000")).rpc();
+      const tx = await program.methods.initialize(new BN("100000"), "solana:localnet").rpc();
 
       const latestBlockhash = await connection.getLatestBlockhash();
 
@@ -81,9 +84,6 @@ export function testSetup() {
       await mockCPISignerServer?.stop();
     }
   });
-
-  const network = detectNetwork(provider);
-  const useMockSigner = shouldUseMockSigner(network);
 
   return {
     provider,
