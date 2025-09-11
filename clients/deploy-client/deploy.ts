@@ -13,7 +13,7 @@ import * as path from "path";
 import * as os from "os";
 import * as dotenv from "dotenv";
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 function loadKeypair(): Keypair {
   const keypairPath =
@@ -37,10 +37,7 @@ async function main() {
   });
   anchor.setProvider(provider);
 
-  const program = new Program<ChainSignaturesProject>(
-    IDL,
-    provider,
-  );
+  const program = new Program<ChainSignaturesProject>(IDL, provider);
 
   console.log("Using wallet:", wallet.publicKey.toString());
 
@@ -56,7 +53,7 @@ async function main() {
     const tx = await program.methods
       .initialize(SIGNATURE_DEPOSIT)
       .accounts({
-        admin: wallet.publicKey
+        admin: wallet.publicKey,
       })
       .rpc();
 
