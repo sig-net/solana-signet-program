@@ -68,7 +68,7 @@ async function main() {
       {
         payload,
         path,
-        key_version: keyVersion
+        key_version: keyVersion,
       },
       {
         sign: {
@@ -97,7 +97,9 @@ async function main() {
       console.error("Signature not found:", error.message);
       console.error("Request ID:", error.requestId);
       console.error("Transaction hash:", error.hash);
-    } else if (error instanceof contracts.solana.utils.errors.SignatureContractError) {
+    } else if (
+      error instanceof contracts.solana.utils.errors.SignatureContractError
+    ) {
       console.error("Contract error:", error.message);
       console.error("Request ID:", error.requestId);
       console.error("Transaction hash:", error.hash);
