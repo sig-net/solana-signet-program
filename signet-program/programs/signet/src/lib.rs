@@ -258,6 +258,7 @@ pub mod chain_signatures_project {
         let program_state = &ctx.accounts.program_state;
         Ok(program_state.signature_deposit)
     }
+
     pub fn read_respond(
         ctx: Context<ReadRespond>,
         request_id: [u8; 32],
@@ -399,6 +400,7 @@ pub struct GetSignatureDeposit<'info> {
     pub program_state: Account<'info, ProgramState>,
 }
 
+#[derive(Accounts)]
 pub struct ReadRespond<'info> {
     pub responder: Signer<'info>,
 }
@@ -455,13 +457,6 @@ pub struct SignRespondRequestedEvent {
 }
 
 #[event]
-pub struct SignatureErrorEvent {
-    pub request_id: [u8; 32],
-    pub responder: Pubkey,
-    pub error: String,
-}
-
-#[event]
 pub struct SignatureRespondedEvent {
     pub request_id: [u8; 32],
     pub responder: Pubkey,
@@ -483,9 +478,11 @@ pub struct SignatureErrorEvent {
 }
 
 /**
- * @dev Emitted when the deposit amount is updated.
- * @param old_deposit The previous deposit amount.
- * @param new_deposit The new deposit amount.
+ * @dev Emitted when a read response is received.
+ * @param request_id The ID of the request. Must be calculated off-chain.
+ * @param responder The address of the responder.
+ * @param serialized_output The serialized output.
+ * @param signature The signature.
  */
 #[event]
 pub struct ReadRespondedEvent {
@@ -495,6 +492,11 @@ pub struct ReadRespondedEvent {
     pub signature: Signature,
 }
 
+/**
+ * @dev Emitted when the deposit amount is updated.
+ * @param old_deposit The previous deposit amount.
+ * @param new_deposit The new deposit amount.
+ */
 #[event]
 pub struct DepositUpdatedEvent {
     pub old_deposit: u64,
