@@ -330,7 +330,7 @@
           "type": "string"
         },
         {
-          "name": "explorer_deserialization_format",
+          "name": "output_deserialization_format",
           "type": {
             "defined": {
               "name": "SerializationFormat"
@@ -338,11 +338,11 @@
           }
         },
         {
-          "name": "explorer_deserialization_schema",
+          "name": "output_deserialization_schema",
           "type": "bytes"
         },
         {
-          "name": "callback_serialization_format",
+          "name": "respond_serialization_format",
           "type": {
             "defined": {
               "name": "SerializationFormat"
@@ -350,7 +350,7 @@
           }
         },
         {
-          "name": "callback_serialization_schema",
+          "name": "respond_serialization_schema",
           "type": "bytes"
         }
       ]
@@ -707,19 +707,19 @@
             "type": "string"
           },
           {
-            "name": "explorer_deserialization_format",
+            "name": "output_deserialization_format",
             "type": "u8"
           },
           {
-            "name": "explorer_deserialization_schema",
+            "name": "output_deserialization_schema",
             "type": "bytes"
           },
           {
-            "name": "callback_serialization_format",
+            "name": "respond_serialization_format",
             "type": "u8"
           },
           {
-            "name": "callback_serialization_schema",
+            "name": "respond_serialization_schema",
             "type": "bytes"
           }
         ]

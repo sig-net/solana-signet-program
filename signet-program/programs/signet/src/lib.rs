@@ -155,10 +155,10 @@ pub mod chain_signatures_project {
         algo: String,
         dest: String,
         params: String,
-        explorer_deserialization_format: SerializationFormat,
-        explorer_deserialization_schema: Vec<u8>,
-        callback_serialization_format: SerializationFormat,
-        callback_serialization_schema: Vec<u8>,
+        output_deserialization_format: SerializationFormat,
+        output_deserialization_schema: Vec<u8>,
+        respond_serialization_format: SerializationFormat,
+        respond_serialization_schema: Vec<u8>,
     ) -> Result<()> {
         let program_state = &ctx.accounts.program_state;
         let requester = &ctx.accounts.requester;
@@ -199,10 +199,10 @@ pub mod chain_signatures_project {
             algo,
             dest,
             params,
-            explorer_deserialization_format: explorer_deserialization_format as u8,
-            explorer_deserialization_schema,
-            callback_serialization_format: callback_serialization_format as u8,
-            callback_serialization_schema
+            output_deserialization_format: output_deserialization_format as u8,
+            output_deserialization_schema,
+            respond_serialization_format: respond_serialization_format as u8,
+            respond_serialization_schema
         });
 
         Ok(())
@@ -432,13 +432,6 @@ pub struct SignatureRequestedEvent {
     pub fee_payer: Option<Pubkey>,
 }
 
-/**
- * @dev Emitted when a signature response is received.
- * @notice Any address can emit this event. Clients should always verify the validity of the signature.
- * @param request_id The ID of the request. Must be calculated off-chain.
- * @param responder The address of the responder.
- * @param signature The signature response.
- */
 #[event]
 pub struct SignRespondRequestedEvent {
     pub sender: Pubkey,
@@ -450,12 +443,19 @@ pub struct SignRespondRequestedEvent {
     pub algo: String,
     pub dest: String,
     pub params: String,
-    pub explorer_deserialization_format: u8,
-    pub explorer_deserialization_schema: Vec<u8>,
-    pub callback_serialization_format: u8,
-    pub callback_serialization_schema: Vec<u8>,
+    pub output_deserialization_format: u8,
+    pub output_deserialization_schema: Vec<u8>,
+    pub respond_serialization_format: u8,
+    pub respond_serialization_schema: Vec<u8>,
 }
 
+/**
+ * @dev Emitted when a signature response is received.
+ * @notice Any address can emit this event. Clients should always verify the validity of the signature.
+ * @param request_id The ID of the request. Must be calculated off-chain.
+ * @param responder The address of the responder.
+ * @param signature The signature response.
+ */
 #[event]
 pub struct SignatureRespondedEvent {
     pub request_id: [u8; 32],
