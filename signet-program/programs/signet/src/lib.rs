@@ -146,6 +146,19 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
+    /**
+     * @dev Function to initiate bidirectional flow
+     * @param serialized_transaction transaction to be signed
+     * @param slip44_chain_id chain identifier
+     * @param key_version The version of the key used for signing.
+     * @param path The derivation path for the user account.
+     * @param algo The algorithm used for signing.
+     * @param dest The response destination.
+     * @param params Additional parameters.
+     * @param output_deserialization_schema schema for transaction output deserialization
+     * @param respond_serialization_format expected serialization format in read_respond payload
+     * @param respond_serialization_schema serialization schema for read_respond payload
+     */
     pub fn sign_respond(
         ctx: Context<SignRespond>,
         serialized_transaction: Vec<u8>,
@@ -257,19 +270,22 @@ pub mod chain_signatures_project {
         Ok(program_state.signature_deposit)
     }
 
+    /**
+     * @dev Function to finalize bidirectional flow
+     * @param request_id The ID of the signature request to respond to
+     * @param serialized_output output of the previously executed transaction
+     * @param signature ECDSA signature of the serialized output and request_id (keccak256(request_id.concat(serialized_output)))
+     */
     pub fn read_respond(
         ctx: Context<ReadRespond>,
         request_id: [u8; 32],
         serialized_output: Vec<u8>,
         signature: Signature,
     ) -> Result<()> {
-        // The signature should be an ECDSA signature over keccak256(request_id || serialized_output)
-
         // only possible error responses // (this tx could never happen):
         // - nonce too low
         // - balance too low
         // - literal on chain error
-
         emit!(ReadRespondedEvent {
             request_id,
             responder: *ctx.accounts.responder.key,
@@ -430,6 +446,21 @@ pub struct SignatureRequestedEvent {
     pub fee_payer: Option<Pubkey>,
 }
 
+/**
+ * @dev Emitted when a sign_respond request is made.
+ * @param sender The address of the sender.
+ * @param serialized_transaction The serialized transaction to be signed.
+ * @param slip44_chain_id The SLIP-44 chain ID.
+ * @param key_version The version of the key used for signing.
+ * @param deposit The deposit amount.
+ * @param path The derivation path for the user account.
+ * @param algo The algorithm used for signing.
+ * @param dest The response destination.
+ * @param params Additional parameters.
+ * @param output_deserialization_schema Schema for transaction output deserialization.
+ * @param respond_serialization_format Expected serialization format in read_respond payload.
+ * @param respond_serialization_schema Serialization schema for read_respond payload.
+ */
 #[event]
 pub struct SignRespondRequestedEvent {
     pub sender: Pubkey,
