@@ -190,7 +190,7 @@ pub mod chain_signatures_project {
 
         emit_cpi!(SignRespondRequestedEvent {
             sender: *requester.key,
-            transaction_data: serialized_transaction,
+            serialized_transaction,
             slip44_chain_id,
             key_version,
             deposit: program_state.signature_deposit,
@@ -433,7 +433,7 @@ pub struct SignatureRequestedEvent {
 #[event]
 pub struct SignRespondRequestedEvent {
     pub sender: Pubkey,
-    pub transaction_data: Vec<u8>,
+    pub serialized_transaction: Vec<u8>,
     pub slip44_chain_id: u32,
     pub key_version: u32,
     pub deposit: u64,
