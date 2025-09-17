@@ -149,7 +149,7 @@ pub mod chain_signatures_project {
     /**
      * @dev Function to initiate bidirectional flow
      * @param serialized_transaction transaction to be signed
-     * @param slip44_chain_id chain identifier
+     * @param caip2_id chain identifier
      * @param key_version The version of the key used for signing.
      * @param path The derivation path for the user account.
      * @param algo The algorithm used for signing.
@@ -162,7 +162,7 @@ pub mod chain_signatures_project {
     pub fn sign_respond(
         ctx: Context<SignRespond>,
         serialized_transaction: Vec<u8>,
-        slip44_chain_id: u32,
+        caip2_id: String,
         key_version: u32,
         path: String,
         algo: String,
@@ -204,7 +204,7 @@ pub mod chain_signatures_project {
         emit_cpi!(SignRespondRequestedEvent {
             sender: *requester.key,
             serialized_transaction,
-            slip44_chain_id,
+            caip2_id,
             key_version,
             deposit: program_state.signature_deposit,
             path,
@@ -450,7 +450,7 @@ pub struct SignatureRequestedEvent {
  * @dev Emitted when a sign_respond request is made.
  * @param sender The address of the sender.
  * @param serialized_transaction The serialized transaction to be signed.
- * @param slip44_chain_id The SLIP-44 chain ID.
+ * @param caip2_id The SLIP-44 chain ID.
  * @param key_version The version of the key used for signing.
  * @param deposit The deposit amount.
  * @param path The derivation path for the user account.
@@ -465,7 +465,7 @@ pub struct SignatureRequestedEvent {
 pub struct SignRespondRequestedEvent {
     pub sender: Pubkey,
     pub serialized_transaction: Vec<u8>,
-    pub slip44_chain_id: u32,
+    pub caip2_id: String,
     pub key_version: u32,
     pub deposit: u64,
     pub path: String,
