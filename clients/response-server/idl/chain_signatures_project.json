@@ -330,14 +330,6 @@
           "type": "string"
         },
         {
-          "name": "output_deserialization_format",
-          "type": {
-            "defined": {
-              "name": "SerializationFormat"
-            }
-          }
-        },
-        {
           "name": "output_deserialization_schema",
           "type": "bytes"
         },
@@ -705,10 +697,6 @@
           {
             "name": "params",
             "type": "string"
-          },
-          {
-            "name": "output_deserialization_format",
-            "type": "u8"
           },
           {
             "name": "output_deserialization_schema",

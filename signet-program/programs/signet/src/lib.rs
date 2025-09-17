@@ -155,7 +155,6 @@ pub mod chain_signatures_project {
         algo: String,
         dest: String,
         params: String,
-        output_deserialization_format: SerializationFormat,
         output_deserialization_schema: Vec<u8>,
         respond_serialization_format: SerializationFormat,
         respond_serialization_schema: Vec<u8>,
@@ -199,7 +198,6 @@ pub mod chain_signatures_project {
             algo,
             dest,
             params,
-            output_deserialization_format: output_deserialization_format as u8,
             output_deserialization_schema,
             respond_serialization_format: respond_serialization_format as u8,
             respond_serialization_schema
@@ -443,7 +441,6 @@ pub struct SignRespondRequestedEvent {
     pub algo: String,
     pub dest: String,
     pub params: String,
-    pub output_deserialization_format: u8,
     pub output_deserialization_schema: Vec<u8>,
     pub respond_serialization_format: u8,
     pub respond_serialization_schema: Vec<u8>,
