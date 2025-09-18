@@ -159,8 +159,8 @@ pub mod chain_signatures_project {
      * @param respond_serialization_format expected serialization format in read_respond payload
      * @param respond_serialization_schema serialization schema for read_respond payload
      */
-    pub fn sign_respond(
-        ctx: Context<SignRespond>,
+    pub fn sign_bidirectional(
+        ctx: Context<SignBidirectional>,
         serialized_transaction: Vec<u8>,
         caip2_id: String,
         key_version: u32,
@@ -201,7 +201,7 @@ pub mod chain_signatures_project {
             program_state.signature_deposit,
         )?;
 
-        emit_cpi!(SignRespondRequestedEvent {
+        emit_cpi!(SignBidirectionalEvent {
             sender: *requester.key,
             serialized_transaction,
             caip2_id,
@@ -276,7 +276,7 @@ pub mod chain_signatures_project {
      * @param serialized_output output of the previously executed transaction
      * @param signature ECDSA signature of the serialized output and request_id (keccak256(request_id.concat(serialized_output)))
      */
-    pub fn read_respond(
+    pub fn respond_bidirectional(
         ctx: Context<ReadRespond>,
         request_id: [u8; 32],
         serialized_output: Vec<u8>,
@@ -286,7 +286,7 @@ pub mod chain_signatures_project {
         // - nonce too low
         // - balance too low
         // - literal on chain error
-        emit!(ReadRespondedEvent {
+        emit!(RespondBidirectionalEvent {
             request_id,
             responder: *ctx.accounts.responder.key,
             serialized_output,
@@ -387,7 +387,7 @@ pub struct Sign<'info> {
 
 #[event_cpi]
 #[derive(Accounts)]
-pub struct SignRespond<'info> {
+pub struct SignBidirectional<'info> {
     #[account(mut, seeds = [b"program-state"], bump)]
     pub program_state: Account<'info, ProgramState>,
     #[account(mut)]
@@ -447,7 +447,7 @@ pub struct SignatureRequestedEvent {
 }
 
 /**
- * @dev Emitted when a sign_respond request is made.
+ * @dev Emitted when a sign_bidirectional request is made.
  * @param sender The address of the sender.
  * @param serialized_transaction The serialized transaction to be signed.
  * @param caip2_id The SLIP-44 chain ID.
@@ -462,7 +462,7 @@ pub struct SignatureRequestedEvent {
  * @param respond_serialization_schema Serialization schema for read_respond payload.
  */
 #[event]
-pub struct SignRespondRequestedEvent {
+pub struct SignBidirectionalEvent {
     pub sender: Pubkey,
     pub serialized_transaction: Vec<u8>,
     pub caip2_id: String,
@@ -513,7 +513,7 @@ pub struct SignatureErrorEvent {
  * @param signature The signature.
  */
 #[event]
-pub struct ReadRespondedEvent {
+pub struct RespondBidirectionalEvent {
     pub request_id: [u8; 32],
     pub responder: Pubkey,
     pub serialized_output: Vec<u8>,
