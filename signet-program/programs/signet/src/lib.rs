@@ -179,6 +179,39 @@ pub mod chain_signatures_project {
             ChainSignaturesError::InvalidTransaction
         );
 
+        // Get the calling program ID
+        // In Solana CPI, we can determine the caller by checking the instruction sysvar
+        let caller_program_id = match &ctx.accounts.instructions {
+            Some(instructions_sysvar) => {
+                // Load current instruction to check if we're in a CPI context
+                match anchor_lang::solana_program::sysvar::instructions::load_current_index_checked(
+                    instructions_sysvar,
+                ) {
+                    Ok(current_index) => {
+                        // If current_index > 0, we're in a CPI call
+                        if current_index > 0 {
+                            // Get the calling instruction (previous in the stack)
+                            match anchor_lang::solana_program::sysvar::instructions::load_instruction_at_checked(
+                                (current_index - 1) as usize,
+                                instructions_sysvar,
+                            ) {
+                                Ok(caller_instruction) => caller_instruction.program_id,
+                                Err(_) => *requester.key, // Fallback to requester
+                            }
+                        } else {
+                            // Direct call (not CPI)
+                            *requester.key
+                        }
+                    }
+                    Err(_) => *requester.key, // Can't determine context, use requester
+                }
+            }
+            None => {
+                // No instruction sysvar provided - treat as direct call
+                *requester.key
+            }
+        };
+
         let transfer_instruction = anchor_lang::system_program::Transfer {
             from: payer,
             to: program_state.to_account_info(),
@@ -190,7 +223,7 @@ pub mod chain_signatures_project {
         )?;
 
         emit_cpi!(SignRespondRequestedEvent {
-            sender: *requester.key,
+            sender: caller_program_id,
             transaction_data: serialized_transaction,
             slip44_chain_id,
             key_version,
@@ -381,6 +414,9 @@ pub struct SignRespond<'info> {
     #[account(mut)]
     pub fee_payer: Option<Signer<'info>>,
     pub system_program: Program<'info, System>,
+    /// CHECK: Instructions sysvar account. Used to determine the calling program ID in CPI calls.
+    /// Must be the instructions sysvar (SysvarId) when provided to properly identify CPI callers.
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::id() @ ChainSignaturesError::MissingInstructionSysvar)]
     pub instructions: Option<AccountInfo<'info>>,
 }
 
@@ -433,11 +469,21 @@ pub struct SignatureRequestedEvent {
 }
 
 /**
- * @dev Emitted when a signature response is received.
- * @notice Any address can emit this event. Clients should always verify the validity of the signature.
- * @param request_id The ID of the request. Must be calculated off-chain.
- * @param responder The address of the responder.
- * @param signature The signature response.
+ * @dev Emitted when a sign-respond request is made.
+ * @notice This event can be emitted via CPI calls from other programs.
+ * @param sender The program ID of the caller (if CPI) or the requester's key (if direct call).
+ * @param transaction_data The serialized transaction data.
+ * @param slip44_chain_id The SLIP-44 chain identifier.
+ * @param key_version The version of the key used for signing.
+ * @param deposit The deposit amount.
+ * @param path The derivation path for the user account.
+ * @param algo The algorithm used for signing.
+ * @param dest The response destination.
+ * @param params Additional parameters.
+ * @param explorer_deserialization_format Format for explorer deserialization.
+ * @param explorer_deserialization_schema Schema for explorer deserialization.
+ * @param callback_serialization_format Format for callback serialization.
+ * @param callback_serialization_schema Schema for callback serialization.
  */
 #[event]
 pub struct SignRespondRequestedEvent {
