@@ -5,17 +5,6 @@ use anchor_lang::prelude::*;
 
 declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 
-/**
- * @title Sig.Network signing program
- * @dev Program for accepting signature requests and providing responses from the Sig.Network.
- */
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq)]
-#[repr(u8)]
-pub enum SerializationFormat {
-    Borsh = 0,
-    AbiJson = 1,
-}
-
 #[program]
 pub mod chain_signatures_project {
     use super::*;
@@ -146,19 +135,29 @@ pub mod chain_signatures_project {
         Ok(())
     }
 
-    pub fn sign_respond(
-        ctx: Context<SignRespond>,
+    /**
+     * @dev Function to initiate bidirectional flow
+     * @param serialized_transaction transaction to be signed
+     * @param caip2_id chain identifier
+     * @param key_version The version of the key used for signing.
+     * @param path The derivation path for the user account.
+     * @param algo The algorithm used for signing.
+     * @param dest The response destination.
+     * @param params Additional parameters.
+     * @param output_deserialization_schema schema for transaction output deserialization
+     * @param respond_serialization_schema serialization schema for read_respond payload
+     */
+    pub fn sign_bidirectional(
+        ctx: Context<SignBidirectional>,
         serialized_transaction: Vec<u8>,
-        slip44_chain_id: u32,
+        caip2_id: String,
         key_version: u32,
         path: String,
         algo: String,
         dest: String,
         params: String,
-        explorer_deserialization_format: SerializationFormat,
-        explorer_deserialization_schema: Vec<u8>,
-        callback_serialization_format: SerializationFormat,
-        callback_serialization_schema: Vec<u8>,
+        output_deserialization_schema: Vec<u8>,
+        respond_serialization_schema: Vec<u8>,
     ) -> Result<()> {
         let program_state = &ctx.accounts.program_state;
         let requester = &ctx.accounts.requester;
@@ -189,20 +188,18 @@ pub mod chain_signatures_project {
             program_state.signature_deposit,
         )?;
 
-        emit_cpi!(SignRespondRequestedEvent {
+        emit_cpi!(SignBidirectionalEvent {
             sender: *requester.key,
-            transaction_data: serialized_transaction,
-            slip44_chain_id,
+            serialized_transaction,
+            caip2_id,
             key_version,
             deposit: program_state.signature_deposit,
             path,
             algo,
             dest,
             params,
-            explorer_deserialization_format: explorer_deserialization_format as u8,
-            explorer_deserialization_schema,
-            callback_serialization_format: callback_serialization_format as u8,
-            callback_serialization_schema
+            output_deserialization_schema,
+            respond_serialization_schema
         });
 
         Ok(())
@@ -259,20 +256,23 @@ pub mod chain_signatures_project {
         Ok(program_state.signature_deposit)
     }
 
-    pub fn read_respond(
+    /**
+     * @dev Function to finalize bidirectional flow
+     * @param request_id The ID of the signature request to respond to
+     * @param serialized_output output of the previously executed transaction
+     * @param signature ECDSA signature of the serialized output and request_id (keccak256(request_id.concat(serialized_output)))
+     */
+    pub fn respond_bidirectional(
         ctx: Context<ReadRespond>,
         request_id: [u8; 32],
         serialized_output: Vec<u8>,
         signature: Signature,
     ) -> Result<()> {
-        // The signature should be an ECDSA signature over keccak256(request_id || serialized_output)
-
         // only possible error responses // (this tx could never happen):
         // - nonce too low
         // - balance too low
         // - literal on chain error
-
-        emit!(ReadRespondedEvent {
+        emit!(RespondBidirectionalEvent {
             request_id,
             responder: *ctx.accounts.responder.key,
             serialized_output,
@@ -373,7 +373,7 @@ pub struct Sign<'info> {
 
 #[event_cpi]
 #[derive(Accounts)]
-pub struct SignRespond<'info> {
+pub struct SignBidirectional<'info> {
     #[account(mut, seeds = [b"program-state"], bump)]
     pub program_state: Account<'info, ProgramState>,
     #[account(mut)]
@@ -433,29 +433,41 @@ pub struct SignatureRequestedEvent {
 }
 
 /**
- * @dev Emitted when a signature response is received.
- * @notice Any address can emit this event. Clients should always verify the validity of the signature.
- * @param request_id The ID of the request. Must be calculated off-chain.
- * @param responder The address of the responder.
- * @param signature The signature response.
+ * @dev Emitted when a sign_bidirectional request is made.
+ * @param sender The address of the sender.
+ * @param serialized_transaction The serialized transaction to be signed.
+ * @param caip2_id The SLIP-44 chain ID.
+ * @param key_version The version of the key used for signing.
+ * @param deposit The deposit amount.
+ * @param path The derivation path for the user account.
+ * @param algo The algorithm used for signing.
+ * @param dest The response destination.
+ * @param params Additional parameters.
+ * @param output_deserialization_schema Schema for transaction output deserialization.
+ * @param respond_serialization_schema Serialization schema for read_respond payload.
  */
 #[event]
-pub struct SignRespondRequestedEvent {
+pub struct SignBidirectionalEvent {
     pub sender: Pubkey,
-    pub transaction_data: Vec<u8>,
-    pub slip44_chain_id: u32,
+    pub serialized_transaction: Vec<u8>,
+    pub caip2_id: String,
     pub key_version: u32,
     pub deposit: u64,
     pub path: String,
     pub algo: String,
     pub dest: String,
     pub params: String,
-    pub explorer_deserialization_format: u8,
-    pub explorer_deserialization_schema: Vec<u8>,
-    pub callback_serialization_format: u8,
-    pub callback_serialization_schema: Vec<u8>,
+    pub output_deserialization_schema: Vec<u8>,
+    pub respond_serialization_schema: Vec<u8>,
 }
 
+/**
+ * @dev Emitted when a signature response is received.
+ * @notice Any address can emit this event. Clients should always verify the validity of the signature.
+ * @param request_id The ID of the request. Must be calculated off-chain.
+ * @param responder The address of the responder.
+ * @param signature The signature response.
+ */
 #[event]
 pub struct SignatureRespondedEvent {
     pub request_id: [u8; 32],
@@ -485,7 +497,7 @@ pub struct SignatureErrorEvent {
  * @param signature The signature.
  */
 #[event]
-pub struct ReadRespondedEvent {
+pub struct RespondBidirectionalEvent {
     pub request_id: [u8; 32],
     pub responder: Pubkey,
     pub serialized_output: Vec<u8>,
