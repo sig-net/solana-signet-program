@@ -365,7 +365,7 @@
     {
       "name": "sign_bidirectional",
       "docs": [
-        "* @dev Function to initiate bidirectional flow\n     * @param serialized_transaction transaction to be signed\n     * @param caip2_id chain identifier\n     * @param key_version The version of the key used for signing.\n     * @param path The derivation path for the user account.\n     * @param algo The algorithm used for signing.\n     * @param dest The response destination.\n     * @param params Additional parameters.\n     * @param output_deserialization_schema schema for transaction output deserialization\n     * @param respond_serialization_format expected serialization format in read_respond payload\n     * @param respond_serialization_schema serialization schema for read_respond payload"
+        "* @dev Function to initiate bidirectional flow\n     * @param serialized_transaction transaction to be signed\n     * @param caip2_id chain identifier\n     * @param key_version The version of the key used for signing.\n     * @param path The derivation path for the user account.\n     * @param algo The algorithm used for signing.\n     * @param dest The response destination.\n     * @param params Additional parameters.\n     * @param output_deserialization_schema schema for transaction output deserialization\n     * @param respond_serialization_schema serialization schema for read_respond payload"
       ],
       "discriminator": [
         21,
@@ -488,14 +488,6 @@
         {
           "name": "output_deserialization_schema",
           "type": "bytes"
-        },
-        {
-          "name": "respond_serialization_format",
-          "type": {
-            "defined": {
-              "name": "SerializationFormat"
-            }
-          }
         },
         {
           "name": "respond_serialization_schema",
@@ -923,29 +915,9 @@
       }
     },
     {
-      "name": "SerializationFormat",
-      "docs": [
-        "* @title Sig.Network signing program\n * @dev Program for accepting signature requests and providing responses from the Sig.Network."
-      ],
-      "repr": {
-        "kind": "rust"
-      },
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "Borsh"
-          },
-          {
-            "name": "AbiJson"
-          }
-        ]
-      }
-    },
-    {
       "name": "SignBidirectionalEvent",
       "docs": [
-        "* @dev Emitted when a sign_bidirectional request is made.\n * @param sender The address of the sender.\n * @param serialized_transaction The serialized transaction to be signed.\n * @param caip2_id The SLIP-44 chain ID.\n * @param key_version The version of the key used for signing.\n * @param deposit The deposit amount.\n * @param path The derivation path for the user account.\n * @param algo The algorithm used for signing.\n * @param dest The response destination.\n * @param params Additional parameters.\n * @param output_deserialization_schema Schema for transaction output deserialization.\n * @param respond_serialization_format Expected serialization format in read_respond payload.\n * @param respond_serialization_schema Serialization schema for read_respond payload."
+        "* @dev Emitted when a sign_bidirectional request is made.\n * @param sender The address of the sender.\n * @param serialized_transaction The serialized transaction to be signed.\n * @param caip2_id The SLIP-44 chain ID.\n * @param key_version The version of the key used for signing.\n * @param deposit The deposit amount.\n * @param path The derivation path for the user account.\n * @param algo The algorithm used for signing.\n * @param dest The response destination.\n * @param params Additional parameters.\n * @param output_deserialization_schema Schema for transaction output deserialization.\n * @param respond_serialization_schema Serialization schema for read_respond payload."
       ],
       "type": {
         "kind": "struct",
@@ -989,10 +961,6 @@
           {
             "name": "output_deserialization_schema",
             "type": "bytes"
-          },
-          {
-            "name": "respond_serialization_format",
-            "type": "u8"
           },
           {
             "name": "respond_serialization_schema",
