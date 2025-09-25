@@ -5,17 +5,6 @@ use anchor_lang::prelude::*;
 
 declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 
-/**
- * @title Sig.Network signing program
- * @dev Program for accepting signature requests and providing responses from the Sig.Network.
- */
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq)]
-#[repr(u8)]
-pub enum SerializationFormat {
-    Borsh = 0,
-    AbiJson = 1,
-}
-
 #[program]
 pub mod chain_signatures_project {
     use super::*;
@@ -156,7 +145,6 @@ pub mod chain_signatures_project {
      * @param dest The response destination.
      * @param params Additional parameters.
      * @param output_deserialization_schema schema for transaction output deserialization
-     * @param respond_serialization_format expected serialization format in read_respond payload
      * @param respond_serialization_schema serialization schema for read_respond payload
      */
     pub fn sign_bidirectional(
@@ -169,7 +157,6 @@ pub mod chain_signatures_project {
         dest: String,
         params: String,
         output_deserialization_schema: Vec<u8>,
-        respond_serialization_format: SerializationFormat,
         respond_serialization_schema: Vec<u8>,
     ) -> Result<()> {
         let program_state = &ctx.accounts.program_state;
@@ -212,7 +199,6 @@ pub mod chain_signatures_project {
             dest,
             params,
             output_deserialization_schema,
-            respond_serialization_format: respond_serialization_format as u8,
             respond_serialization_schema
         });
 
@@ -458,7 +444,6 @@ pub struct SignatureRequestedEvent {
  * @param dest The response destination.
  * @param params Additional parameters.
  * @param output_deserialization_schema Schema for transaction output deserialization.
- * @param respond_serialization_format Expected serialization format in read_respond payload.
  * @param respond_serialization_schema Serialization schema for read_respond payload.
  */
 #[event]
@@ -473,7 +458,6 @@ pub struct SignBidirectionalEvent {
     pub dest: String,
     pub params: String,
     pub output_deserialization_schema: Vec<u8>,
-    pub respond_serialization_format: u8,
     pub respond_serialization_schema: Vec<u8>,
 }
 
