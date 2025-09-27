@@ -11,7 +11,7 @@ import type * as anchor from '@coral-xyz/anchor';
 import type { Program } from '@coral-xyz/anchor';
 import type { ProxyTestCpi } from '../target/types/proxy_test_cpi';
 import type { ChainSignatures } from '../target/types/chain_signatures';
-import type { contracts, chainAdapters } from 'signet.js';
+import type { contracts } from 'signet.js';
 
 export interface SignArgs {
   payload: number[];
@@ -106,8 +106,6 @@ export async function callDirectSign(
 export async function waitForSignatureResponse(
   signArgs: SignArgs,
   signetSolContract: contracts.solana.ChainSignatureContract,
-  evmChainAdapter: chainAdapters.evm.EVM,
-  requesterPublicKey: anchor.web3.PublicKey,
   afterSignature?: string
 ): Promise<{
   isValid: boolean;
@@ -116,7 +114,6 @@ export async function waitForSignatureResponse(
     s: string;
     v: number;
   };
-  derivedAddress: string;
 }> {
   const requestId = signetSolContract.getRequestId(
     {
@@ -129,11 +126,6 @@ export async function waitForSignatureResponse(
       dest: signArgs.dest,
       params: signArgs.params,
     }
-  );
-
-  const derivedAddress = await evmChainAdapter.deriveAddressAndPublicKey(
-    requesterPublicKey.toString(),
-    signArgs.path
   );
 
   const result = await signetSolContract.pollForRequestId({
@@ -158,7 +150,6 @@ export async function waitForSignatureResponse(
   return {
     isValid: true,
     signature: result,
-    derivedAddress: derivedAddress.address,
   };
 }
 

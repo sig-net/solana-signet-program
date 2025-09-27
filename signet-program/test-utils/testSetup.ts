@@ -2,12 +2,10 @@ import type { Program } from '@coral-xyz/anchor';
 import type { ChainSignatures } from '../target/types/chain_signatures';
 import { BN } from '@coral-xyz/anchor';
 import * as anchor from '@coral-xyz/anchor';
-import { chainAdapters, contracts } from 'signet.js';
+import { contracts } from 'signet.js';
 import { getEnv, bigintPrivateKeyToNajPublicKey } from './utils';
 import { detectNetwork, shouldUseMockSigner } from './networkConfig';
 import { MockCPISignerServer } from './MockCPISignerServer';
-import { createPublicClient, http } from 'viem';
-import { mainnet } from 'viem/chains';
 
 // Must be a function to get the correct context
 export function testSetup() {
@@ -30,17 +28,6 @@ export function testSetup() {
     config: {
       rootPublicKey,
     },
-  });
-
-  const publicClient = createPublicClient({
-    chain: mainnet,
-    transport: http(),
-  });
-
-  const evmChainAdapter = new chainAdapters.evm.EVM({
-    // @ts-expect-error - publicClient type incompatible but works for testing
-    publicClient,
-    contract: signetSolContract,
   });
 
   const mockCPISignerServer = new MockCPISignerServer({
@@ -96,6 +83,5 @@ export function testSetup() {
     connection,
     program,
     signetSolContract,
-    evmChainAdapter,
   };
 }

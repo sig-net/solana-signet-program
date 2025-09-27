@@ -10,12 +10,7 @@ import {
 } from '../test-utils/signingUtils';
 
 describe('Sign/Respond CPI tests', () => {
-  const {
-    provider,
-    program: signetProgram,
-    signetSolContract,
-    evmChainAdapter,
-  } = testSetup();
+  const { provider, program: signetProgram, signetSolContract } = testSetup();
 
   const proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
 
@@ -25,7 +20,7 @@ describe('Sign/Respond CPI tests', () => {
   );
 
   it('Can call signet program via CPI and receive signature response', async () => {
-    const signArgs = createSignArgs('CPI_TEST');
+    const signArgs = createSignArgs('CPI_TEST', 'single');
 
     const txSignature = await callProxySign(
       proxyProgram,
@@ -37,8 +32,6 @@ describe('Sign/Respond CPI tests', () => {
     const response = await waitForSignatureResponse(
       signArgs,
       signetSolContract,
-      evmChainAdapter,
-      provider.wallet.publicKey,
       txSignature
     );
 
@@ -57,13 +50,7 @@ describe('Sign/Respond CPI tests', () => {
           provider.wallet.publicKey,
           eventAuthorityPda
         );
-        return waitForSignatureResponse(
-          signArgs1,
-          signetSolContract,
-          evmChainAdapter,
-          provider.wallet.publicKey,
-          tx1
-        );
+        return waitForSignatureResponse(signArgs1, signetSolContract, tx1);
       })(),
       (async () => {
         const tx2 = await callProxySign(
@@ -72,13 +59,7 @@ describe('Sign/Respond CPI tests', () => {
           provider.wallet.publicKey,
           eventAuthorityPda
         );
-        return waitForSignatureResponse(
-          signArgs2,
-          signetSolContract,
-          evmChainAdapter,
-          provider.wallet.publicKey,
-          tx2
-        );
+        return waitForSignatureResponse(signArgs2, signetSolContract, tx2);
       })(),
     ]);
 

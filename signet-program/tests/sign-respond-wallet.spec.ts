@@ -7,17 +7,15 @@ import {
 } from '../test-utils/signingUtils';
 
 describe('Sign/Respond wallet tests', () => {
-  const { provider, program, signetSolContract, evmChainAdapter } = testSetup();
+  const { program, signetSolContract } = testSetup();
 
   it('Can request a signature', async () => {
-    const signArgs = createSignArgs('WALLET_TEST');
+    const signArgs = createSignArgs('WALLET_TEST', 'wallet');
 
     const txSignature = await callDirectSign(program, signArgs);
     const response = await waitForSignatureResponse(
       signArgs,
       signetSolContract,
-      evmChainAdapter,
-      provider.wallet.publicKey,
       txSignature
     );
 
