@@ -17,58 +17,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-          cache-dependency-path: signet-program/yarn.lock
 
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
+      - run: npm install -g yarn
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: metadaoproject/setup-solana@v1.0
+        with:
+          solana-cli-version: ${{ env.SOLANA_VERSION }}
+
+      - uses: metadaoproject/setup-anchor@v1.2
+        with:
+          anchor-version: ${{ env.ANCHOR_VERSION }}
+
+      - run: yarn install --frozen-lockfile
         working-directory: ./signet-program
 
-      - name: Run TypeScript type checking
-        run: yarn typecheck
+      - run: anchor build
         working-directory: ./signet-program
 
-      - name: Run ESLint
-        run: yarn lint
-        working-directory: ./signet-program
-
-      - name: Check Prettier formatting
-        run: yarn format:check
-        working-directory: ./signet-program
-
-      - name: Run all checks
-        run: yarn check
+      - run: yarn check
         working-directory: ./signet-program
 
   test:
-    name: Run Tests
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-          cache-dependency-path: signet-program/yarn.lock
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+      - run: npm install -g yarn
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -78,43 +69,30 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Setup Solana
-        uses: metadaoproject/setup-solana@v1.0
+      - uses: metadaoproject/setup-solana@v1.0
         with:
           solana-cli-version: ${{ env.SOLANA_VERSION }}
 
-      - name: Setup Anchor
-        uses: metadaoproject/setup-anchor@v1.2
+      - uses: metadaoproject/setup-anchor@v1.2
         with:
           anchor-version: ${{ env.ANCHOR_VERSION }}
 
-      - name: Install Node dependencies
-        run: yarn install --frozen-lockfile
+      - run: yarn install --frozen-lockfile
         working-directory: ./signet-program
 
-      - name: Build Anchor program
-        run: anchor build
-        working-directory: ./signet-program
-
-      - name: Run Anchor tests
-        run: anchor test
+      - run: anchor test
         working-directory: ./signet-program
 
   build:
-    name: Build Program
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -124,32 +102,16 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Setup Solana
-        uses: metadaoproject/setup-solana@v1.0
+      - uses: metadaoproject/setup-solana@v1.0
         with:
           solana-cli-version: ${{ env.SOLANA_VERSION }}
 
-      - name: Setup Anchor
-        uses: metadaoproject/setup-anchor@v1.2
+      - uses: metadaoproject/setup-anchor@v1.2
         with:
           anchor-version: ${{ env.ANCHOR_VERSION }}
 
-      - name: Build Anchor program
-        run: anchor build
+      - run: anchor build
         working-directory: ./signet-program
 
-      - name: Verify program builds successfully
-        run: |
-          if [ -f "target/deploy/chain_signatures.so" ]; then
-            echo "✅ chain_signatures program built successfully"
-          else
-            echo "❌ chain_signatures program build failed"
-            exit 1
-          fi
-          if [ -f "target/deploy/proxy_test_cpi.so" ]; then
-            echo "✅ proxy_test_cpi program built successfully"
-          else
-            echo "❌ proxy_test_cpi program build failed"
-            exit 1
-          fi
+      - run: test -f target/deploy/chain_signatures.so && test -f target/deploy/proxy_test_cpi.so
         working-directory: ./signet-program
