@@ -7,11 +7,11 @@
  * - Waiting for signature responses from the subscriber
  * - Logging payload descriptions for easy debugging
  */
-import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { ProxyTestCpi } from "../target/types/proxy_test_cpi";
-import { ChainSignatures } from "../target/types/chain_signatures";
-import { contracts, chainAdapters } from "signet.js";
+import type * as anchor from '@coral-xyz/anchor';
+import type { Program } from '@coral-xyz/anchor';
+import type { ProxyTestCpi } from '../target/types/proxy_test_cpi';
+import type { ChainSignatures } from '../target/types/chain_signatures';
+import type { contracts, chainAdapters } from 'signet.js';
 
 export interface SignArgs {
   payload: number[];
@@ -35,7 +35,7 @@ const PAYLOAD_PREFIXES = {
  */
 export function createSignArgs(
   testType: keyof typeof PAYLOAD_PREFIXES,
-  pathSuffix: string = "",
+  pathSuffix: string = '',
   offset: number = 0
 ): SignArgs {
   const prefix = PAYLOAD_PREFIXES[testType];
@@ -50,9 +50,9 @@ export function createSignArgs(
     path: pathSuffix
       ? `test-${testType.toLowerCase()}-path-${pathSuffix}`
       : `test-${testType.toLowerCase()}-path`,
-    algo: "secp256k1",
-    dest: "ethereum",
-    params: "{}",
+    algo: 'secp256k1',
+    dest: 'ethereum',
+    params: '{}',
   };
 }
 
@@ -140,7 +140,7 @@ export async function waitForSignatureResponse(
     requestId,
     payload: signArgs.payload,
     path: signArgs.path,
-    afterSignature: afterSignature || "",
+    afterSignature: afterSignature || '',
     options: {
       retryCount: 30,
       delay: 1000,
@@ -166,7 +166,7 @@ export async function waitForSignatureResponse(
  * Get payload type description for logging
  */
 export function getPayloadDescription(payload: number[]): string {
-  if (payload.length === 0) return "empty";
+  if (payload.length === 0) return 'empty';
 
   const prefix = payload[0];
   const offset = payload[1] || 0;

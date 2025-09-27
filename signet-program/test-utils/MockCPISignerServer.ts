@@ -1,13 +1,15 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { ChainSignatures } from "../target/types/chain_signatures";
-import { contracts } from "signet.js";
-import { getEnv, deriveSigningKey, signMessage } from "./utils";
+import * as anchor from '@coral-xyz/anchor';
+
 import {
   ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR,
   eventNames,
-} from "./constants";
-import { SignatureRequestedEvent } from "./types";
+} from './constants';
+import { getEnv, deriveSigningKey, signMessage } from './utils';
+
+import type { SignatureRequestedEvent } from './types';
+import type { ChainSignatures } from '../target/types/chain_signatures';
+import type { Program } from '@coral-xyz/anchor';
+import type { contracts } from 'signet.js';
 
 const env = getEnv();
 
@@ -18,7 +20,7 @@ export async function parseCPIEvents(
   program: Program<ChainSignatures>
 ): Promise<SignatureRequestedEvent[]> {
   const tx = await connection.getTransaction(signature, {
-    commitment: "confirmed",
+    commitment: 'confirmed',
     maxSupportedTransactionVersion: 0,
   });
 
@@ -26,13 +28,13 @@ export async function parseCPIEvents(
     return [];
   }
 
-  const targetProgramStr = targetProgramId.toString();
+  const _targetProgramStr = targetProgramId.toString();
   const events: SignatureRequestedEvent[] = [];
 
   // Get account keys properly based on transaction type
   const getAccountKeys = (): anchor.web3.PublicKey[] => {
     const message = tx.transaction.message;
-    if ("accountKeys" in message) {
+    if ('accountKeys' in message) {
       // Legacy transaction
       return message.accountKeys;
     } else {
@@ -48,30 +50,28 @@ export async function parseCPIEvents(
       if (!instruction.data || instruction.programIdIndex >= accountKeys.length)
         continue;
 
-      const programKey = accountKeys[instruction.programIdIndex];
+      const _programKey = accountKeys[instruction.programIdIndex];
 
       try {
-          const rawData = anchor.utils.bytes.bs58.decode(instruction.data);
+        const rawData = anchor.utils.bytes.bs58.decode(instruction.data);
 
-          if (
-            !rawData
-              .subarray(0, 8)
-              .equals(ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR)
-          ) {
-            continue;
-          }
-
-          const eventData = anchor.utils.bytes.base64.encode(
-            rawData.subarray(8)
-          );
-          const event = program.coder.events.decode(eventData);
-
-          if (event?.name === eventNames.signatureRequested) {
-            events.push(event.data as SignatureRequestedEvent);
-          }
-        } catch (e) {
-          // Ignore non-event instructions
+        if (
+          !rawData
+            .subarray(0, 8)
+            .equals(ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR)
+        ) {
+          continue;
         }
+
+        const eventData = anchor.utils.bytes.base64.encode(rawData.subarray(8));
+        const event = program.coder.events.decode(eventData);
+
+        if (event?.name === eventNames.signatureRequested) {
+          events.push(event.data as SignatureRequestedEvent);
+        }
+      } catch {
+        // Ignore non-event instructions
+      }
     }
   }
 
@@ -97,14 +97,13 @@ export class MockCPISignerServer {
   }) {
     this.provider = provider;
     this.wallet = provider.wallet as anchor.Wallet;
-    this.program = anchor.workspace
-      .chainSignatures as Program<ChainSignatures>;
+    this.program = anchor.workspace.chainSignatures as Program<ChainSignatures>;
     this.solContract = signetSolContract;
     this.signetProgramId = signetProgramId;
   }
 
   async start(): Promise<void> {
-    await this.subscribeToEvents();
+    this.subscribeToEvents();
   }
 
   async stop(): Promise<void> {
@@ -116,26 +115,28 @@ export class MockCPISignerServer {
     }
   }
 
-  private async subscribeToEvents(): Promise<void> {
+  private subscribeToEvents(): void {
     this.logSubscriptionId = this.provider.connection.onLogs(
-      "all",
-      async (logs) => {
-        try {
-          const events = await parseCPIEvents(
-            this.provider.connection,
-            logs.signature,
-            this.signetProgramId,
-            this.program
-          );
+      'all',
+      (logs) => {
+        void (async () => {
+          try {
+            const events = await parseCPIEvents(
+              this.provider.connection,
+              logs.signature,
+              this.signetProgramId,
+              this.program
+            );
 
-          await Promise.all(
-            events.map((event) => this.handleSignatureRequest(event))
-          );
-        } catch (error) {
-          console.error("Error processing CPI event:", error);
-        }
+            await Promise.all(
+              events.map((event) => this.handleSignatureRequest(event))
+            );
+          } catch (error) {
+            console.error('Error processing CPI event:', error);
+          }
+        })();
       },
-      "confirmed"
+      'confirmed'
     );
   }
 
@@ -156,7 +157,7 @@ export class MockCPISignerServer {
         }
       );
 
-      const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), "hex"));
+      const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
 
       const derivedPrivateKey = await deriveSigningKey(
         eventData.path,
@@ -171,7 +172,7 @@ export class MockCPISignerServer {
         .accounts({ responder: this.wallet.publicKey })
         .rpc();
     } catch (error) {
-      console.error("Error sending signature response:", error);
+      console.error('Error sending signature response:', error);
     }
   }
 }

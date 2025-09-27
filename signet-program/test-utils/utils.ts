@@ -1,20 +1,20 @@
-import * as path from "path";
-import * as dotenv from "dotenv";
-import { z } from "zod";
-import { ethers } from "ethers";
-import bs58 from "bs58";
+import * as path from 'path';
+import * as dotenv from 'dotenv';
+import { z } from 'zod';
+import { ethers } from 'ethers';
+import bs58 from 'bs58';
 import {
   EPSILON_DERIVATION_PREFIX,
   SOLANA_CHAIN_ID,
   SECP256K1_CURVE_ORDER,
-} from "./constants";
-import * as anchor from "@coral-xyz/anchor";
+} from './constants';
+import type * as anchor from '@coral-xyz/anchor';
 
 // Load environment variables from the root .env file
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const envSchema = z.object({
-  PRIVATE_KEY_TESTNET: z.string().min(1, "PRIVATE_KEY_TESTNET is required"),
+  PRIVATE_KEY_TESTNET: z.string().min(1, 'PRIVATE_KEY_TESTNET is required'),
 });
 
 export const getEnv = () => {
@@ -52,8 +52,8 @@ export const bigintPrivateKeyToNajPublicKey = (
   const xCoord = publicKeyHex.slice(0, 64); // First 32 bytes (64 hex chars)
   const yCoord = publicKeyHex.slice(64, 128); // Second 32 bytes (64 hex chars)
 
-  const xBytes = Buffer.from(xCoord, "hex");
-  const yBytes = Buffer.from(yCoord, "hex");
+  const xBytes = Buffer.from(xCoord, 'hex');
+  const yBytes = Buffer.from(yCoord, 'hex');
   const publicKeyBytes = Buffer.concat([xBytes, yBytes]);
 
   const publicKeyBase58 = bs58.encode(publicKeyBytes);
@@ -82,7 +82,7 @@ export async function deriveSigningKey(
   const derivedPrivateKey =
     (basePrivateKeyBigInt + epsilon) % SECP256K1_CURVE_ORDER;
 
-  return "0x" + derivedPrivateKey.toString(16).padStart(64, "0");
+  return `0x${derivedPrivateKey.toString(16).padStart(64, '0')}`;
 }
 
 export async function signMessage(
@@ -90,9 +90,9 @@ export async function signMessage(
   privateKeyHex: string
 ): Promise<SignatureResult> {
   const msgHashHex =
-    typeof msgHash === "string"
+    typeof msgHash === 'string'
       ? msgHash
-      : "0x" + Buffer.from(msgHash).toString("hex");
+      : `0x${Buffer.from(msgHash).toString('hex')}`;
 
   const signingKey = new ethers.SigningKey(privateKeyHex);
   const signature = signingKey.sign(msgHashHex);
@@ -103,15 +103,15 @@ export async function signMessage(
   );
   const publicKeyPoint = ethers.getBytes(recoveredPublicKey);
 
-  const x = publicKeyPoint.slice(1, 33);
+  const _x = publicKeyPoint.slice(1, 33);
   const y = publicKeyPoint.slice(33, 65);
 
   return {
     bigR: {
-      x: Array.from(Buffer.from(signature.r.slice(2), "hex")),
+      x: Array.from(Buffer.from(signature.r.slice(2), 'hex')),
       y: Array.from(y),
     },
-    s: Array.from(Buffer.from(signature.s.slice(2), "hex")),
+    s: Array.from(Buffer.from(signature.s.slice(2), 'hex')),
     recoveryId: signature.v - 27,
   };
 }
@@ -128,6 +128,6 @@ export const confirmTransaction = async (
       blockhash: latestBlockhash.blockhash,
       lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
     },
-    "confirmed"
+    'confirmed'
   );
 };

@@ -1,4 +1,4 @@
-import * as anchor from "@coral-xyz/anchor";
+import type * as anchor from '@coral-xyz/anchor';
 
 export interface SignatureRequestedEvent {
   sender: anchor.web3.PublicKey;

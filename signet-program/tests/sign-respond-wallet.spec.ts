@@ -1,21 +1,16 @@
-import { assert } from "chai";
-import { testSetup } from "../test-utils/testSetup";
+import { assert } from 'chai';
+import { testSetup } from '../test-utils/testSetup';
 import {
   createSignArgs,
   callDirectSign,
   waitForSignatureResponse,
-} from "../test-utils/signingUtils";
+} from '../test-utils/signingUtils';
 
-describe("Sign/Respond wallet tests", () => {
-  const {
-    provider,
-    program,
-    signetSolContract,
-    evmChainAdapter,
-  } = testSetup();
+describe('Sign/Respond wallet tests', () => {
+  const { provider, program, signetSolContract, evmChainAdapter } = testSetup();
 
-  it("Can request a signature", async () => {
-    const signArgs = createSignArgs("WALLET_TEST");
+  it('Can request a signature', async () => {
+    const signArgs = createSignArgs('WALLET_TEST');
 
     const txSignature = await callDirectSign(program, signArgs);
     const response = await waitForSignatureResponse(
@@ -26,6 +21,6 @@ describe("Sign/Respond wallet tests", () => {
       txSignature
     );
 
-    assert.ok(response.isValid, "Signature should be valid");
+    assert.ok(response.isValid, 'Signature should be valid');
   });
 });

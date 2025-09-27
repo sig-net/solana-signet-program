@@ -1,13 +1,13 @@
-import { Program } from "@coral-xyz/anchor";
-import { ChainSignatures } from "../target/types/chain_signatures";
-import { BN } from "@coral-xyz/anchor";
-import * as anchor from "@coral-xyz/anchor";
-import { chainAdapters, contracts } from "signet.js";
-import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
-import { detectNetwork, shouldUseMockSigner } from "./networkConfig";
-import { MockCPISignerServer } from "./MockCPISignerServer";
-import { createPublicClient, http } from "viem";
-import { mainnet } from "viem/chains";
+import type { Program } from '@coral-xyz/anchor';
+import type { ChainSignatures } from '../target/types/chain_signatures';
+import { BN } from '@coral-xyz/anchor';
+import * as anchor from '@coral-xyz/anchor';
+import { chainAdapters, contracts } from 'signet.js';
+import { getEnv, bigintPrivateKeyToNajPublicKey } from './utils';
+import { detectNetwork, shouldUseMockSigner } from './networkConfig';
+import { MockCPISignerServer } from './MockCPISignerServer';
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
 
 // Must be a function to get the correct context
 export function testSetup() {
@@ -50,7 +50,7 @@ export function testSetup() {
   });
 
   const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("program-state")],
+    [Buffer.from('program-state')],
     program.programId
   );
 
@@ -67,9 +67,9 @@ export function testSetup() {
       await program.account.programState.fetch(programStatePda);
 
       return;
-    } catch (error) {
+    } catch {
       const tx = await program.methods
-        .initialize(new BN("100000"), "solana:localnet")
+        .initialize(new BN('100000'), 'solana:localnet')
         .rpc();
 
       const latestBlockhash = await connection.getLatestBlockhash();
@@ -80,7 +80,7 @@ export function testSetup() {
           blockhash: latestBlockhash.blockhash,
           lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
         },
-        "confirmed"
+        'confirmed'
       );
     }
   });
