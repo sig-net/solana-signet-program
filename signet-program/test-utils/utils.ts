@@ -10,8 +10,7 @@ import {
 } from './constants';
 import type * as anchor from '@coral-xyz/anchor';
 
-// Load environment variables from the root .env file
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const envSchema = z.object({
   PRIVATE_KEY_TESTNET: z.string().min(1, 'PRIVATE_KEY_TESTNET is required'),
