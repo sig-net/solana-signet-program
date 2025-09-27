@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'felipe/**']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  SOLANA_VERSION: 1.18.17
+  ANCHOR_VERSION: 0.31.0
+  NODE_VERSION: 20
+
+jobs:
+  lint-format-typecheck:
+    name: Lint, Format & Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: signet-program/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: ./signet-program
+
+      - name: Run TypeScript type checking
+        run: yarn typecheck
+        working-directory: ./signet-program
+
+      - name: Run ESLint
+        run: yarn lint
+        working-directory: ./signet-program
+
+      - name: Check Prettier formatting
+        run: yarn format:check
+        working-directory: ./signet-program
+
+      - name: Run all checks
+        run: yarn check
+        working-directory: ./signet-program
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: signet-program/yarn.lock
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana --version
+
+      - name: Install Anchor CLI
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${{ env.ANCHOR_VERSION }} anchor-cli --locked
+          anchor --version
+
+      - name: Install Node dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: ./signet-program
+
+      - name: Build Anchor program
+        run: anchor build
+        working-directory: ./signet-program
+
+      - name: Run Anchor tests
+        run: anchor test
+        working-directory: ./signet-program
+
+  build:
+    name: Build Program
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana --version
+
+      - name: Install Anchor CLI
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${{ env.ANCHOR_VERSION }} anchor-cli --locked
+          anchor --version
+
+      - name: Build Anchor program
+        run: anchor build
+        working-directory: ./signet-program
+
+      - name: Verify program builds successfully
+        run: |
+          if [ -f "target/deploy/chain_signatures.so" ]; then
+            echo "✅ chain_signatures program built successfully"
+          else
+            echo "❌ chain_signatures program build failed"
+            exit 1
+          fi
+          if [ -f "target/deploy/proxy_test_cpi.so" ]; then
+            echo "✅ proxy_test_cpi program built successfully"
+          else
+            echo "❌ proxy_test_cpi program build failed"
+            exit 1
+          fi
+        working-directory: ./signet-program
