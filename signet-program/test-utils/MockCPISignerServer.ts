@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
+import { ChainSignatures } from "../target/types/chain_signatures";
 import { contracts } from "signet.js";
 import { getEnv, deriveSigningKey, signMessage } from "./utils";
 import {
@@ -15,7 +15,7 @@ export async function parseCPIEvents(
   connection: anchor.web3.Connection,
   signature: string,
   targetProgramId: anchor.web3.PublicKey,
-  program: Program<ChainSignaturesProject>
+  program: Program<ChainSignatures>
 ): Promise<SignatureRequestedEvent[]> {
   const tx = await connection.getTransaction(signature, {
     commitment: "confirmed",
@@ -50,8 +50,7 @@ export async function parseCPIEvents(
 
       const programKey = accountKeys[instruction.programIdIndex];
 
-      if (programKey.toString() === targetProgramStr) {
-        try {
+      try {
           const rawData = anchor.utils.bytes.bs58.decode(instruction.data);
 
           if (
@@ -70,10 +69,9 @@ export async function parseCPIEvents(
           if (event?.name === eventNames.signatureRequested) {
             events.push(event.data as SignatureRequestedEvent);
           }
-        } catch {
+        } catch (e) {
           // Ignore non-event instructions
         }
-      }
     }
   }
 
@@ -81,7 +79,7 @@ export async function parseCPIEvents(
 }
 
 export class MockCPISignerServer {
-  private readonly program: Program<ChainSignaturesProject>;
+  private readonly program: Program<ChainSignatures>;
   private readonly solContract: contracts.solana.ChainSignatureContract;
   private readonly wallet: anchor.Wallet;
   private readonly provider: anchor.AnchorProvider;
@@ -100,7 +98,7 @@ export class MockCPISignerServer {
     this.provider = provider;
     this.wallet = provider.wallet as anchor.Wallet;
     this.program = anchor.workspace
-      .chainSignaturesProject as Program<ChainSignaturesProject>;
+      .chainSignatures as Program<ChainSignatures>;
     this.solContract = signetSolContract;
     this.signetProgramId = signetProgramId;
   }
@@ -120,7 +118,7 @@ export class MockCPISignerServer {
 
   private async subscribeToEvents(): Promise<void> {
     this.logSubscriptionId = this.provider.connection.onLogs(
-      this.signetProgramId,
+      "all",
       async (logs) => {
         try {
           const events = await parseCPIEvents(

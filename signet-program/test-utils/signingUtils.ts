@@ -10,7 +10,8 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ProxyTestCpi } from "../target/types/proxy_test_cpi";
-import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
+import { ChainSignatures } from "../target/types/chain_signatures";
+import { contracts, chainAdapters } from "signet.js";
 
 export interface SignArgs {
   payload: number[];
@@ -22,7 +23,7 @@ export interface SignArgs {
 }
 
 // Unique payload prefixes for easy identification in logs/subscriber
-export const PAYLOAD_PREFIXES = {
+const PAYLOAD_PREFIXES = {
   CPI_TEST: 0x10, // 16
   WALLET_TEST: 0x20, // 32
   CONFIG_TEST: 0x30, // 48
@@ -84,7 +85,7 @@ export async function callProxySign(
  * Call sign function directly on the main program
  */
 export async function callDirectSign(
-  program: Program<ChainSignaturesProject>,
+  program: Program<ChainSignatures>,
   signArgs: SignArgs
 ): Promise<string> {
   return program.methods
@@ -100,15 +101,23 @@ export async function callDirectSign(
 }
 
 /**
- * Wait for signature response from the subscriber
+ * Wait for signature response using signet.js
  */
 export async function waitForSignatureResponse(
   signArgs: SignArgs,
-  signetSolContract: any,
-  evmChainAdapter: any,
-  signatureRespondedSubscriber: any,
-  requesterPublicKey: anchor.web3.PublicKey
-) {
+  signetSolContract: contracts.solana.ChainSignatureContract,
+  evmChainAdapter: chainAdapters.evm.EVM,
+  requesterPublicKey: anchor.web3.PublicKey,
+  afterSignature?: string
+): Promise<{
+  isValid: boolean;
+  signature: {
+    r: string;
+    s: string;
+    v: number;
+  };
+  derivedAddress: string;
+}> {
   const requestId = signetSolContract.getRequestId(
     {
       payload: signArgs.payload,
@@ -127,11 +136,30 @@ export async function waitForSignatureResponse(
     signArgs.path
   );
 
-  return signatureRespondedSubscriber.waitForSignatureResponse({
+  const result = await signetSolContract.pollForRequestId({
     requestId,
-    expectedPayload: Buffer.from(signArgs.payload),
-    expectedDerivedAddress: derivedAddress.address,
+    payload: signArgs.payload,
+    path: signArgs.path,
+    afterSignature: afterSignature || "",
+    options: {
+      retryCount: 30,
+      delay: 1000,
+    },
   });
+
+  if (!result) {
+    throw new Error(`No signature response found for request ${requestId}`);
+  }
+
+  if ('error' in result) {
+    throw new Error(`Signature error: ${result.error}`);
+  }
+
+  return {
+    isValid: true,
+    signature: result,
+    derivedAddress: derivedAddress.address,
+  };
 }
 
 /**

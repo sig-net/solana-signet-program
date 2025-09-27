@@ -7,7 +7,6 @@ import {
   createSignArgs,
   callProxySign,
   waitForSignatureResponse,
-  getPayloadDescription,
 } from "../test-utils/signingUtils";
 
 describe("Sign/Respond CPI tests", () => {
@@ -16,7 +15,6 @@ describe("Sign/Respond CPI tests", () => {
     program: signetProgram,
     signetSolContract,
     evmChainAdapter,
-    signatureRespondedSubscriber,
   } = testSetup();
 
   const proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
@@ -29,18 +27,19 @@ describe("Sign/Respond CPI tests", () => {
   it("Can call signet program via CPI and receive signature response", async () => {
     const signArgs = createSignArgs("CPI_TEST");
 
-    await callProxySign(
+    const txSignature = await callProxySign(
       proxyProgram,
       signArgs,
       provider.wallet.publicKey,
       eventAuthorityPda
     );
+
     const response = await waitForSignatureResponse(
       signArgs,
       signetSolContract,
       evmChainAdapter,
-      signatureRespondedSubscriber,
-      provider.wallet.publicKey
+      provider.wallet.publicKey,
+      txSignature
     );
 
     assert.ok(response.isValid, "Signature should be valid");
@@ -52,7 +51,7 @@ describe("Sign/Respond CPI tests", () => {
 
     const [response1, response2] = await Promise.all([
       (async () => {
-        await callProxySign(
+        const tx1 = await callProxySign(
           proxyProgram,
           signArgs1,
           provider.wallet.publicKey,
@@ -62,12 +61,12 @@ describe("Sign/Respond CPI tests", () => {
           signArgs1,
           signetSolContract,
           evmChainAdapter,
-          signatureRespondedSubscriber,
-          provider.wallet.publicKey
+          provider.wallet.publicKey,
+          tx1
         );
       })(),
       (async () => {
-        await callProxySign(
+        const tx2 = await callProxySign(
           proxyProgram,
           signArgs2,
           provider.wallet.publicKey,
@@ -77,8 +76,8 @@ describe("Sign/Respond CPI tests", () => {
           signArgs2,
           signetSolContract,
           evmChainAdapter,
-          signatureRespondedSubscriber,
-          provider.wallet.publicKey
+          provider.wallet.publicKey,
+          tx2
         );
       })(),
     ]);
