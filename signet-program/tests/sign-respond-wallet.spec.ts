@@ -4,7 +4,6 @@ import {
   createSignArgs,
   callDirectSign,
   waitForSignatureResponse,
-  getPayloadDescription,
 } from "../test-utils/signingUtils";
 
 describe("Sign/Respond wallet tests", () => {
@@ -13,19 +12,18 @@ describe("Sign/Respond wallet tests", () => {
     program,
     signetSolContract,
     evmChainAdapter,
-    signatureRespondedSubscriber,
   } = testSetup();
 
   it("Can request a signature", async () => {
     const signArgs = createSignArgs("WALLET_TEST");
 
-    await callDirectSign(program, signArgs);
+    const txSignature = await callDirectSign(program, signArgs);
     const response = await waitForSignatureResponse(
       signArgs,
       signetSolContract,
       evmChainAdapter,
-      signatureRespondedSubscriber,
-      provider.wallet.publicKey
+      provider.wallet.publicKey,
+      txSignature
     );
 
     assert.ok(response.isValid, "Signature should be valid");

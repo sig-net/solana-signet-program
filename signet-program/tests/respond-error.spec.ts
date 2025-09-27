@@ -1,14 +1,17 @@
 import { assert } from "chai";
-import * as anchor from "@coral-xyz/anchor";
 import { testSetup } from "../test-utils/testSetup";
-import { createSignArgs } from "../test-utils/signingUtils";
+import { PublicKey } from "@solana/web3.js";
+
+interface SignatureErrorEvent {
+  requestId: number[];
+  responder: PublicKey;
+  error: string;
+}
 
 describe("Respond Error tests", () => {
   const { provider, program } = testSetup();
 
   it("Can respond with single error", async () => {
-    const signArgs = createSignArgs("CONFIG_TEST");
-
     const requestId = Array.from({ length: 32 }, (_, i) => i % 256);
 
     const errorResponse = {
@@ -17,11 +20,11 @@ describe("Respond Error tests", () => {
     };
 
     let errorEventReceived = false;
-    let capturedEvent: any = null;
+    let capturedEvent: SignatureErrorEvent | null = null;
 
     const listener = program.addEventListener(
       "signatureErrorEvent",
-      (event) => {
+      (event: SignatureErrorEvent) => {
         errorEventReceived = true;
         capturedEvent = event;
       }
@@ -77,11 +80,11 @@ describe("Respond Error tests", () => {
       },
     ];
 
-    const capturedEvents: any[] = [];
+    const capturedEvents: SignatureErrorEvent[] = [];
 
     const listener = program.addEventListener(
       "signatureErrorEvent",
-      (event) => {
+      (event: SignatureErrorEvent) => {
         capturedEvents.push(event);
       }
     );
@@ -148,11 +151,11 @@ describe("Respond Error tests", () => {
     };
 
     let errorEventReceived = false;
-    let capturedEvent: any = null;
+    let capturedEvent: SignatureErrorEvent | null = null;
 
     const listener = program.addEventListener(
       "signatureErrorEvent",
-      (event) => {
+      (event: SignatureErrorEvent) => {
         errorEventReceived = true;
         capturedEvent = event;
       }
@@ -192,11 +195,11 @@ describe("Respond Error tests", () => {
     };
 
     let errorEventReceived = false;
-    let capturedEvent: any = null;
+    let capturedEvent: SignatureErrorEvent | null = null;
 
     const listener = program.addEventListener(
       "signatureErrorEvent",
-      (event) => {
+      (event: SignatureErrorEvent) => {
         errorEventReceived = true;
         capturedEvent = event;
       }

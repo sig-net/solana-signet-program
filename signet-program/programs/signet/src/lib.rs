@@ -6,7 +6,7 @@ use anchor_lang::prelude::*;
 declare_id!("4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU");
 
 #[program]
-pub mod chain_signatures_project {
+pub mod chain_signatures {
     use super::*;
     /**
      * @dev Function to initialize the program state.
@@ -221,7 +221,7 @@ pub mod chain_signatures_project {
         );
 
         for i in 0..request_ids.len() {
-            emit!(SignatureRespondedEvent {
+            emit_cpi!(SignatureRespondedEvent {
                 request_id: request_ids[i],
                 responder: *ctx.accounts.responder.key,
                 signature: signatures[i].clone(),
@@ -384,6 +384,7 @@ pub struct SignBidirectional<'info> {
     pub instructions: Option<AccountInfo<'info>>,
 }
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct Respond<'info> {
     pub responder: Signer<'info>,

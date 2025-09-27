@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use chain_signatures::cpi::accounts::Sign as SignetSign;
-use chain_signatures::program::ChainSignaturesProject;
+use chain_signatures::program::ChainSignatures;
 use chain_signatures::ProgramState as SignetProgramState;
 
 declare_id!("76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f");
@@ -43,7 +43,7 @@ pub mod proxy_test_cpi {
 #[derive(Accounts)]
 pub struct CallSign<'info> {
     /// The signet program we're calling via CPI
-    pub signet_program: Program<'info, ChainSignaturesProject>,
+    pub signet_program: Program<'info, ChainSignatures>,
 
     /// The signet program's state account
     #[account(

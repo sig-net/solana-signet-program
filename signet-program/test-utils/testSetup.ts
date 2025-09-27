@@ -1,20 +1,20 @@
 import { Program } from "@coral-xyz/anchor";
-import { ChainSignaturesProject } from "../target/types/chain_signatures_project";
-import { SignatureRespondedSubscriber } from "./SignatureRespondedSubscriber";
+import { ChainSignatures } from "../target/types/chain_signatures";
 import { BN } from "@coral-xyz/anchor";
 import * as anchor from "@coral-xyz/anchor";
 import { chainAdapters, contracts } from "signet.js";
 import { getEnv, bigintPrivateKeyToNajPublicKey } from "./utils";
 import { detectNetwork, shouldUseMockSigner } from "./networkConfig";
 import { MockCPISignerServer } from "./MockCPISignerServer";
+import { createPublicClient, http } from "viem";
+import { mainnet } from "viem/chains";
 
 // Must be a function to get the correct context
 export function testSetup() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace
-    .chainSignaturesProject as Program<ChainSignaturesProject>;
+  const program = anchor.workspace.chainSignatures as Program<ChainSignatures>;
 
   const connection = new anchor.web3.Connection(
     provider.connection.rpcEndpoint
@@ -27,17 +27,21 @@ export function testSetup() {
   const signetSolContract = new contracts.solana.ChainSignatureContract({
     provider,
     programId: program.programId,
-    rootPublicKey,
+    config: {
+      rootPublicKey,
+    },
+  });
+
+  const publicClient = createPublicClient({
+    chain: mainnet,
+    transport: http(),
   });
 
   const evmChainAdapter = new chainAdapters.evm.EVM({
-    publicClient: {} as any,
+    // @ts-expect-error - publicClient type incompatible but works for testing
+    publicClient,
     contract: signetSolContract,
   });
-
-  const signatureRespondedSubscriber = new SignatureRespondedSubscriber(
-    program
-  );
 
   const mockCPISignerServer = new MockCPISignerServer({
     provider,
@@ -93,6 +97,5 @@ export function testSetup() {
     program,
     signetSolContract,
     evmChainAdapter,
-    signatureRespondedSubscriber,
   };
 }
