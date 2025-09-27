@@ -31,7 +31,7 @@ jobs:
         with:
           solana-cli-version: ${{ env.SOLANA_VERSION }}
 
-      - uses: metadaoproject/setup-anchor@v1.2
+      - uses: metadaoproject/setup-anchor@v2
         with:
           anchor-version: ${{ env.ANCHOR_VERSION }}
 
@@ -73,7 +73,7 @@ jobs:
         with:
           solana-cli-version: ${{ env.SOLANA_VERSION }}
 
-      - uses: metadaoproject/setup-anchor@v1.2
+      - uses: metadaoproject/setup-anchor@v2
         with:
           anchor-version: ${{ env.ANCHOR_VERSION }}
 
@@ -106,7 +106,7 @@ jobs:
         with:
           solana-cli-version: ${{ env.SOLANA_VERSION }}
 
-      - uses: metadaoproject/setup-anchor@v1.2
+      - uses: metadaoproject/setup-anchor@v2
         with:
           anchor-version: ${{ env.ANCHOR_VERSION }}
 
