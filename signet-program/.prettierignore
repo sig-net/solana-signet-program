@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+target/
+dist/
+build/
+.anchor/
+
+# Generated files
+*.d.ts
+target/idl/**
+target/types/**
+
+# Test coverage
+coverage/
+
+# Package manager files
+yarn.lock
+package-lock.json
+
+# Rust files (handled by rustfmt)
+*.rs
+
+# IDL files
+*.json
