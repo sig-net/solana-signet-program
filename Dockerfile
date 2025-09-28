@@ -9,4 +9,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Install Rust, Solana and Anchor
 RUN curl --proto '=https' --tlsv1.2 -sSfL https://solana-install.solana.workers.dev | bash
 
+# Setup Anchor
+RUN avm install 0.31.1
+RUN avm use 0.31.1
+
 WORKDIR /workspace
