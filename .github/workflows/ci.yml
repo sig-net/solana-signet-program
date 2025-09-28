@@ -35,13 +35,13 @@ jobs:
         working-directory: signet-program
         run: yarn run format:check
 
-      - name: Run type check
-        working-directory: signet-program
-        run: yarn run typecheck
-
       - name: Generate keypair
         run: solana-keygen new --no-bip39-passphrase --force
 
       - name: Run Anchor tests
         working-directory: signet-program
         run: anchor test
+
+      - name: Run type check
+        working-directory: signet-program
+        run: yarn run typecheck
