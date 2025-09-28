@@ -40,7 +40,9 @@ jobs:
 
       - name: Run Anchor tests
         working-directory: signet-program
-        run: anchor test
+        run: |
+          avm use 0.31.1
+          anchor test
 
       - name: Run type check
         working-directory: signet-program
