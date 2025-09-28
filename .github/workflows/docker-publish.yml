@@ -1,19 +1,15 @@
-name: Build Docker Image
+name: Publish Docker Image
 
 on:
   push:
     branches: [main]
     paths:
       - 'Dockerfile'
-      - '.github/workflows/docker-build.yml'
-  pull_request:
-    paths:
-      - 'Dockerfile'
-      - '.github/workflows/docker-build.yml'
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
   build:
+    name: Build and Publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,4 +36,4 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository }}/solana-ci:latest
-            ghcr.io/${{ github.repository }}/solana-ci:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/solana-ci:main
