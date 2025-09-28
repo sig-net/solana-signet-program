@@ -31,9 +31,11 @@ export function testSetup() {
   });
 
   const mockCPISignerServer = new MockCPISignerServer({
-    provider,
+    connection,
+    program,
+    wallet: provider.wallet as anchor.Wallet,
     signetSolContract,
-    signetProgramId: program.programId,
+    basePrivateKey: env.PRIVATE_KEY_TESTNET,
   });
 
   const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
