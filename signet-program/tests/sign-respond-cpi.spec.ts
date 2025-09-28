@@ -12,7 +12,7 @@ import {
 describe('Sign/Respond CPI tests', () => {
   const { provider, program: signetProgram, signetSolContract } = testSetup();
 
-  const proxyProgram = anchor.workspace.proxyTestCpi as any;
+  const proxyProgram = anchor.workspace.proxyTestCpi as Program<ProxyTestCpi>;
 
   const [eventAuthorityPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from('__event_authority')],
