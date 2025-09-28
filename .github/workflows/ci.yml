@@ -41,6 +41,7 @@ jobs:
       - name: Run Anchor tests
         working-directory: signet-program
         run: |
+          avm install 0.31.1
           avm use 0.31.1
           anchor test
 
