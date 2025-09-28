@@ -4,19 +4,16 @@ import {
   ANCHOR_EMIT_CPI_CALL_BACK_DISCRIMINATOR,
   eventNames,
 } from './constants';
-import { getEnv, deriveSigningKey, signMessage } from './utils';
+import { deriveSigningKey, signMessage } from './utils';
 
 import type { SignatureRequestedEvent } from './types';
 import type { ChainSignatures } from '../target/types/chain_signatures';
 import type { Program } from '@coral-xyz/anchor';
 import type { contracts } from 'signet.js';
 
-const env = getEnv();
-
 export async function parseCPIEvents(
   connection: anchor.web3.Connection,
   signature: string,
-  targetProgramId: anchor.web3.PublicKey,
   program: Program<ChainSignatures>
 ): Promise<SignatureRequestedEvent[]> {
   const tx = await connection.getTransaction(signature, {
@@ -28,7 +25,6 @@ export async function parseCPIEvents(
     return [];
   }
 
-  const _targetProgramStr = targetProgramId.toString();
   const events: SignatureRequestedEvent[] = [];
 
   // Get account keys properly based on transaction type
@@ -49,8 +45,6 @@ export async function parseCPIEvents(
     for (const instruction of innerIxSet.instructions) {
       if (!instruction.data || instruction.programIdIndex >= accountKeys.length)
         continue;
-
-      const _programKey = accountKeys[instruction.programIdIndex];
 
       try {
         const rawData = anchor.utils.bytes.bs58.decode(instruction.data);
@@ -82,24 +76,28 @@ export class MockCPISignerServer {
   private readonly program: Program<ChainSignatures>;
   private readonly solContract: contracts.solana.ChainSignatureContract;
   private readonly wallet: anchor.Wallet;
-  private readonly provider: anchor.AnchorProvider;
-  private readonly signetProgramId: anchor.web3.PublicKey;
+  private readonly connection: anchor.web3.Connection;
+  private readonly basePrivateKey: string;
   private logSubscriptionId: number | null = null;
 
   constructor({
-    provider,
+    connection,
+    program,
+    wallet,
     signetSolContract,
-    signetProgramId,
+    basePrivateKey,
   }: {
-    provider: anchor.AnchorProvider;
+    connection: anchor.web3.Connection;
+    program: Program<ChainSignatures>;
+    wallet: anchor.Wallet;
     signetSolContract: contracts.solana.ChainSignatureContract;
-    signetProgramId: anchor.web3.PublicKey;
+    basePrivateKey: string;
   }) {
-    this.provider = provider;
-    this.wallet = provider.wallet as anchor.Wallet;
-    this.program = anchor.workspace.chainSignatures as Program<ChainSignatures>;
+    this.connection = connection;
+    this.wallet = wallet;
+    this.program = program;
     this.solContract = signetSolContract;
-    this.signetProgramId = signetProgramId;
+    this.basePrivateKey = basePrivateKey;
   }
 
   async start(): Promise<void> {
@@ -108,23 +106,20 @@ export class MockCPISignerServer {
 
   async stop(): Promise<void> {
     if (this.logSubscriptionId !== null) {
-      await this.provider.connection.removeOnLogsListener(
-        this.logSubscriptionId
-      );
+      await this.connection.removeOnLogsListener(this.logSubscriptionId);
       this.logSubscriptionId = null;
     }
   }
 
   private subscribeToEvents(): void {
-    this.logSubscriptionId = this.provider.connection.onLogs(
+    this.logSubscriptionId = this.connection.onLogs(
       'all',
       (logs) => {
         void (async () => {
           try {
             const events = await parseCPIEvents(
-              this.provider.connection,
+              this.connection,
               logs.signature,
-              this.signetProgramId,
               this.program
             );
 
@@ -162,7 +157,7 @@ export class MockCPISignerServer {
       const derivedPrivateKey = await deriveSigningKey(
         eventData.path,
         eventData.sender.toString(),
-        env.PRIVATE_KEY_TESTNET
+        this.basePrivateKey
       );
 
       const signature = await signMessage(eventData.payload, derivedPrivateKey);
