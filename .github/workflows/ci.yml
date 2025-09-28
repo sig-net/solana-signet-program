@@ -2,13 +2,8 @@ name: CI Tests
 
 on:
   push:
-    paths:
-      - "signet-program/**"
-      - ".github/workflows/**"
+    branches: [main]
   pull_request:
-    paths:
-      - "signet-program/**"
-      - ".github/workflows/**"
 
 jobs:
   test:
