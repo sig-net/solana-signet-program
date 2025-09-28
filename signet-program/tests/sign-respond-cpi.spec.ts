@@ -63,7 +63,7 @@ describe('Sign/Respond CPI tests', () => {
       })(),
     ]);
 
-    assert.ok(!response1.isValid, 'First signature should be valid');
-    assert.ok(!response2.isValid, 'Second signature should be valid');
+    assert.ok(response1.isValid, 'First signature should be valid');
+    assert.ok(response2.isValid, 'Second signature should be valid');
   });
 });
