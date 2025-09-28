@@ -3151,10 +3151,10 @@ side-channel@^1.1.0:
     side-channel-map "^1.0.1"
     side-channel-weakmap "^1.0.2"
 
-signet.js@0.0.12-beta.12:
-  version "0.0.12-beta.12"
-  resolved "https://registry.yarnpkg.com/signet.js/-/signet.js-0.0.12-beta.12.tgz#bea041d9f3666d57e46438a29af8a0303c547c41"
-  integrity sha512-OMrlVUJ6aVug+ck+2PufqMnRsoF3uYGjTMX2qDD+oMlG3qDmENSjiLYAI9xgsa7YmhmPnzEAjzbaky23xadt4g==
+signet.js@0.0.12-beta.13:
+  version "0.0.12-beta.13"
+  resolved "https://registry.yarnpkg.com/signet.js/-/signet.js-0.0.12-beta.13.tgz#f2816e5059aa540e58e2e40cb4cc022aa460ecaf"
+  integrity sha512-nAwmzr4VkH5ysgU5NgXUFFSIlMuVayFN4PX+vkwtand3ECexWZWvFfImlxu7jmS5iSVOrNvniYhMpTzO05T5sQ==
   dependencies:
     "@coral-xyz/anchor" "^0.31.0"
     "@cosmjs/amino" "^0.32.4"
