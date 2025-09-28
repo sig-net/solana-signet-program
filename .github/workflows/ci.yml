@@ -1,7 +1,9 @@
 name: CI Tests
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Publish Docker Image"]
+    types: [completed]
     branches: [main]
   pull_request:
 
@@ -9,6 +11,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'pull_request' }}
     container:
       image: ghcr.io/${{ github.repository }}/solana-ci:latest
       credentials:
