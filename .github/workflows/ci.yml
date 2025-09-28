@@ -5,112 +5,45 @@ on:
     paths:
       - "signet-program/**"
       - ".github/workflows/**"
-      - "Dockerfile"
-      - ".dockerignore"
   pull_request:
     paths:
       - "signet-program/**"
       - ".github/workflows/**"
-      - "Dockerfile"
-      - ".dockerignore"
 
 jobs:
-  build:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      image: ${{ steps.image.outputs.image }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set image tag
-        id: image
-        run: |
-          if [[ "${{ github.event_name }}" == "push" ]] || [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
-            echo "image=ghcr.io/${{ github.repository }}/solana-ci:${{ github.sha }}" >> $GITHUB_OUTPUT
-            echo "push=true" >> $GITHUB_OUTPUT
-          else
-            echo "image=solana-ci:test" >> $GITHUB_OUTPUT
-            echo "push=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ steps.image.outputs.push }}
-          load: ${{ steps.image.outputs.push != 'true' }}
-          platforms: linux/amd64
-          tags: |
-            ${{ steps.image.outputs.image }}
-            ghcr.io/${{ github.repository }}/solana-ci:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   test:
     name: Run Tests
-    needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
+    container:
+      image: ghcr.io/${{ github.repository }}/solana-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       PRIVATE_KEY_TESTNET: 0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        working-directory: signet-program
+        run: yarn install
 
-      - name: Pull Docker image
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        run: docker pull ${{ needs.build.outputs.image }}
+      - name: Run lint
+        working-directory: signet-program
+        run: yarn run lint
 
-      - name: Run CI tests
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace/signet-program \
-            -e PRIVATE_KEY_TESTNET="${PRIVATE_KEY_TESTNET}" \
-            ${{ needs.build.outputs.image }} \
-            bash -c "
-              set -e
-              echo '=== Installing dependencies ==='
-              yarn install
+      - name: Run format check
+        working-directory: signet-program
+        run: yarn run format:check
 
-              echo '=== Running lint ==='
-              yarn run lint
+      - name: Run type check
+        working-directory: signet-program
+        run: yarn run typecheck
 
-              echo '=== Running format check ==='
-              yarn run format:check
+      - name: Generate keypair
+        run: solana-keygen new --no-bip39-passphrase --force
 
-              echo '=== Running type check ==='
-              yarn run typecheck
-
-              echo '=== Generating keypair ==='
-              solana-keygen new --no-bip39-passphrase --force
-
-              echo '=== Running Anchor tests ==='
-              anchor test
-            "
+      - name: Run Anchor tests
+        working-directory: signet-program
+        run: anchor test
