@@ -1,13 +1,20 @@
+# This workflow setups a Docker image with
+# - Node.js 20
+# - Yarn 1.22.22
+# - Rust stable
+# - Solana CLI 2.1.15
+# - Anchor 0.31.1
+
 name: Publish Docker Image
 
 on:
   push:
     branches: [main]
     paths:
-      - "Dockerfile"
+      - 'Dockerfile'
   pull_request:
     paths:
-      - "Dockerfile"
+      - 'Dockerfile'
   workflow_dispatch:
 
 jobs:
