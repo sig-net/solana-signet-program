@@ -20,7 +20,9 @@ export function testSetup() {
 
   const env = getEnv();
 
-  const rootPublicKey = bigintPrivateKeyToNajPublicKey(env.PRIVATE_KEY_TESTNET);
+  const rootPublicKey = bigintPrivateKeyToNajPublicKey(
+    env.FAKENET_SIGNER_ROOT_PRIVATE_KEY
+  );
 
   const signetSolContract = new contracts.solana.ChainSignatureContract({
     provider,
@@ -35,7 +37,7 @@ export function testSetup() {
     program,
     wallet: provider.wallet as anchor.Wallet,
     signetSolContract,
-    basePrivateKey: env.PRIVATE_KEY_TESTNET,
+    basePrivateKey: env.FAKENET_SIGNER_ROOT_PRIVATE_KEY,
   });
 
   const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(

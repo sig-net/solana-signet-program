@@ -3,6 +3,9 @@ node_modules/
 yarn.lock
 package-lock.json
 
+# Claude Code
+.claude
+
 # Build outputs
 target/
 dist/

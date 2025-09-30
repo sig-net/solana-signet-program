@@ -13,12 +13,15 @@ import type * as anchor from '@coral-xyz/anchor';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const envSchema = z.object({
-  PRIVATE_KEY_TESTNET: z.string().min(1, 'PRIVATE_KEY_TESTNET is required'),
+  FAKENET_SIGNER_ROOT_PRIVATE_KEY: z
+    .string()
+    .min(1, 'FAKENET_SIGNER_ROOT_PRIVATE_KEY is required'),
 });
 
 export const getEnv = () => {
   const result = envSchema.safeParse({
-    PRIVATE_KEY_TESTNET: process.env.PRIVATE_KEY_TESTNET,
+    FAKENET_SIGNER_ROOT_PRIVATE_KEY:
+      process.env.FAKENET_SIGNER_ROOT_PRIVATE_KEY,
   });
 
   if (!result.success) {
