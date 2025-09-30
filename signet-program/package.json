@@ -1,4 +1,6 @@
 {
+  "name": "signet-program",
+  "version": "1.0.0",
   "license": "ISC",
   "scripts": {
     "lint": "eslint . --max-warnings 0",

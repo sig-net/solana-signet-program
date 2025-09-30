@@ -10,11 +10,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export default [
   eslint.configs.recommended,
   {
-    files: ['**/*.ts', '**/*.tsx'],
+    files: ['signet-program/**/*.ts', 'signet-program/**/*.tsx'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: './tsconfig.json',
+        project: './signet-program/tsconfig.json',
         tsconfigRootDir: __dirname,
       },
       globals: {
@@ -55,6 +55,12 @@ export default [
   },
   prettierConfig,
   {
-    ignores: ['**/target/**', '**/node_modules/**', '**/dist/**', '**/*.d.ts'],
+    ignores: [
+      '**/target/**',
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/*.d.ts',
+      'clients/**',
+    ],
   },
 ];

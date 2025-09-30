@@ -46,7 +46,6 @@ This repository contains Solana Anchor program that is deployed on Solana blockc
 4. **Update Program ID**
 
    Update the Program ID in the following files:
-
    - `programs/signet/src/lib.rs` (in `declare_id!` macro)
    - `Anchor.toml` (under `[programs.testnet]`)
 
@@ -66,7 +65,7 @@ This repository contains Solana Anchor program that is deployed on Solana blockc
    KEYPAIR_PATH=~/.config/solana/id.json
 
    # Ethereum Signing Keys
-   PRIVATE_KEY_TESTNET=0x... # Your Responder private key
+   FAKENET_SIGNER_ROOT_PRIVATE_KEY=0x... # Your Responder root private key
 
    # For client verification
    RESPONDER_BASE_PUBLIC_KEY=0x... # Uncompressed (0x04...) public key
@@ -126,7 +125,6 @@ The project includes tests for all program functionality including configuration
 ### Prerequisites for Testing
 
 1. **Environment Setup**
-
    - Ensure you have the `.env` file configured (see Configuration section above)
    - Node.js dependencies installed (`yarn install` in the signet-program directory)
    - Anchor framework installed
@@ -134,7 +132,7 @@ The project includes tests for all program functionality including configuration
 2. **Required Environment Variables**
    ```bash
    # In your .env file at project root
-   PRIVATE_KEY_TESTNET=0x... # Your test private key
+   FAKENET_SIGNER_ROOT_PRIVATE_KEY=0x... # Your mock signer root private key
    RESPONDER_BASE_PUBLIC_KEY=0x... # Corresponding public key
    KEYPAIR_PATH=~/.config/solana/id.json
    ```
