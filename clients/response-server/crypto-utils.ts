@@ -1,10 +1,9 @@
-import { CONFIG } from "./config";
-import { ethers } from "ethers";
+import { CONFIG } from './config';
+import { ethers } from 'ethers';
 
 export class CryptoUtils {
   static deriveEpsilon(requester: string, path: string): bigint {
     const derivationPath = `${CONFIG.EPSILON_DERIVATION_PREFIX},${CONFIG.SOLANA_CHAIN_ID},${requester},${path}`;
-    console.log("📝 Derivation path:", derivationPath);
     const hash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
     return BigInt(hash);
   }
@@ -18,7 +17,7 @@ export class CryptoUtils {
     const privateKeyBigInt = BigInt(basePrivateKey);
     const derivedPrivateKey =
       (privateKeyBigInt + epsilon) % BigInt(CONFIG.SECP256K1_N);
-    return "0x" + derivedPrivateKey.toString(16).padStart(64, "0");
+    return '0x' + derivedPrivateKey.toString(16).padStart(64, '0');
   }
 
   static modularSquareRoot(n: bigint, p: bigint): bigint {
@@ -26,7 +25,7 @@ export class CryptoUtils {
     if (p % 4n === 3n) {
       return this.powerMod(n, (p + 1n) / 4n, p);
     }
-    throw new Error("Modulus not supported");
+    throw new Error('Modulus not supported');
   }
 
   static powerMod(base: bigint, exponent: bigint, modulus: bigint): bigint {
@@ -46,11 +45,15 @@ export class CryptoUtils {
   static async signMessage(
     msgHash: number[] | string,
     privateKeyHex: string
-  ): Promise<any> {
+  ): Promise<{
+    bigR: { x: number[]; y: number[] };
+    s: number[];
+    recoveryId: number;
+  }> {
     const msgHashHex =
-      typeof msgHash === "string"
+      typeof msgHash === 'string'
         ? msgHash
-        : "0x" + Buffer.from(msgHash).toString("hex");
+        : '0x' + Buffer.from(msgHash).toString('hex');
 
     const signingKey = new ethers.SigningKey(privateKeyHex);
     const signature = signingKey.sign(msgHashHex);
@@ -66,10 +69,10 @@ export class CryptoUtils {
 
     return {
       bigR: {
-        x: Array.from(Buffer.from(signature.r.slice(2), "hex")),
-        y: Array.from(Buffer.from(rY.toString(16).padStart(64, "0"), "hex")),
+        x: Array.from(Buffer.from(signature.r.slice(2), 'hex')),
+        y: Array.from(Buffer.from(rY.toString(16).padStart(64, '0'), 'hex')),
       },
-      s: Array.from(Buffer.from(signature.s.slice(2), "hex")),
+      s: Array.from(Buffer.from(signature.s.slice(2), 'hex')),
       recoveryId,
     };
   }

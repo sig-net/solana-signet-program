@@ -1,7 +1,7 @@
-import { ethers } from "ethers";
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { ethers } from 'ethers';
+import { secp256k1 } from '@noble/curves/secp256k1';
 
-const EPSILON_DERIVATION_PREFIX = "sig.network v1.0.0 epsilon derivation";
+const EPSILON_DERIVATION_PREFIX = 'sig.network v1.0.0 epsilon derivation';
 
 /**
  * Derive epsilon value for key derivation
@@ -11,10 +11,10 @@ const EPSILON_DERIVATION_PREFIX = "sig.network v1.0.0 epsilon derivation";
  */
 export function deriveEpsilonSol(requester: string, path: string): bigint {
   // Solana SLIP-0044 https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-  const chainId = "0x800001f5";
+  const chainId = '0x800001f5';
 
   const derivationPath = `${EPSILON_DERIVATION_PREFIX},${chainId},${requester},${path}`;
-  console.log("Derivation path:", derivationPath);
+  console.log('Derivation path:', derivationPath);
 
   const hash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
   return BigInt(hash);
@@ -30,7 +30,7 @@ export function publicKeyToPoint(publicKey: string) {
   const cleanPubKey = publicKey.slice(4);
   const x = cleanPubKey.slice(0, 64);
   const y = cleanPubKey.slice(64, 128);
-  return { x: BigInt("0x" + x), y: BigInt("0x" + y) };
+  return { x: BigInt('0x' + x), y: BigInt('0x' + y) };
 }
 
 /**
@@ -39,9 +39,9 @@ export function publicKeyToPoint(publicKey: string) {
  * @returns The public key in string format (0x04 + x + y)
  */
 export function pointToPublicKey(point: { x: bigint; y: bigint }): string {
-  const x = point.x.toString(16).padStart(64, "0");
-  const y = point.y.toString(16).padStart(64, "0");
-  return "0x04" + x + y;
+  const x = point.x.toString(16).padStart(64, '0');
+  const y = point.y.toString(16).padStart(64, '0');
+  return '0x04' + x + y;
 }
 
 /**
@@ -76,10 +76,10 @@ export function derivePublicKey(
       y: resultAffine.y,
     });
 
-    console.log("Derived public key:", derivedPublicKey);
+    console.log('Derived public key:', derivedPublicKey);
     return derivedPublicKey;
   } catch (error) {
-    console.error("Error deriving public key:", error);
+    console.error('Error deriving public key:', error);
     throw error;
   }
 }

@@ -1,14 +1,15 @@
-import { ethers } from "ethers";
-import { CONFIG } from "./config";
-import { TransactionOutput, TransactionStatus } from "./types";
+import { ethers } from 'ethers';
+import { CONFIG } from './config';
+import { TransactionOutput, TransactionStatus } from './types';
+import { envConfig } from './envConfig';
 
 export class EthereumMonitor {
-  private static providerCache = new Map<string, any>();
+  private static providerCache = new Map<string, ethers.JsonRpcProvider>();
   static async waitForTransactionAndGetOutput(
     txHash: string,
     slip44ChainId: number,
     explorerDeserializationFormat: number,
-    explorerDeserializationSchema: any,
+    explorerDeserializationSchema: Buffer | number[],
     fromAddress: string,
     nonce: number
   ): Promise<TransactionStatus> {
@@ -17,7 +18,7 @@ export class EthereumMonitor {
     try {
       provider = this.getProvider(slip44ChainId);
     } catch (e) {
-      return { status: "fatal_error", reason: "unsupported_chain" };
+      return { status: 'fatal_error', reason: 'unsupported_chain' };
     }
 
     console.log(`⏳ Checking transaction ${txHash}...`);
@@ -30,19 +31,19 @@ export class EthereumMonitor {
         console.log(`✅ Transaction found! Confirmation complete.`);
         console.log(`  📦 Block number: ${receipt.blockNumber}`);
         console.log(
-          `  ${receipt.status === 1 ? "✅" : "❌"} Status: ${
-            receipt.status === 1 ? "Success" : "Failed"
+          `  ${receipt.status === 1 ? '✅' : '❌'} Status: ${
+            receipt.status === 1 ? 'Success' : 'Failed'
           }`
         );
 
         if (receipt.status === 0) {
-          return { status: "error", reason: "reverted" };
+          return { status: 'error', reason: 'reverted' };
         }
 
         // Get transaction for output extraction
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
-          return { status: "pending" };
+          return { status: 'pending' };
         }
 
         try {
@@ -55,12 +56,12 @@ export class EthereumMonitor {
             fromAddress
           );
           return {
-            status: "success",
+            status: 'success',
             success: output.success,
             output: output.output,
           };
         } catch (e) {
-          return { status: "fatal_error", reason: "extraction_failed" };
+          return { status: 'fatal_error', reason: 'extraction_failed' };
         }
       } else {
         // No receipt - check if replaced
@@ -69,29 +70,28 @@ export class EthereumMonitor {
           // Check if it was our transaction
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
-            return { status: "error", reason: "replaced" };
+            return { status: 'error', reason: 'replaced' };
           }
         }
 
         // Check if transaction exists
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
-          return { status: "pending" };
+          return { status: 'pending' };
         }
 
         console.log(`✅ Transaction found! Waiting for confirmation...`);
 
         // Already checked receipt above and it was null, so return pending
-        return { status: "pending" };
+        return { status: 'pending' };
       }
     } catch (e) {
-      return { status: "pending" };
+      return { status: 'pending' };
     }
   }
 
   private static getProvider(slip44ChainId: number): ethers.JsonRpcProvider {
-    const rpcUrl = process.env.RPC_URL || "https://api.devnet.solana.com";
-    const isDevnet = rpcUrl.includes("devnet");
+    const isDevnet = envConfig.RPC_URL.includes('devnet');
     const cacheKey = `${slip44ChainId}-${isDevnet}`;
 
     if (this.providerCache.has(cacheKey)) {
@@ -103,12 +103,10 @@ export class EthereumMonitor {
       case 60: // Ethereum
         if (isDevnet) {
           url =
-            process.env.SEPOLIA_RPC_URL ||
-            `https://sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`;
-          console.log("  🌐 Using Ethereum Sepolia");
+            envConfig.SEPOLIA_RPC_URL ||
+            `https://sepolia.infura.io/v3/${envConfig.INFURA_API_KEY}`;
         } else {
-          url = process.env.ETHEREUM_RPC_URL || "https://eth.llamarpc.com";
-          console.log("  🌐 Using Ethereum Mainnet");
+          url = envConfig.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com';
         }
         break;
       default:
@@ -125,14 +123,14 @@ export class EthereumMonitor {
     receipt: ethers.TransactionReceipt,
     provider: ethers.JsonRpcProvider,
     explorerDeserializationFormat: number,
-    explorerDeserializationSchema: any,
+    explorerDeserializationSchema: Buffer | number[],
     fromAddress: string
   ): Promise<TransactionOutput> {
-    const isContractCall = tx.data && tx.data !== "0x" && tx.data.length > 2;
+    const isContractCall = tx.data && tx.data !== '0x' && tx.data.length > 2;
 
     if (isContractCall && explorerDeserializationFormat === 1) {
       try {
-        console.log("  📞 Getting function return value...");
+        console.log('  📞 Getting function return value...');
 
         const callResult = await provider.call({
           to: tx.to,
@@ -142,27 +140,29 @@ export class EthereumMonitor {
         });
 
         const schemaStr =
-          typeof explorerDeserializationSchema === "string"
+          typeof explorerDeserializationSchema === 'string'
             ? explorerDeserializationSchema
             : new TextDecoder().decode(
                 new Uint8Array(explorerDeserializationSchema)
               );
 
-        const schema = JSON.parse(schemaStr);
+        const schema = JSON.parse(schemaStr) as Array<{
+          name: string;
+          type: string;
+        }>;
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-          schema.map((s: any) => s.type),
+          schema.map((s) => s.type),
           callResult
         );
 
-        const decodedOutput: any = {};
-        schema.forEach((field: any, index: number) => {
+        const decodedOutput: Record<string, unknown> = {};
+        schema.forEach((field, index) => {
           decodedOutput[field.name] = decoded[index];
         });
 
-        console.log("  📊 Decoded output:", decodedOutput);
         return { success: true, output: decodedOutput };
       } catch (e) {
-        console.error("  ⚠️ Error getting function return value:", e);
+        console.error('Error extracting output:', e);
         return { success: true, output: { success: true } };
       }
     } else {

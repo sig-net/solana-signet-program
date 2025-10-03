@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { ethers } from 'ethers';
 
 export class RequestIdGenerator {
   static generateSignRespondRequestId(
@@ -11,17 +11,17 @@ export class RequestIdGenerator {
     dest: string,
     params: string
   ): string {
-    const txDataHex = "0x" + Buffer.from(transactionData).toString("hex");
+    const txDataHex = '0x' + Buffer.from(transactionData).toString('hex');
     const encoded = ethers.solidityPacked(
       [
-        "string",
-        "bytes",
-        "uint32",
-        "uint32",
-        "string",
-        "string",
-        "string",
-        "string",
+        'string',
+        'bytes',
+        'uint32',
+        'uint32',
+        'string',
+        'string',
+        'string',
+        'string',
       ],
       [sender, txDataHex, slip44ChainId, keyVersion, path, algo, dest, params]
     );
@@ -38,17 +38,17 @@ export class RequestIdGenerator {
     dest: string,
     params: string
   ): string {
-    const payloadHex = "0x" + Buffer.from(payload).toString("hex");
+    const payloadHex = '0x' + Buffer.from(payload).toString('hex');
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
       [
-        "string",
-        "bytes",
-        "string",
-        "uint32",
-        "uint256",
-        "string",
-        "string",
-        "string",
+        'string',
+        'bytes',
+        'string',
+        'uint32',
+        'uint256',
+        'string',
+        'string',
+        'string',
       ],
       [addr, payloadHex, path, keyVersion, chainId, algo, dest, params]
     );
