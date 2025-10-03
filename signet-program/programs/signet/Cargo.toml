@@ -2,9 +2,9 @@
 name = "chain-signatures"
 version = "0.1.3"
 description = "Chain signatures program for cross-chain signing on Solana"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Sig Network"]
 license = "MIT"
-repository = "https://github.com/esaminu/chain-signatures-solana"
+repository = "https://github.com/sig-net/signet-solana-program"
 edition = "2021"
 
 [lib]

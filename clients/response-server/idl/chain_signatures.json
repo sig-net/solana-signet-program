@@ -1,11 +1,11 @@
 {
-  "address": "4uvZW8K4g4jBg7dzPNbb9XDxJLFBK7V6iC76uofmYvEU",
+  "address": "85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV",
   "metadata": {
-    "name": "chain_signatures_project",
+    "name": "chain_signatures",
     "version": "0.1.3",
     "spec": "0.1.0",
     "description": "Chain signatures program for cross-chain signing on Solana",
-    "repository": "https://github.com/esaminu/chain-signatures-solana"
+    "repository": "https://github.com/sig-net/signet-solana-program"
   },
   "instructions": [
     {
@@ -135,6 +135,38 @@
         {
           "name": "responder",
           "signer": true
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
         }
       ],
       "args": [

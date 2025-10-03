@@ -1,6 +1,6 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Connection } from "@solana/web3.js";
-import bs58 from "bs58";
+import * as anchor from '@coral-xyz/anchor';
+import { Connection } from '@solana/web3.js';
+import bs58 from 'bs58';
 
 // EMIT_CPI_INSTRUCTION_DISCRIMINATOR - identifies that this is an emit_cpi! instruction
 // This is a constant from Anchor that identifies the instruction type
@@ -11,7 +11,7 @@ const EMIT_CPI_INSTRUCTION_DISCRIMINATOR = Buffer.from([
 
 export interface ParsedCpiEvent {
   name: string;
-  data: any;
+  data: unknown;
 }
 
 export class CpiEventParser {
@@ -27,7 +27,7 @@ export class CpiEventParser {
     connection: Connection,
     signature: string,
     targetProgramId: string,
-    program: anchor.Program<any>
+    program: anchor.Program
   ): Promise<ParsedCpiEvent[]> {
     const events: ParsedCpiEvent[] = [];
 
@@ -35,7 +35,7 @@ export class CpiEventParser {
       // Get the transaction with JsonParsed encoding to access inner instructions
       // CPI events appear as inner instructions when emit_cpi! is used
       const tx = await connection.getParsedTransaction(signature, {
-        commitment: "confirmed",
+        commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
       });
 
@@ -49,8 +49,8 @@ export class CpiEventParser {
         for (const instruction of innerIxSet.instructions) {
           // Check for PartiallyDecoded instructions from our target program
           if (
-            "programId" in instruction &&
-            "data" in instruction &&
+            'programId' in instruction &&
+            'data' in instruction &&
             instruction.programId.toString() === targetProgramId
           ) {
             const parsedEvent = CpiEventParser.parseInstruction(
@@ -64,7 +64,7 @@ export class CpiEventParser {
         }
       }
     } catch (error) {
-      console.error("Error parsing transaction for CPI events:", error);
+      console.error('Error parsing transaction for CPI events:', error);
     }
 
     return events;
@@ -78,7 +78,7 @@ export class CpiEventParser {
    */
   private static parseInstruction(
     instructionData: string,
-    program: anchor.Program<any>
+    program: anchor.Program
   ): ParsedCpiEvent | null {
     try {
       // Decode the base58 instruction data
@@ -126,14 +126,14 @@ export class CpiEventParser {
             // Decode using Anchor's BorshEventCoder
             const eventCoder = new anchor.BorshEventCoder(program.idl);
             const decodedEvent = eventCoder.decode(
-              fullEventData.toString("base64")
+              fullEventData.toString('base64')
             );
 
             if (decodedEvent) {
               return decodedEvent;
             }
-          } catch (decodeError) {
-            console.log("Failed to decode event data:", decodeError);
+          } catch {
+            // Ignore decode errors
           }
         }
       }
@@ -153,8 +153,8 @@ export class CpiEventParser {
    */
   static subscribeToCpiEvents(
     connection: Connection,
-    program: anchor.Program<any>,
-    eventHandlers: Map<string, (event: any, slot: number) => Promise<void>>
+    program: anchor.Program,
+    eventHandlers: Map<string, (event: unknown, slot: number) => Promise<void>>
   ): number {
     return connection.onLogs(
       program.programId,
@@ -181,7 +181,7 @@ export class CpiEventParser {
           }
         }
       },
-      "confirmed"
+      'confirmed'
     );
   }
 }
