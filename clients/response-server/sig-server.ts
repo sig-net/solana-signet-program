@@ -17,7 +17,6 @@ import { EthereumMonitor } from './ethereum-monitor';
 import { OutputSerializer } from './output-serializer';
 import { SolanaUtils } from './solana-utils';
 import { CpiEventParser } from './cpi-event-parser';
-import { ethers } from 'ethers';
 import * as borsh from 'borsh';
 import { getSerializationFormat, getSlip44FromCaip2 } from './chain-utils';
 
@@ -81,10 +80,13 @@ class ChainSignatureServer {
         }
 
         try {
+          const slip44ChainId = getSlip44FromCaip2(txInfo.caip2Id);
+          const explorerFormat = getSerializationFormat(txInfo.caip2Id);
+
           const result = await EthereumMonitor.waitForTransactionAndGetOutput(
             txHash,
-            txInfo.chainId,
-            txInfo.explorerDeserializationFormat,
+            slip44ChainId,
+            explorerFormat,
             txInfo.explorerDeserializationSchema,
             txInfo.fromAddress,
             txInfo.nonce
@@ -143,9 +145,11 @@ class ChainSignatureServer {
   ) {
     console.log(`✅ Transaction completed: ${txHash}`);
 
+    const callbackFormat = 0;
+
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
-      txInfo.callbackSerializationFormat,
+      callbackFormat,
       txInfo.callbackSerializationSchema
     );
 
@@ -185,26 +189,11 @@ class ChainSignatureServer {
     console.log(`❌ Transaction failed: ${txHash}`);
 
     try {
-      // Magic prefix to identify error responses
       const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
-      let errorData: Buffer;
-      if (txInfo.callbackSerializationFormat === 0) {
-        // Borsh - add magic prefix
-        const errorSchema = { struct: { error: 'bool' } };
-        const borshData = borsh.serialize(errorSchema, { error: true });
-        errorData = Buffer.concat([MAGIC_ERROR_PREFIX, borshData]);
-      } else {
-        // ABI - add magic prefix
-        const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-          ['bool'],
-          [true]
-        );
-        errorData = Buffer.concat([
-          MAGIC_ERROR_PREFIX,
-          ethers.getBytes(encoded),
-        ]);
-      }
+      const errorSchema = { struct: { error: 'bool' } };
+      const borshData = borsh.serialize(errorSchema, { error: true });
+      const errorData = Buffer.concat([MAGIC_ERROR_PREFIX, borshData]);
 
       const serializedOutput = new Uint8Array(errorData);
 
@@ -342,16 +331,11 @@ class ChainSignatureServer {
       })
       .rpc();
 
-    const explorerFormat = getSerializationFormat(event.caip2Id);
-    const callbackFormat = getSerializationFormat(event.caip2Id);
-
     pendingTransactions.set(result.signedTxHash, {
       txHash: result.signedTxHash,
       requestId,
-      chainId: slip44ChainId,
-      explorerDeserializationFormat: explorerFormat,
+      caip2Id: event.caip2Id,
       explorerDeserializationSchema: event.outputDeserializationSchema,
-      callbackSerializationFormat: callbackFormat,
       callbackSerializationSchema: event.respondSerializationSchema,
       sender: event.sender.toString(),
       path: event.path,

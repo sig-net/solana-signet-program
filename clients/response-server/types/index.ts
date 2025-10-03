@@ -30,10 +30,8 @@ export interface SignatureRequestedEvent {
 export interface PendingTransaction {
   txHash: string;
   requestId: string;
-  chainId: number;
-  explorerDeserializationFormat: number;
+  caip2Id: string;
   explorerDeserializationSchema: Buffer | number[];
-  callbackSerializationFormat: number;
   callbackSerializationSchema: Buffer | number[];
   sender: string;
   path: string;
