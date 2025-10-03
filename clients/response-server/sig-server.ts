@@ -307,18 +307,18 @@ class ChainSignatureServer {
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
-    const slip44ChainId = getSlip44FromCaip2(event.caip2Id);
-
     const requestId = RequestIdGenerator.generateSignRespondRequestId(
       event.sender.toString(),
       Array.from(event.serializedTransaction),
-      slip44ChainId,
+      event.caip2Id,
       event.keyVersion,
       event.path,
       event.algo,
       event.dest,
       event.params
     );
+
+    const slip44ChainId = getSlip44FromCaip2(event.caip2Id);
 
     console.log('  🔑 Request ID:', requestId);
 
@@ -359,6 +359,8 @@ class ChainSignatureServer {
       nonce: result.nonce,
       checkCount: 0,
     });
+
+    console.log(`🔍 Monitoring transaction: ${result.signedTxHash}`);
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {
