@@ -4,7 +4,7 @@ export class RequestIdGenerator {
   static generateSignRespondRequestId(
     sender: string,
     transactionData: number[],
-    slip44ChainId: number,
+    caip2Id: string,
     keyVersion: number,
     path: string,
     algo: string,
@@ -16,14 +16,14 @@ export class RequestIdGenerator {
       [
         'string',
         'bytes',
-        'uint32',
+        'string',
         'uint32',
         'string',
         'string',
         'string',
         'string',
       ],
-      [sender, txDataHex, slip44ChainId, keyVersion, path, algo, dest, params]
+      [sender, txDataHex, caip2Id, keyVersion, path, algo, dest, params]
     );
     return ethers.keccak256(encoded);
   }
