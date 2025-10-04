@@ -6,19 +6,19 @@ import type {
   SignatureRequestedEvent,
   PendingTransaction,
   TransactionOutput,
+  ServerConfig,
 } from './types';
+import { serverConfigSchema } from './types';
 import ChainSignaturesIDL from './idl/chain_signatures.json';
-import { envConfig } from './envConfig';
 import { CryptoUtils } from './crypto-utils';
 import { CONFIG } from './config';
 import { RequestIdGenerator } from './request-id-generator';
 import { TransactionProcessor } from './transaction-processor';
 import { EthereumMonitor } from './ethereum-monitor';
 import { OutputSerializer } from './output-serializer';
-import { SolanaUtils } from './solana-utils';
 import { CpiEventParser } from './cpi-event-parser';
 import * as borsh from 'borsh';
-import { getSerializationFormat, getSlip44FromCaip2 } from './chain-utils';
+import { SerializationFormat } from './chain-utils';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -29,11 +29,30 @@ class ChainSignatureServer {
   private program: Program;
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
+  private config: ServerConfig;
 
-  constructor() {
-    this.connection = new Connection(envConfig.RPC_URL, 'confirmed');
+  constructor(config: ServerConfig) {
+    try {
+      this.config = serverConfigSchema.parse(config);
+    } catch (error) {
+      if (error instanceof Error && 'issues' in error) {
+        const zodError = error as {
+          issues: Array<{ path: string[]; message: string }>;
+        };
+        console.error('❌ Server configuration validation failed:');
+        zodError.issues.forEach((err) => {
+          console.error(`  - ${err.path.join('.')}: ${err.message}`);
+        });
+      }
+      throw new Error('Invalid server configuration');
+    }
 
-    this.wallet = new anchor.Wallet(SolanaUtils.loadKeypair());
+    const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
+      new Uint8Array(JSON.parse(this.config.solanaPrivateKey))
+    );
+
+    this.connection = new Connection(this.config.rpcUrl, 'confirmed');
+    this.wallet = new anchor.Wallet(solanaKeypair);
     this.provider = new anchor.AnchorProvider(this.connection, this.wallet, {
       commitment: 'confirmed',
     });
@@ -80,16 +99,13 @@ class ChainSignatureServer {
         }
 
         try {
-          const slip44ChainId = getSlip44FromCaip2(txInfo.caip2Id);
-          const explorerFormat = getSerializationFormat(txInfo.caip2Id);
-
           const result = await EthereumMonitor.waitForTransactionAndGetOutput(
             txHash,
-            slip44ChainId,
-            explorerFormat,
+            txInfo.caip2Id,
             txInfo.explorerDeserializationSchema,
             txInfo.fromAddress,
-            txInfo.nonce
+            txInfo.nonce,
+            this.config
           );
 
           // Increment check count
@@ -145,23 +161,17 @@ class ChainSignatureServer {
   ) {
     console.log(`✅ Transaction completed: ${txHash}`);
 
-    const callbackFormat = 0;
-
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
-      callbackFormat,
+      SerializationFormat.Borsh, // Server only respond to Solana for now
       txInfo.callbackSerializationSchema
     );
 
     const requestIdBytes = Buffer.from(txInfo.requestId.slice(2), 'hex');
-    const messageHash = CryptoUtils.hashMessage(
+    const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
-      serializedOutput
-    );
-
-    const signature = await CryptoUtils.signMessage(
-      messageHash,
-      envConfig.PRIVATE_KEY_TESTNET
+      serializedOutput,
+      this.config.ethereumPrivateKey
     );
 
     try {
@@ -198,14 +208,10 @@ class ChainSignatureServer {
       const serializedOutput = new Uint8Array(errorData);
 
       const requestIdBytes = Buffer.from(txInfo.requestId.slice(2), 'hex');
-      const messageHash = CryptoUtils.hashMessage(
+      const signature = await CryptoUtils.signBidirectionalResponse(
         requestIdBytes,
-        serializedOutput
-      );
-
-      const signature = await CryptoUtils.signMessage(
-        messageHash,
-        envConfig.PRIVATE_KEY_TESTNET
+        serializedOutput,
+        this.config.ethereumPrivateKey
       );
 
       await this.program.methods
@@ -233,7 +239,7 @@ class ChainSignatureServer {
     // Standard event listeners for non-CPI events
     cpiEventHandlers.set(
       'signBidirectionalEvent',
-      async (eventData: unknown, slot: number) => {
+      async (eventData: unknown, _slot: number) => {
         const event = eventData as SignBidirectionalEvent;
         console.log(
           `\n📨 SignBidirectionalEvent from ${event.sender.toString()}`
@@ -250,7 +256,7 @@ class ChainSignatureServer {
     // Note: Anchor's BorshEventCoder returns event names in camelCase
     cpiEventHandlers.set(
       'signatureRequestedEvent',
-      async (eventData: unknown, slot: number) => {
+      async (eventData: unknown) => {
         const event = eventData as SignatureRequestedEvent;
         console.log(
           `\n📝 SignatureRequestedEvent from ${event.sender.toString()}`
@@ -276,25 +282,6 @@ class ChainSignatureServer {
     // This is just for logging non-CPI RespondBidirectionalEvent if it exists
   }
 
-  private logSchemaInfo(
-    type: string,
-    format: number,
-    schema: Buffer | number[]
-  ) {
-    console.log(`\n  📋 ${type} Deserialization:`);
-    console.log(`    Format: ${format === 0 ? 'Borsh' : 'AbiJson'}`);
-
-    try {
-      const schemaStr = new TextDecoder().decode(new Uint8Array(schema));
-      if (schemaStr.trim()) {
-        const parsed = JSON.parse(schemaStr);
-        console.log(`    Schema:`, JSON.stringify(parsed, null, 2));
-      }
-    } catch {
-      console.log(`    Schema: [Invalid or binary data]`);
-    }
-  }
-
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
     const requestId = RequestIdGenerator.generateSignRespondRequestId(
       event.sender.toString(),
@@ -307,20 +294,19 @@ class ChainSignatureServer {
       event.params
     );
 
-    const slip44ChainId = getSlip44FromCaip2(event.caip2Id);
-
     console.log('  🔑 Request ID:', requestId);
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
-      envConfig.PRIVATE_KEY_TESTNET
+      this.config.ethereumPrivateKey
     );
 
     const result = await TransactionProcessor.processTransactionForSigning(
       new Uint8Array(event.serializedTransaction),
       derivedPrivateKey,
-      slip44ChainId
+      event.caip2Id,
+      this.config
     );
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
@@ -364,7 +350,7 @@ class ChainSignatureServer {
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
-      envConfig.PRIVATE_KEY_TESTNET
+      this.config.ethereumPrivateKey
     );
 
     const signature = await CryptoUtils.signMessage(
@@ -394,10 +380,21 @@ class ChainSignatureServer {
 }
 
 async function main() {
-  const server = new ChainSignatureServer();
+  const { envConfig } = await import('./envConfig');
+
+  const config: ServerConfig = {
+    rpcUrl: envConfig.RPC_URL,
+    solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
+    ethereumPrivateKey: envConfig.PRIVATE_KEY_TESTNET,
+    infuraApiKey: envConfig.INFURA_API_KEY,
+    sepoliaRpcUrl: envConfig.SEPOLIA_RPC_URL,
+    ethereumRpcUrl: envConfig.ETHEREUM_RPC_URL,
+    isDevnet: envConfig.RPC_URL.includes('devnet'),
+  };
+
+  const server = new ChainSignatureServer(config);
   await server.start();
 
-  // Handle graceful shutdown
   process.on('SIGINT', async () => {
     await server.shutdown();
   });

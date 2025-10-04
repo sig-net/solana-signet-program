@@ -8,8 +8,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 const envSchema = z.object({
   // Solana Configuration
   RPC_URL: z.string().url().default('https://api.devnet.solana.com'),
-  SOLANA_PRIVATE_KEY: z.string().optional(),
-  KEYPAIR_PATH: z.string().optional(),
+  SOLANA_PRIVATE_KEY: z.string().min(1, 'Solana private key is required'),
 
   // Ethereum Configuration
   PRIVATE_KEY_TESTNET: z
@@ -27,19 +26,11 @@ function validateEnv(): EnvConfig {
     const env = envSchema.parse({
       RPC_URL: process.env.RPC_URL,
       SOLANA_PRIVATE_KEY: process.env.SOLANA_PRIVATE_KEY,
-      KEYPAIR_PATH: process.env.KEYPAIR_PATH,
       PRIVATE_KEY_TESTNET: process.env.PRIVATE_KEY_TESTNET,
       INFURA_API_KEY: process.env.INFURA_API_KEY,
       SEPOLIA_RPC_URL: process.env.SEPOLIA_RPC_URL,
       ETHEREUM_RPC_URL: process.env.ETHEREUM_RPC_URL,
     });
-
-    // Validate that at least one Solana key source is provided
-    if (!env.SOLANA_PRIVATE_KEY && !env.KEYPAIR_PATH) {
-      throw new Error(
-        'Either SOLANA_PRIVATE_KEY or KEYPAIR_PATH must be provided'
-      );
-    }
 
     return env;
   } catch (error) {

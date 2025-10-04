@@ -1,5 +1,6 @@
 import { CONFIG } from './config';
 import { ethers } from 'ethers';
+import { SignatureResponse } from './types';
 
 export class CryptoUtils {
   static deriveEpsilon(requester: string, path: string): bigint {
@@ -20,36 +21,10 @@ export class CryptoUtils {
     return '0x' + derivedPrivateKey.toString(16).padStart(64, '0');
   }
 
-  static modularSquareRoot(n: bigint, p: bigint): bigint {
-    if (n === 0n) return 0n;
-    if (p % 4n === 3n) {
-      return this.powerMod(n, (p + 1n) / 4n, p);
-    }
-    throw new Error('Modulus not supported');
-  }
-
-  static powerMod(base: bigint, exponent: bigint, modulus: bigint): bigint {
-    if (modulus === 1n) return 0n;
-    let result = 1n;
-    base = base % modulus;
-    while (exponent > 0n) {
-      if (exponent % 2n === 1n) {
-        result = (result * base) % modulus;
-      }
-      base = (base * base) % modulus;
-      exponent = exponent / 2n;
-    }
-    return result;
-  }
-
   static async signMessage(
     msgHash: number[] | string,
     privateKeyHex: string
-  ): Promise<{
-    bigR: { x: number[]; y: number[] };
-    s: number[];
-    recoveryId: number;
-  }> {
+  ): Promise<SignatureResponse> {
     const msgHashHex =
       typeof msgHash === 'string'
         ? msgHash
@@ -58,32 +33,33 @@ export class CryptoUtils {
     const signingKey = new ethers.SigningKey(privateKeyHex);
     const signature = signingKey.sign(msgHashHex);
 
-    // Convert to Solana format
-    const rBigInt = BigInt(signature.r);
-    const p = BigInt(CONFIG.SECP256K1_P);
-    const ySquared = (rBigInt ** 3n + 7n) % p;
-    const y = this.modularSquareRoot(ySquared, p);
-    const recoveryId = signature.v - 27;
-    const yParity = recoveryId;
-    const rY = y % 2n === BigInt(yParity) ? y : p - y;
+    const recoveredPublicKey = ethers.SigningKey.recoverPublicKey(
+      msgHashHex,
+      signature
+    );
+    const publicKeyPoint = ethers.getBytes(recoveredPublicKey);
+
+    const y = publicKeyPoint.slice(33, 65);
 
     return {
       bigR: {
         x: Array.from(Buffer.from(signature.r.slice(2), 'hex')),
-        y: Array.from(Buffer.from(rY.toString(16).padStart(64, '0'), 'hex')),
+        y: Array.from(y),
       },
       s: Array.from(Buffer.from(signature.s.slice(2), 'hex')),
-      recoveryId,
+      recoveryId: signature.v - 27,
     };
   }
 
-  static hashMessage(
+  static async signBidirectionalResponse(
     requestId: Uint8Array,
-    serializedOutput: Uint8Array
-  ): string {
+    serializedOutput: Uint8Array,
+    privateKeyHex: string
+  ): Promise<SignatureResponse> {
     const combined = new Uint8Array(requestId.length + serializedOutput.length);
     combined.set(requestId);
     combined.set(serializedOutput, requestId.length);
-    return ethers.keccak256(combined);
+    const messageHash = ethers.keccak256(combined);
+    return this.signMessage(messageHash, privateKeyHex);
   }
 }

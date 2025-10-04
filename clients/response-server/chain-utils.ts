@@ -8,7 +8,26 @@ export enum SerializationFormat {
 }
 
 /**
- * Infer serialization format from CAIP-2 chain ID
+ * Extract namespace from CAIP-2 chain ID
+ *
+ * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1", "solana:mainnet")
+ * @returns namespace - The chain namespace (e.g., "eip155", "solana")
+ *
+ * @example
+ * getNamespaceFromCaip2("eip155:1") // "eip155"
+ * getNamespaceFromCaip2("solana:mainnet") // "solana"
+ */
+export function getNamespaceFromCaip2(caip2Id: string): string {
+  const [namespace] = caip2Id.split(':');
+  if (!namespace) {
+    throw new Error(`Invalid CAIP-2 ID: ${caip2Id}`);
+  }
+  return namespace.toLowerCase();
+}
+
+/**
+ * Get serialization format from CAIP-2 chain ID
+ * Multiple chains can share the same serialization format
  *
  * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1", "solana:mainnet")
  * @returns SerializationFormat - Borsh for Solana, ABI for EVM chains
@@ -19,39 +38,14 @@ export enum SerializationFormat {
  * getSerializationFormat("solana:mainnet") // SerializationFormat.Borsh
  */
 export function getSerializationFormat(caip2Id: string): SerializationFormat {
-  const [namespace] = caip2Id.split(':');
+  const namespace = getNamespaceFromCaip2(caip2Id);
 
-  switch (namespace.toLowerCase()) {
-    case 'eip155': // Ethereum and EVM-compatible chains
-    case 'bip122': // Bitcoin (would use ABI-like encoding)
-    case 'cosmos': // Cosmos chains (would use ABI-like encoding)
+  switch (namespace) {
+    case 'eip155':
       return SerializationFormat.ABI;
-
-    case 'solana': // Solana chains
+    case 'solana':
       return SerializationFormat.Borsh;
-
     default:
       throw new Error(`Unsupported chain namespace: ${namespace}`);
   }
-}
-
-/**
- * Extract SLIP-44 coin type from CAIP-2 ID for EIP-155 chains
- *
- * @param caip2Id - CAIP-2 chain identifier
- * @returns SLIP-44 coin type number
- *
- * @example
- * getSlip44FromCaip2("eip155:1") // 60 (Ethereum mainnet)
- * getSlip44FromCaip2("eip155:11155111") // 60 (Sepolia testnet)
- */
-export function getSlip44FromCaip2(caip2Id: string): number {
-  const [namespace, reference] = caip2Id.split(':');
-
-  if (namespace === 'eip155') {
-    // All EVM chains use SLIP-44 coin type 60
-    return 60;
-  }
-
-  throw new Error(`Cannot extract SLIP-44 from chain: ${caip2Id}`);
 }
