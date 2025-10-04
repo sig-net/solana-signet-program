@@ -1,20 +1,20 @@
 import { ethers } from 'ethers';
-import { CONFIG } from './config';
-import { CryptoUtils } from './crypto-utils';
-import { ProcessedTransaction } from './types';
-import { envConfig } from './envConfig';
+import { ProcessedTransaction, ServerConfig, SignatureResponse } from './types';
+import { getNamespaceFromCaip2 } from './chain-utils';
 
 export class TransactionProcessor {
   private static fundingProvider: ethers.JsonRpcProvider | null = null;
   private static fundingProviderError: boolean = false;
+
   static async processTransactionForSigning(
     rlpEncodedTx: Uint8Array,
     privateKey: string,
-    slip44ChainId: number
+    caip2Id: string,
+    config: ServerConfig
   ): Promise<ProcessedTransaction> {
     console.log('\n🔐 Processing the Transaction for Signing');
     console.log('  📋 RLP-encoded transaction:', ethers.hexlify(rlpEncodedTx));
-    console.log('  🔢 SLIP-44 Chain ID:', slip44ChainId);
+    console.log('  🔗 Chain ID:', caip2Id);
 
     // Detect transaction type
     const isEIP1559 = rlpEncodedTx[0] === 0x02;
@@ -60,9 +60,10 @@ export class TransactionProcessor {
     }
 
     // Convert signature to Solana format
-    const solanaSignature = await this.convertToSolanaSignature(signature);
+    const solanaSignature = this.toSolanaSignature(signature);
 
-    if (slip44ChainId === 60) {
+    const namespace = getNamespaceFromCaip2(caip2Id);
+    if (namespace === 'eip155') {
       /// FUNDING DERIVED ADDRESS WITH ETH CODE
       const tx = ethers.Transaction.from(ethers.hexlify(rlpEncodedTx));
       const gasNeeded =
@@ -85,7 +86,7 @@ export class TransactionProcessor {
 
       try {
         if (!this.fundingProvider) {
-          const url = `https://sepolia.infura.io/v3/${envConfig.INFURA_API_KEY}`;
+          const url = `https://sepolia.infura.io/v3/${config.infuraApiKey}`;
           this.fundingProvider = new ethers.JsonRpcProvider(url);
           await this.fundingProvider.getNetwork();
         }
@@ -93,7 +94,7 @@ export class TransactionProcessor {
         const balance = await this.fundingProvider.getBalance(wallet.address);
         if (balance < gasNeeded) {
           const fundingWallet = new ethers.Wallet(
-            envConfig.PRIVATE_KEY_TESTNET,
+            config.ethereumPrivateKey,
             this.fundingProvider
           );
           await fundingWallet
@@ -106,7 +107,6 @@ export class TransactionProcessor {
       } catch (error) {
         console.error('Funding provider error:', error);
         this.fundingProviderError = true;
-        // Continue without funding - let the transaction fail naturally
       }
     }
 
@@ -120,28 +120,21 @@ export class TransactionProcessor {
     };
   }
 
-  private static async convertToSolanaSignature(
+  private static toSolanaSignature(
     signature: ethers.Signature
-  ): Promise<{
-    bigR: { x: number[]; y: number[] };
-    s: number[];
-    recoveryId: number;
-  }> {
-    const rBigInt = BigInt(signature.r);
-    const p = BigInt(CONFIG.SECP256K1_P);
-    const ySquared = (rBigInt ** 3n + 7n) % p;
-    const y = CryptoUtils.modularSquareRoot(ySquared, p);
-    const recoveryId = signature.v - 27;
-    const yParity = recoveryId;
-    const rY = y % 2n === BigInt(yParity) ? y : p - y;
+  ): SignatureResponse {
+    const prefix = signature.yParity === 0 ? '02' : '03';
+    const compressed = prefix + signature.r.slice(2);
+    const point = ethers.SigningKey.computePublicKey('0x' + compressed, false);
+    const pointBytes = ethers.getBytes(point);
 
     return {
       bigR: {
         x: Array.from(Buffer.from(signature.r.slice(2), 'hex')),
-        y: Array.from(Buffer.from(rY.toString(16).padStart(64, '0'), 'hex')),
+        y: Array.from(pointBytes.slice(33, 65)),
       },
       s: Array.from(Buffer.from(signature.s.slice(2), 'hex')),
-      recoveryId,
+      recoveryId: signature.yParity || 0,
     };
   }
 }

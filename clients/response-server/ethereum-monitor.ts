@@ -1,22 +1,21 @@
 import { ethers } from 'ethers';
-import { CONFIG } from './config';
-import { TransactionOutput, TransactionStatus } from './types';
-import { envConfig } from './envConfig';
+import { TransactionOutput, TransactionStatus, ServerConfig } from './types';
+import { getNamespaceFromCaip2, getSerializationFormat, SerializationFormat } from './chain-utils';
 
 export class EthereumMonitor {
   private static providerCache = new Map<string, ethers.JsonRpcProvider>();
   static async waitForTransactionAndGetOutput(
     txHash: string,
-    slip44ChainId: number,
-    explorerDeserializationFormat: number,
+    caip2Id: string,
     explorerDeserializationSchema: Buffer | number[],
     fromAddress: string,
-    nonce: number
+    nonce: number,
+    config: ServerConfig
   ): Promise<TransactionStatus> {
     let provider: ethers.JsonRpcProvider;
 
     try {
-      provider = this.getProvider(slip44ChainId);
+      provider = this.getProvider(caip2Id, config);
     } catch (e) {
       return { status: 'fatal_error', reason: 'unsupported_chain' };
     }
@@ -51,7 +50,7 @@ export class EthereumMonitor {
             tx,
             receipt,
             provider,
-            explorerDeserializationFormat,
+            caip2Id,
             explorerDeserializationSchema,
             fromAddress
           );
@@ -90,27 +89,30 @@ export class EthereumMonitor {
     }
   }
 
-  private static getProvider(slip44ChainId: number): ethers.JsonRpcProvider {
-    const isDevnet = envConfig.RPC_URL.includes('devnet');
-    const cacheKey = `${slip44ChainId}-${isDevnet}`;
+  private static getProvider(
+    caip2Id: string,
+    config: ServerConfig
+  ): ethers.JsonRpcProvider {
+    const namespace = getNamespaceFromCaip2(caip2Id);
+    const cacheKey = `${caip2Id}-${config.isDevnet}`;
 
     if (this.providerCache.has(cacheKey)) {
       return this.providerCache.get(cacheKey)!;
     }
 
     let url: string;
-    switch (slip44ChainId) {
-      case 60: // Ethereum
-        if (isDevnet) {
+    switch (namespace) {
+      case 'eip155':
+        if (config.isDevnet) {
           url =
-            envConfig.SEPOLIA_RPC_URL ||
-            `https://sepolia.infura.io/v3/${envConfig.INFURA_API_KEY}`;
+            config.sepoliaRpcUrl ||
+            `https://sepolia.infura.io/v3/${config.infuraApiKey}`;
         } else {
-          url = envConfig.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com';
+          url = config.ethereumRpcUrl || 'https://eth.llamarpc.com';
         }
         break;
       default:
-        throw new Error(`Unsupported SLIP-44 chain ID: ${slip44ChainId}`);
+        throw new Error(`Unsupported chain namespace: ${namespace}`);
     }
 
     const provider = new ethers.JsonRpcProvider(url);
@@ -122,13 +124,14 @@ export class EthereumMonitor {
     tx: ethers.TransactionResponse,
     receipt: ethers.TransactionReceipt,
     provider: ethers.JsonRpcProvider,
-    explorerDeserializationFormat: number,
+    caip2Id: string,
     explorerDeserializationSchema: Buffer | number[],
     fromAddress: string
   ): Promise<TransactionOutput> {
+    const serializationFormat = getSerializationFormat(caip2Id);
     const isContractCall = tx.data && tx.data !== '0x' && tx.data.length > 2;
 
-    if (isContractCall && explorerDeserializationFormat === 1) {
+    if (isContractCall && serializationFormat === SerializationFormat.ABI) {
       try {
         console.log('  📞 Getting function return value...');
 
