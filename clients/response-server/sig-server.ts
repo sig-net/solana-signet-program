@@ -1,6 +1,8 @@
 import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
+import BN from 'bn.js';
+import pino from 'pino';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -22,7 +24,7 @@ import { SerializationFormat } from './chain-utils';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
-class ChainSignatureServer {
+export class ChainSignatureServer {
   private connection: Connection;
   private wallet: anchor.Wallet;
   private provider: anchor.AnchorProvider;
@@ -30,6 +32,8 @@ class ChainSignatureServer {
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
+  private logger: pino.Logger;
+  private monitorIntervalId: NodeJS.Timeout | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -47,11 +51,16 @@ class ChainSignatureServer {
       throw new Error('Invalid server configuration');
     }
 
+    this.logger = pino({
+      enabled: this.config.verbose === true,
+      level: 'info',
+    });
+
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
       new Uint8Array(JSON.parse(this.config.solanaPrivateKey))
     );
 
-    this.connection = new Connection(this.config.rpcUrl, 'confirmed');
+    this.connection = new Connection(this.config.solanaRpcUrl, 'confirmed');
     this.wallet = new anchor.Wallet(solanaKeypair);
     this.provider = new anchor.AnchorProvider(this.connection, this.wallet, {
       commitment: 'confirmed',
@@ -62,39 +71,66 @@ class ChainSignatureServer {
   }
 
   async start() {
-    console.log('🚀 Response Server');
-    console.log('  Wallet:', this.wallet.publicKey.toString());
-    console.log('  Program:', this.program.programId.toString());
+    this.logger.info('🚀 Response Server');
+    this.logger.info({ wallet: this.wallet.publicKey.toString() }, 'Wallet');
+    this.logger.info({ program: this.program.programId.toString() }, 'Program');
+
+    await this.ensureInitialized();
 
     this.startTransactionMonitor();
     this.setupEventListeners();
   }
 
+  private async ensureInitialized() {
+    const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from('program-state')],
+      this.program.programId
+    );
+
+    try {
+      const accountInfo = await this.connection.getAccountInfo(programStatePda);
+      if (accountInfo) {
+        return;
+      }
+    } catch {}
+
+    const signatureDeposit = this.config.signatureDeposit || '10000000';
+    const chainId = this.config.chainId || 'solana:localnet';
+
+    try {
+      await this.program.methods
+        .initialize(new BN(signatureDeposit), chainId)
+        .accounts({
+          admin: this.wallet.publicKey,
+        })
+        .rpc();
+    } catch (error) {
+      throw new Error(
+        `Failed to initialize program: ${error instanceof Error ? error.message : error}`
+      );
+    }
+  }
+
   private startTransactionMonitor() {
-    setInterval(async () => {
+    this.monitorIntervalId = setInterval(async () => {
       this.pollCounter++;
 
       if (pendingTransactions.size > 0 && this.pollCounter % 12 === 1) {
-        console.log(
-          `\n📊 Monitoring ${pendingTransactions.size} pending transaction(s)...`
+        this.logger.info(
+          { count: pendingTransactions.size },
+          '📊 Monitoring pending transactions'
         );
       }
 
       for (const [txHash, txInfo] of pendingTransactions.entries()) {
-        // CHANGE 4: Exponential backoff - check less frequently as time passes
         if (txInfo.checkCount > 0) {
-          // Skip checks based on how many times we've already checked
-          // 0-5 checks: every 5s
-          // 6-10 checks: every 10s
-          // 11-20 checks: every 30s
-          // 20+ checks: every 60s
           let skipFactor = 1;
           if (txInfo.checkCount > 20) skipFactor = 12;
           else if (txInfo.checkCount > 10) skipFactor = 6;
           else if (txInfo.checkCount > 5) skipFactor = 2;
 
           if (this.pollCounter % skipFactor !== 0) {
-            continue; // Skip this check
+            continue;
           }
         }
 
@@ -108,12 +144,10 @@ class ChainSignatureServer {
             this.config
           );
 
-          // Increment check count
           txInfo.checkCount++;
 
           switch (result.status) {
             case 'pending':
-              // Just increment count, continue polling
               break;
 
             case 'success':
@@ -125,14 +159,15 @@ class ChainSignatureServer {
               break;
 
             case 'error':
-              // Only for reverted/replaced - send signed error
               await this.handleFailedTransaction(txHash, txInfo);
               pendingTransactions.delete(txHash);
               break;
 
             case 'fatal_error':
-              // Just remove from map, don't send signed error
-              console.error(`Fatal error for ${txHash}:`, result.reason);
+              this.logger.error(
+                { txHash, reason: result.reason },
+                'Fatal error for transaction'
+              );
               pendingTransactions.delete(txHash);
               break;
           }
@@ -143,11 +178,14 @@ class ChainSignatureServer {
               error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
               error.message.includes('Failed to load keypair'))
           ) {
-            console.error(`Infrastructure error for ${txHash}:`, error.message);
+            this.logger.error(
+              { txHash, error: error.message },
+              'Infrastructure error'
+            );
             pendingTransactions.delete(txHash);
           } else {
-            console.error(`Unexpected error polling ${txHash}:`, error);
-            txInfo.checkCount++; // Still increment count
+            this.logger.error({ txHash, error }, 'Unexpected error polling');
+            txInfo.checkCount++;
           }
         }
       }
@@ -159,11 +197,11 @@ class ChainSignatureServer {
     txInfo: PendingTransaction,
     result: TransactionOutput
   ) {
-    console.log(`✅ Transaction completed: ${txHash}`);
+    this.logger.info({ txHash }, '✅ Transaction completed');
 
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
-      SerializationFormat.Borsh, // Server only respond to Solana for now
+      SerializationFormat.Borsh,
       txInfo.callbackSerializationSchema
     );
 
@@ -171,7 +209,7 @@ class ChainSignatureServer {
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
       serializedOutput,
-      this.config.ethereumPrivateKey
+      this.config.mpcRootKey
     );
 
     try {
@@ -188,7 +226,7 @@ class ChainSignatureServer {
 
       pendingTransactions.delete(txHash);
     } catch (error) {
-      console.error('Error sending response:', error);
+      this.logger.error({ error }, 'Error sending response');
     }
   }
 
@@ -196,7 +234,7 @@ class ChainSignatureServer {
     txHash: string,
     txInfo: PendingTransaction
   ) {
-    console.log(`❌ Transaction failed: ${txHash}`);
+    this.logger.warn({ txHash }, '❌ Transaction failed');
 
     try {
       const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
@@ -211,7 +249,7 @@ class ChainSignatureServer {
       const signature = await CryptoUtils.signBidirectionalResponse(
         requestIdBytes,
         serializedOutput,
-        this.config.ethereumPrivateKey
+        this.config.mpcRootKey
       );
 
       await this.program.methods
@@ -225,61 +263,55 @@ class ChainSignatureServer {
         })
         .rpc();
     } catch (error) {
-      console.error('Error sending error response:', error);
+      this.logger.error({ error }, 'Error sending error response');
     }
   }
 
   private setupEventListeners() {
-    // CPI event listener for SignatureRequestedEvent only
     const cpiEventHandlers = new Map<
       string,
       (event: unknown, slot: number) => Promise<void>
     >();
 
-    // Standard event listeners for non-CPI events
     cpiEventHandlers.set(
       'signBidirectionalEvent',
       async (eventData: unknown, _slot: number) => {
         const event = eventData as SignBidirectionalEvent;
-        console.log(
-          `\n📨 SignBidirectionalEvent from ${event.sender.toString()}`
+        this.logger.info(
+          { sender: event.sender.toString() },
+          '📨 SignBidirectionalEvent'
         );
 
         try {
           await this.handleSignBidirectional(event);
         } catch (error) {
-          console.error('Error processing bidirectional:', error);
+          this.logger.error({ error }, 'Error processing bidirectional');
         }
       }
     );
 
-    // Note: Anchor's BorshEventCoder returns event names in camelCase
     cpiEventHandlers.set(
       'signatureRequestedEvent',
       async (eventData: unknown) => {
         const event = eventData as SignatureRequestedEvent;
-        console.log(
-          `\n📝 SignatureRequestedEvent from ${event.sender.toString()}`
+        this.logger.info(
+          { sender: event.sender.toString() },
+          '📝 SignatureRequestedEvent'
         );
 
         try {
           await this.handleSignatureRequest(event);
         } catch (error) {
-          console.error('Error sending signature:', error);
+          this.logger.error({ error }, 'Error sending signature');
         }
       }
     );
 
-    // Subscribe to CPI events
     this.cpiSubscriptionId = CpiEventParser.subscribeToCpiEvents(
       this.connection,
       this.program,
       cpiEventHandlers
     );
-
-    // Standard event listener for RespondBidirectionalEvent
-    // Note: addEventListener is not used for CPI events, they're parsed manually
-    // This is just for logging non-CPI RespondBidirectionalEvent if it exists
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
@@ -294,12 +326,12 @@ class ChainSignatureServer {
       event.params
     );
 
-    console.log('  🔑 Request ID:', requestId);
+    this.logger.info({ requestId }, '🔑 Request ID');
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
-      this.config.ethereumPrivateKey
+      this.config.mpcRootKey
     );
 
     const result = await TransactionProcessor.processTransactionForSigning(
@@ -330,7 +362,10 @@ class ChainSignatureServer {
       checkCount: 0,
     });
 
-    console.log(`🔍 Monitoring transaction: ${result.signedTxHash}`);
+    this.logger.info(
+      { txHash: result.signedTxHash },
+      '🔍 Monitoring transaction'
+    );
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {
@@ -345,12 +380,12 @@ class ChainSignatureServer {
       event.params
     );
 
-    console.log('  🔑 Request ID:', requestId);
+    this.logger.info({ requestId }, '🔑 Request ID');
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
-      this.config.ethereumPrivateKey
+      this.config.mpcRootKey
     );
 
     const signature = await CryptoUtils.signMessage(
@@ -366,16 +401,19 @@ class ChainSignatureServer {
       })
       .rpc();
 
-    console.log('  ✅ Signature sent!');
-    console.log('  🔗 Solana tx:', tx);
+    this.logger.info({ tx }, '✅ Signature sent!');
   }
 
   async shutdown() {
-    console.log('\n🛑 Shutting down...');
+    this.logger.info('🛑 Shutting down...');
+    if (this.monitorIntervalId !== null) {
+      clearInterval(this.monitorIntervalId);
+      this.monitorIntervalId = null;
+    }
     if (this.cpiSubscriptionId !== null) {
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);
+      this.cpiSubscriptionId = null;
     }
-    process.exit(0);
   }
 }
 
@@ -383,13 +421,11 @@ async function main() {
   const { envConfig } = await import('./envConfig');
 
   const config: ServerConfig = {
-    rpcUrl: envConfig.RPC_URL,
+    solanaRpcUrl: envConfig.SOLANA_RPC_URL,
     solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
-    ethereumPrivateKey: envConfig.PRIVATE_KEY_TESTNET,
+    mpcRootKey: envConfig.MPC_ROOT_KEY,
     infuraApiKey: envConfig.INFURA_API_KEY,
-    sepoliaRpcUrl: envConfig.SEPOLIA_RPC_URL,
-    ethereumRpcUrl: envConfig.ETHEREUM_RPC_URL,
-    isDevnet: envConfig.RPC_URL.includes('devnet'),
+    isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
   };
 
   const server = new ChainSignatureServer(config);

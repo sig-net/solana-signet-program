@@ -1,10 +1,10 @@
 import { assert } from 'chai';
-import { testSetup } from '../test-utils/testSetup';
+import { testSetup } from '../test-utils/testSetup.js';
 import {
   createSignArgs,
   callDirectSign,
   waitForSignatureResponse,
-} from '../test-utils/signingUtils';
+} from '../test-utils/signingUtils.js';
 
 describe('Sign/Respond wallet tests', () => {
   const { program, signetSolContract } = testSetup();

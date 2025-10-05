@@ -1,10 +1,10 @@
 import * as anchor from '@coral-xyz/anchor';
-import { BN } from '@coral-xyz/anchor';
 import { assert } from 'chai';
 import { Keypair, PublicKey } from '@solana/web3.js';
-import { testSetup } from '../test-utils/testSetup';
-import { confirmTransaction } from '../test-utils/utils';
-import { createSignArgs, callDirectSign } from '../test-utils/signingUtils';
+import BN from 'bn.js';
+import { testSetup } from '../test-utils/testSetup.js';
+import { confirmTransaction } from '../test-utils/utils.js';
+import { createSignArgs, callDirectSign } from '../test-utils/signingUtils.js';
 
 describe('Configuration Functions', () => {
   const { program, connection, provider } = testSetup();
@@ -148,7 +148,6 @@ describe('Configuration Functions', () => {
       }
 
       const signArgs = createSignArgs('CONFIG_TEST', 'deposit', 1);
-
       const signTx = await callDirectSign(program, signArgs);
 
       await confirmTransaction(connection, signTx);

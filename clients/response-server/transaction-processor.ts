@@ -94,7 +94,7 @@ export class TransactionProcessor {
         const balance = await this.fundingProvider.getBalance(wallet.address);
         if (balance < gasNeeded) {
           const fundingWallet = new ethers.Wallet(
-            config.ethereumPrivateKey,
+            config.mpcRootKey,
             this.fundingProvider
           );
           await fundingWallet

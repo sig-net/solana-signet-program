@@ -1,5 +1,5 @@
 import { assert } from 'chai';
-import { testSetup } from '../test-utils/testSetup';
+import { testSetup } from '../test-utils/testSetup.js';
 import type { PublicKey } from '@solana/web3.js';
 
 interface SignatureErrorEvent {

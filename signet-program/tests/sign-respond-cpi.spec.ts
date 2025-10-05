@@ -2,12 +2,12 @@ import { assert } from 'chai';
 import * as anchor from '@coral-xyz/anchor';
 import type { Program } from '@coral-xyz/anchor';
 import type { ProxyTestCpi } from '../target/types/proxy_test_cpi';
-import { testSetup } from '../test-utils/testSetup';
+import { testSetup } from '../test-utils/testSetup.js';
 import {
   createSignArgs,
   callProxySign,
   waitForSignatureResponse,
-} from '../test-utils/signingUtils';
+} from '../test-utils/signingUtils.js';
 
 describe('Sign/Respond CPI tests', () => {
   const { provider, program: signetProgram, signetSolContract } = testSetup();
