@@ -27,6 +27,10 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      - name: Build fakenet-signer
+        working-directory: clients/response-server
+        run: yarn build
+
       - name: Run lint
         working-directory: signet-program
         run: yarn run lint
