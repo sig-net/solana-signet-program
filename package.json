@@ -13,7 +13,7 @@
     "format:check": "prettier --check '**/*.{ts,tsx,js,jsx,json,md}'",
     "typecheck": "yarn workspace signet-program typecheck",
     "check": "yarn lint && yarn format:check && yarn typecheck",
-    "response": "yarn workspace response-server start"
+    "response": "yarn workspace fakenet-signer start"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
