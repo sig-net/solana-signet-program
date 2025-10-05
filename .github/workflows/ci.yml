@@ -22,7 +22,7 @@ jobs:
       INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
       # Placeholder values - overridden by anchor test workspace
       SOLANA_RPC_URL: https://api.devnet.solana.com # Overridden by local validator
-      PROGRAM_ID: 11111111111111111111111111111111 # Overridden by deployed program ID in testSetup.ts
+      PROGRAM_ID: 85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV # Overridden by deployed program ID in testSetup.ts
       VERBOSE: 'false'
     steps:
       - name: Checkout
