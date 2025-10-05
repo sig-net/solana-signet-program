@@ -4,11 +4,8 @@ import * as anchor from '@coral-xyz/anchor';
 import { contracts } from 'signet.js';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
-import {
-  envConfig,
-  ChainSignatureServer,
-  type ServerConfig,
-} from 'response-server';
+import { ChainSignatureServer, type ServerConfig } from 'response-server';
+import { testEnvConfig } from './testEnvConfig';
 
 function privateKeyToNajPublicKey(privateKey: string): `secp256k1:${string}` {
   const signingKey = new ethers.SigningKey(privateKey);
@@ -29,7 +26,7 @@ export function testSetup() {
     provider.connection.rpcEndpoint
   );
 
-  const rootPublicKey = privateKeyToNajPublicKey(envConfig.MPC_ROOT_KEY);
+  const rootPublicKey = privateKeyToNajPublicKey(testEnvConfig.MPC_ROOT_KEY);
 
   const signetSolContract = new contracts.solana.ChainSignatureContract({
     provider,
@@ -41,9 +38,9 @@ export function testSetup() {
 
   const config: ServerConfig = {
     solanaRpcUrl: provider.connection.rpcEndpoint,
-    solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
-    mpcRootKey: envConfig.MPC_ROOT_KEY,
-    infuraApiKey: envConfig.INFURA_API_KEY,
+    solanaPrivateKey: testEnvConfig.SOLANA_PRIVATE_KEY,
+    mpcRootKey: testEnvConfig.MPC_ROOT_KEY,
+    infuraApiKey: testEnvConfig.INFURA_API_KEY,
     programId: program.programId.toString(),
     isDevnet: provider.connection.rpcEndpoint.includes('devnet'),
     signatureDeposit: '100000',
