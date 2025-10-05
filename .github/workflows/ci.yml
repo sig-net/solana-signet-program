@@ -2,7 +2,7 @@ name: CI Tests
 
 on:
   workflow_run:
-    workflows: ["Publish Docker Image"]
+    workflows: ['Publish Docker Image']
     types: [completed]
     branches: [main]
   pull_request:
@@ -18,7 +18,7 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
-      FAKENET_SIGNER_ROOT_PRIVATE_KEY: "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      MPC_ROOT_KEY: '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
