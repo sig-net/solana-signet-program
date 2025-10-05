@@ -20,7 +20,9 @@ jobs:
     env:
       MPC_ROOT_KEY: ${{ secrets.MPC_ROOT_KEY }}
       INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
-      SOLANA_RPC_URL: https://api.devnet.solana.com
+      # Placeholder values - overridden by anchor test workspace
+      SOLANA_RPC_URL: https://api.devnet.solana.com # Overridden by local validator
+      PROGRAM_ID: 11111111111111111111111111111111 # Overridden by deployed program ID in testSetup.ts
       VERBOSE: 'false'
     steps:
       - name: Checkout

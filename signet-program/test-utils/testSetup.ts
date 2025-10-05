@@ -44,6 +44,7 @@ export function testSetup() {
     solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
     mpcRootKey: envConfig.MPC_ROOT_KEY,
     infuraApiKey: envConfig.INFURA_API_KEY,
+    programId: program.programId.toString(),
     isDevnet: provider.connection.rpcEndpoint.includes('devnet'),
     signatureDeposit: '100000',
     chainId: 'solana:localnet',
