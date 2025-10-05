@@ -65,7 +65,7 @@ This repository contains Solana Anchor program that is deployed on Solana blockc
    KEYPAIR_PATH=~/.config/solana/id.json
 
    # Ethereum Signing Keys
-   FAKENET_SIGNER_ROOT_PRIVATE_KEY=0x... # Your Responder root private key
+   MPC_ROOT_KEY=0x... # Your Responder root private key
 
    # For client verification
    RESPONDER_BASE_PUBLIC_KEY=0x... # Uncompressed (0x04...) public key
@@ -132,7 +132,7 @@ The project includes tests for all program functionality including configuration
 2. **Required Environment Variables**
    ```bash
    # In your .env file at project root
-   FAKENET_SIGNER_ROOT_PRIVATE_KEY=0x... # Your mock signer root private key
+   MPC_ROOT_KEY=0x... # Your mock signer root private key
    RESPONDER_BASE_PUBLIC_KEY=0x... # Corresponding public key
    KEYPAIR_PATH=~/.config/solana/id.json
    ```
