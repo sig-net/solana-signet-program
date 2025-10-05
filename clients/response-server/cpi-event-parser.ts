@@ -2,6 +2,9 @@ import * as anchor from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import bs58 from 'bs58';
 
+// EMIT_CPI_INSTRUCTION_DISCRIMINATOR - identifies that this is an emit_cpi! instruction
+// This is a constant from Anchor that identifies the instruction type
+// Value: e445a52e51cb9a1d
 export const EMIT_CPI_INSTRUCTION_DISCRIMINATOR = Buffer.from([
   0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d,
 ]);
@@ -29,6 +32,8 @@ export class CpiEventParser {
     const events: ParsedCpiEvent[] = [];
 
     try {
+      // Get the transaction with JsonParsed encoding to access inner instructions
+      // CPI events appear as inner instructions when emit_cpi! is used
       const tx = await connection.getParsedTransaction(signature, {
         commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
@@ -75,6 +80,11 @@ export class CpiEventParser {
     try {
       const ixData = bs58.decode(instructionData);
 
+      // Check if this is an emit_cpi! instruction
+      // The instruction data format is:
+      // [0-8]:   emit_cpi! instruction discriminator
+      // [8-16]:  event discriminator (identifies which event type)
+      // [16+]:   event data (the actual event fields)
       if (
         ixData.length >= 16 &&
         Buffer.compare(
