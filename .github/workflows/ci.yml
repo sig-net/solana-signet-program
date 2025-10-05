@@ -18,7 +18,10 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
-      MPC_ROOT_KEY: '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+      MPC_ROOT_KEY: ${{ secrets.MPC_ROOT_KEY }}
+      INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
+      SOLANA_RPC_URL: https://api.devnet.solana.com
+      VERBOSE: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,6 +40,11 @@ jobs:
 
       - name: Generate keypair
         run: solana-keygen new --no-bip39-passphrase --force
+
+      - name: Set Solana private key
+        run: |
+          SOLANA_PRIVATE_KEY=$(cat ~/.config/solana/id.json)
+          echo "SOLANA_PRIVATE_KEY=$SOLANA_PRIVATE_KEY" >> $GITHUB_ENV
 
       - name: Run Anchor tests
         working-directory: signet-program
