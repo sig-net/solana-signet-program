@@ -11,4 +11,3 @@ export { OutputSerializer } from './output-serializer';
 export * from './types/index';
 export * from './chain-utils';
 export { CONFIG } from './config';
-export { envConfig } from './envConfig';

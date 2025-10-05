@@ -1,20 +1,52 @@
 {
-  "name": "response-server",
-  "version": "1.0.0",
+  "name": "fakenet-signer",
+  "version": "1.2.1-beta.3",
+  "description": "Multi-chain signature orchestrator for Solana - listens for signature requests, executes transactions on target chains (Ethereum, etc.), and returns results",
   "type": "module",
-  "main": "index.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./index.ts",
-    "./*": "./*.ts"
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
   },
+  "files": [
+    "dist",
+    "idl"
+  ],
   "scripts": {
-    "start": "tsx sig-server.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsdown",
+    "start": "tsx run.ts",
+    "prepublishOnly": "yarn build",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "version:patch": "yarn version --patch --no-git-tag-version",
+    "version:minor": "yarn version --minor --no-git-tag-version",
+    "version:major": "yarn version --major --no-git-tag-version",
+    "version:beta": "yarn version --prerelease --preid=beta --no-git-tag-version",
+    "publish:beta": "yarn version:beta && yarn build && yarn publish --tag beta",
+    "publish:official": "yarn build && yarn publish"
   },
-  "keywords": [],
+  "keywords": [
+    "solana",
+    "ethereum",
+    "blockchain",
+    "multi-chain",
+    "signature",
+    "mpc",
+    "chain-signatures",
+    "cross-chain",
+    "web3"
+  ],
   "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "MIT",
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e",
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
@@ -27,5 +59,8 @@
     "pino": "^10.0.0",
     "tsx": "^4.19.2",
     "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "tsdown": "^0.15.6"
   }
 }

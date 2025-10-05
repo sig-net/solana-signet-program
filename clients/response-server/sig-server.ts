@@ -327,7 +327,7 @@ export class ChainSignatureServer {
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
-    const requestId = RequestIdGenerator.generateSignRespondRequestId(
+    const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
       event.sender.toString(),
       Array.from(event.serializedTransaction),
       event.caip2Id,
@@ -381,7 +381,7 @@ export class ChainSignatureServer {
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {
-    const requestId = RequestIdGenerator.generateRequestId(
+    const requestId = RequestIdGenerator.generateSignRequestId(
       event.sender.toString(),
       Array.from(event.payload),
       event.path,
@@ -428,29 +428,3 @@ export class ChainSignatureServer {
     }
   }
 }
-
-async function main() {
-  const { envConfig } = await import('./envConfig');
-
-  const config: ServerConfig = {
-    solanaRpcUrl: envConfig.SOLANA_RPC_URL,
-    solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
-    mpcRootKey: envConfig.MPC_ROOT_KEY,
-    infuraApiKey: envConfig.INFURA_API_KEY,
-    programId: envConfig.PROGRAM_ID,
-    isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
-    verbose: envConfig.VERBOSE,
-  };
-
-  const server = new ChainSignatureServer(config);
-  await server.start();
-
-  process.on('SIGINT', async () => {
-    await server.shutdown();
-  });
-}
-
-main().catch((err) => {
-  console.error('❌ Fatal error:', err);
-  process.exit(1);
-});

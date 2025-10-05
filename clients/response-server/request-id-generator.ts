@@ -1,7 +1,25 @@
 import { ethers } from 'ethers';
 
 export class RequestIdGenerator {
-  static generateSignRespondRequestId(
+  /**
+   * Generate a request ID for bidirectional sign operations
+   *
+   * Use this for sign-and-respond flows where:
+   * - A transaction is signed on one chain (e.g., Ethereum)
+   * - The transaction is executed
+   * - The result is monitored and returned to Solana
+   *
+   * @param sender - Solana public key of the requester
+   * @param transactionData - Serialized transaction bytes
+   * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:11155111")
+   * @param keyVersion - MPC key version
+   * @param path - Derivation path
+   * @param algo - Signature algorithm
+   * @param dest - Destination identifier
+   * @param params - Additional parameters
+   * @returns Deterministic request ID (keccak256 hash)
+   */
+  static generateSignBidirectionalRequestId(
     sender: string,
     transactionData: number[],
     caip2Id: string,
@@ -28,7 +46,25 @@ export class RequestIdGenerator {
     return ethers.keccak256(encoded);
   }
 
-  static generateRequestId(
+  /**
+   * Generate a request ID for simple signature requests
+   *
+   * Use this for one-way signature operations where:
+   * - A payload/message hash is signed
+   * - Only the signature is returned (no transaction execution)
+   * - No monitoring or bidirectional response needed
+   *
+   * @param addr - Solana public key of the requester
+   * @param payload - Message hash or payload to sign
+   * @param path - Derivation path
+   * @param keyVersion - MPC key version
+   * @param chainId - Chain identifier (number or string)
+   * @param algo - Signature algorithm
+   * @param dest - Destination identifier
+   * @param params - Additional parameters
+   * @returns Deterministic request ID (keccak256 hash)
+   */
+  static generateSignRequestId(
     addr: string,
     payload: number[],
     path: string,
