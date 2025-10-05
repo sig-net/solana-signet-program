@@ -21,7 +21,7 @@ jobs:
       MPC_ROOT_KEY: ${{ secrets.MPC_ROOT_KEY }}
       INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
       SOLANA_RPC_URL: https://api.devnet.solana.com
-      VERBOSE: 'true'
+      VERBOSE: 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
