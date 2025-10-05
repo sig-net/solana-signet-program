@@ -67,7 +67,9 @@ export class ChainSignatureServer {
     });
     anchor.setProvider(this.provider);
 
-    this.program = new Program(ChainSignaturesIDL as anchor.Idl, this.provider);
+    const idl = ChainSignaturesIDL as anchor.Idl;
+    idl.address = this.config.programId;
+    this.program = new Program(idl, this.provider);
   }
 
   async start() {
@@ -435,6 +437,7 @@ async function main() {
     solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
     mpcRootKey: envConfig.MPC_ROOT_KEY,
     infuraApiKey: envConfig.INFURA_API_KEY,
+    programId: envConfig.PROGRAM_ID,
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
     verbose: envConfig.VERBOSE,
   };

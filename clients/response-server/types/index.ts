@@ -1,4 +1,4 @@
-import type { PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 
 export interface ServerConfig {
@@ -6,6 +6,7 @@ export interface ServerConfig {
   solanaPrivateKey: string;
   mpcRootKey: string;
   infuraApiKey: string;
+  programId: string;
   isDevnet: boolean;
   signatureDeposit?: string;
   chainId?: string;
@@ -22,6 +23,14 @@ export const serverConfigSchema = z.object({
       'MPC root key must be a valid hex private key'
     ),
   infuraApiKey: z.string().min(1, 'Infura API key is required'),
+  programId: z.string().refine((val) => {
+    try {
+      new PublicKey(val);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Must be a valid Solana public key'),
   isDevnet: z.boolean(),
   signatureDeposit: z.string().optional(),
   chainId: z.string().optional(),
