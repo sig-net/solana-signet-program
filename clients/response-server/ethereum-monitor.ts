@@ -65,14 +65,17 @@ export class EthereumMonitor {
           return { status: 'fatal_error', reason: 'extraction_failed' };
         }
       } else {
+        // No receipt - check if replaced
         const currentNonce = await provider.getTransactionCount(fromAddress);
         if (currentNonce > nonce) {
+          // Check if it was our transaction
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
             return { status: 'error', reason: 'replaced' };
           }
         }
 
+        // Check if transaction exists
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
           return { status: 'pending' };
@@ -80,6 +83,7 @@ export class EthereumMonitor {
 
         console.log(`✅ Transaction found! Waiting for confirmation...`);
 
+        // Already checked receipt above and it was null, so return pending
         return { status: 'pending' };
       }
     } catch (e) {

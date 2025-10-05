@@ -123,14 +123,20 @@ export class ChainSignatureServer {
       }
 
       for (const [txHash, txInfo] of pendingTransactions.entries()) {
+        // CHANGE 4: Exponential backoff - check less frequently as time passes
         if (txInfo.checkCount > 0) {
+          // Skip checks based on how many times we've already checked
+          // 0-5 checks: every 5s
+          // 6-10 checks: every 10s
+          // 11-20 checks: every 30s
+          // 20+ checks: every 60s
           let skipFactor = 1;
           if (txInfo.checkCount > 20) skipFactor = 12;
           else if (txInfo.checkCount > 10) skipFactor = 6;
           else if (txInfo.checkCount > 5) skipFactor = 2;
 
           if (this.pollCounter % skipFactor !== 0) {
-            continue;
+            continue; // Skip this check
           }
         }
 
@@ -144,10 +150,12 @@ export class ChainSignatureServer {
             this.config
           );
 
+          // Increment check count
           txInfo.checkCount++;
 
           switch (result.status) {
             case 'pending':
+              // Just increment count, continue polling
               break;
 
             case 'success':
@@ -159,11 +167,13 @@ export class ChainSignatureServer {
               break;
 
             case 'error':
+              // Only for reverted/replaced - send signed error
               await this.handleFailedTransaction(txHash, txInfo);
               pendingTransactions.delete(txHash);
               break;
 
             case 'fatal_error':
+              // Just remove from map, don't send signed error
               this.logger.error(
                 { txHash, reason: result.reason },
                 'Fatal error for transaction'
@@ -201,7 +211,7 @@ export class ChainSignatureServer {
 
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
-      SerializationFormat.Borsh,
+      SerializationFormat.Borsh, // Server only respond to Solana for now
       txInfo.callbackSerializationSchema
     );
 
@@ -426,6 +436,7 @@ async function main() {
     mpcRootKey: envConfig.MPC_ROOT_KEY,
     infuraApiKey: envConfig.INFURA_API_KEY,
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
+    verbose: envConfig.VERBOSE,
   };
 
   const server = new ChainSignatureServer(config);

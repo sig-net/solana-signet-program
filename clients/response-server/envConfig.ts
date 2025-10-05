@@ -15,6 +15,10 @@ const envSchema = z.object({
     .string()
     .regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a valid hex private key'),
   INFURA_API_KEY: z.string().min(1, 'Infura API key is required'),
+  VERBOSE: z
+    .string()
+    .optional()
+    .transform((val) => val === 'true'),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -26,6 +30,7 @@ function validateEnv(): EnvConfig {
       SOLANA_PRIVATE_KEY: process.env.SOLANA_PRIVATE_KEY,
       MPC_ROOT_KEY: process.env.MPC_ROOT_KEY,
       INFURA_API_KEY: process.env.INFURA_API_KEY,
+      VERBOSE: process.env.VERBOSE,
     });
 
     return env;
