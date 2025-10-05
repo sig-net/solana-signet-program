@@ -4,7 +4,7 @@ import * as anchor from '@coral-xyz/anchor';
 import { contracts } from 'signet.js';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
-import { ChainSignatureServer, type ServerConfig } from 'response-server';
+import { ChainSignatureServer, type ServerConfig } from 'fakenet-signer';
 import { testEnvConfig } from './testEnvConfig';
 
 function privateKeyToNajPublicKey(privateKey: string): `secp256k1:${string}` {
