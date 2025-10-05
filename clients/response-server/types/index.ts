@@ -2,25 +2,30 @@ import type { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 
 export interface ServerConfig {
-  rpcUrl: string;
+  solanaRpcUrl: string;
   solanaPrivateKey: string;
-  ethereumPrivateKey: string;
+  mpcRootKey: string;
   infuraApiKey: string;
-  sepoliaRpcUrl?: string;
-  ethereumRpcUrl?: string;
   isDevnet: boolean;
+  signatureDeposit?: string;
+  chainId?: string;
+  verbose?: boolean;
 }
 
 export const serverConfigSchema = z.object({
-  rpcUrl: z.string().url({ message: 'RPC URL must be a valid URL' }),
+  solanaRpcUrl: z.string().min(1, 'Solana RPC URL is required'),
   solanaPrivateKey: z.string().min(1, 'Solana private key is required'),
-  ethereumPrivateKey: z
+  mpcRootKey: z
     .string()
-    .regex(/^0x[a-fA-F0-9]{64}$/, 'Ethereum private key must be a valid hex private key'),
+    .regex(
+      /^0x[a-fA-F0-9]{64}$/,
+      'MPC root key must be a valid hex private key'
+    ),
   infuraApiKey: z.string().min(1, 'Infura API key is required'),
-  sepoliaRpcUrl: z.string().url({ message: 'Sepolia RPC URL must be a valid URL' }).optional(),
-  ethereumRpcUrl: z.string().url({ message: 'Ethereum RPC URL must be a valid URL' }).optional(),
   isDevnet: z.boolean(),
+  signatureDeposit: z.string().optional(),
+  chainId: z.string().optional(),
+  verbose: z.boolean().optional(),
 });
 
 export interface SignBidirectionalEvent {

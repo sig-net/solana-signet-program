@@ -1,13 +1,24 @@
 import type { Program } from '@coral-xyz/anchor';
 import type { ChainSignatures } from '../target/types/chain_signatures';
-import { BN } from '@coral-xyz/anchor';
 import * as anchor from '@coral-xyz/anchor';
 import { contracts } from 'signet.js';
-import { getEnv, bigintPrivateKeyToNajPublicKey } from './utils';
-import { detectNetwork, shouldUseMockSigner } from './networkConfig';
-import { MockCPISignerServer } from './MockCPISignerServer';
+import { ethers } from 'ethers';
+import bs58 from 'bs58';
+import {
+  envConfig,
+  ChainSignatureServer,
+  type ServerConfig,
+} from 'response-server';
 
-// Must be a function to get the correct context
+function privateKeyToNajPublicKey(privateKey: string): `secp256k1:${string}` {
+  const signingKey = new ethers.SigningKey(privateKey);
+  const publicKeyHex = signingKey.publicKey.slice(4);
+  const xBytes = Buffer.from(publicKeyHex.slice(0, 64), 'hex');
+  const yBytes = Buffer.from(publicKeyHex.slice(64, 128), 'hex');
+  const publicKeyBytes = Buffer.concat([xBytes, yBytes]);
+  return `secp256k1:${bs58.encode(publicKeyBytes)}`;
+}
+
 export function testSetup() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
@@ -18,11 +29,7 @@ export function testSetup() {
     provider.connection.rpcEndpoint
   );
 
-  const env = getEnv();
-
-  const rootPublicKey = bigintPrivateKeyToNajPublicKey(
-    env.FAKENET_SIGNER_ROOT_PRIVATE_KEY
-  );
+  const rootPublicKey = privateKeyToNajPublicKey(envConfig.MPC_ROOT_KEY);
 
   const signetSolContract = new contracts.solana.ChainSignatureContract({
     provider,
@@ -32,53 +39,39 @@ export function testSetup() {
     },
   });
 
-  const mockCPISignerServer = new MockCPISignerServer({
-    connection,
-    program,
-    wallet: provider.wallet as anchor.Wallet,
-    signetSolContract,
-    basePrivateKey: env.FAKENET_SIGNER_ROOT_PRIVATE_KEY,
-  });
+  const config: ServerConfig = {
+    solanaRpcUrl: provider.connection.rpcEndpoint,
+    solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
+    mpcRootKey: envConfig.MPC_ROOT_KEY,
+    infuraApiKey: envConfig.INFURA_API_KEY,
+    isDevnet: provider.connection.rpcEndpoint.includes('devnet'),
+    signatureDeposit: '100000',
+    chainId: 'solana:localnet',
+    verbose: false,
+  };
 
-  const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from('program-state')],
-    program.programId
-  );
+  const server = new ChainSignatureServer(config);
 
-  const network = detectNetwork(provider);
-  const useMockSigner = shouldUseMockSigner(network);
+  const rpcEndpoint = provider.connection.rpcEndpoint.toLowerCase();
+  const isLocalnet =
+    rpcEndpoint.includes('localhost') ||
+    rpcEndpoint.includes('127.0.0.1') ||
+    rpcEndpoint.includes(':8899');
 
   before(async () => {
-    if (useMockSigner) {
-      await mockCPISignerServer.start();
-    }
-
-    // Make sure we initialize the program only once as Anchor shares the execution environment with all tests
-    try {
-      await program.account.programState.fetch(programStatePda);
-
-      return;
-    } catch {
-      const tx = await program.methods
-        .initialize(new BN('100000'), 'solana:localnet')
-        .rpc();
-
-      const latestBlockhash = await connection.getLatestBlockhash();
-
-      await connection.confirmTransaction(
-        {
-          signature: tx,
-          blockhash: latestBlockhash.blockhash,
-          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-        },
-        'confirmed'
-      );
+    if (isLocalnet) {
+      try {
+        await server.start();
+      } catch (error) {
+        console.error('Error starting server:', error);
+        throw error;
+      }
     }
   });
 
   after(async () => {
-    if (useMockSigner) {
-      await mockCPISignerServer?.stop();
+    if (isLocalnet) {
+      await server?.shutdown();
     }
   });
 

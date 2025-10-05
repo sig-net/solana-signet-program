@@ -1,9 +1,14 @@
 {
   "name": "response-server",
   "version": "1.0.0",
-  "main": "index.js",
+  "type": "module",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./*": "./*.ts"
+  },
   "scripts": {
-    "start": "ts-node --compiler-options '{\"resolveJsonModule\":true,\"esModuleInterop\":true,\"module\":\"commonjs\"}' sig-server.ts",
+    "start": "tsx sig-server.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -19,11 +24,8 @@
     "bs58": "^6.0.0",
     "dotenv": "^16.4.7",
     "ethers": "^6.13.5",
-    "ts-node": "^10.9.2",
+    "pino": "^10.0.0",
+    "tsx": "^4.19.2",
     "zod": "^4.1.11"
-  },
-  "devDependencies": {
-    "@types/node": "^22.13.11",
-    "typescript": "^5.8.2"
   }
 }

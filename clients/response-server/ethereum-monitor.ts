@@ -1,6 +1,10 @@
 import { ethers } from 'ethers';
 import { TransactionOutput, TransactionStatus, ServerConfig } from './types';
-import { getNamespaceFromCaip2, getSerializationFormat, SerializationFormat } from './chain-utils';
+import {
+  getNamespaceFromCaip2,
+  getSerializationFormat,
+  SerializationFormat,
+} from './chain-utils';
 
 export class EthereumMonitor {
   private static providerCache = new Map<string, ethers.JsonRpcProvider>();
@@ -26,7 +30,6 @@ export class EthereumMonitor {
       const receipt = await provider.getTransactionReceipt(txHash);
 
       if (receipt) {
-        // Transaction is mined!
         console.log(`✅ Transaction found! Confirmation complete.`);
         console.log(`  📦 Block number: ${receipt.blockNumber}`);
         console.log(
@@ -39,7 +42,6 @@ export class EthereumMonitor {
           return { status: 'error', reason: 'reverted' };
         }
 
-        // Get transaction for output extraction
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
           return { status: 'pending' };
@@ -63,17 +65,14 @@ export class EthereumMonitor {
           return { status: 'fatal_error', reason: 'extraction_failed' };
         }
       } else {
-        // No receipt - check if replaced
         const currentNonce = await provider.getTransactionCount(fromAddress);
         if (currentNonce > nonce) {
-          // Check if it was our transaction
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
             return { status: 'error', reason: 'replaced' };
           }
         }
 
-        // Check if transaction exists
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
           return { status: 'pending' };
@@ -81,7 +80,6 @@ export class EthereumMonitor {
 
         console.log(`✅ Transaction found! Waiting for confirmation...`);
 
-        // Already checked receipt above and it was null, so return pending
         return { status: 'pending' };
       }
     } catch (e) {
@@ -103,13 +101,9 @@ export class EthereumMonitor {
     let url: string;
     switch (namespace) {
       case 'eip155':
-        if (config.isDevnet) {
-          url =
-            config.sepoliaRpcUrl ||
-            `https://sepolia.infura.io/v3/${config.infuraApiKey}`;
-        } else {
-          url = config.ethereumRpcUrl || 'https://eth.llamarpc.com';
-        }
+        url = config.isDevnet
+          ? `https://sepolia.infura.io/v3/${config.infuraApiKey}`
+          : `https://mainnet.infura.io/v3/${config.infuraApiKey}`;
         break;
       default:
         throw new Error(`Unsupported chain namespace: ${namespace}`);
