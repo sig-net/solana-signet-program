@@ -31,10 +31,17 @@ export class TransactionProcessor {
 
     // Decode and prepare signed transaction
     const decoded = ethers.decodeRlp(rlpData) as string[];
-    const nonce = isEIP1559
-      ? parseInt(decoded[1], 16) // Second field for EIP-1559
-      : parseInt(decoded[0], 16); // First field for legacy
-    console.log(" 📝 Transaction nonce:", nonce);
+
+    // Helper function to parse RLP integer fields
+    const parseRlpInt = (value: string): number => {
+      if (!value || value === "0x" || value === "0x80") {
+        return 0;
+      }
+      return parseInt(value, 16);
+    };
+
+    const nonce = isEIP1559 ? parseRlpInt(decoded[1]) : parseRlpInt(decoded[0]);
+    console.log("  📝 Transaction nonce:", nonce);
     const vValue = isEIP1559 ? signature.v - 27 : signature.v;
 
     const signedFields = [

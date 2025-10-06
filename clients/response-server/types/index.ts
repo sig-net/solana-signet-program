@@ -11,6 +11,7 @@ export interface PendingTransaction {
   fromAddress: string;
   nonce: number;
   checkCount: number;
+  source: string;
 }
 
 export interface ProcessedTransaction {

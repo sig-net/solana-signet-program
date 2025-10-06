@@ -14,6 +14,7 @@ import { EthereumMonitor } from "./ethereum-monitor";
 import { OutputSerializer } from "./output-serializer";
 import { SolanaUtils } from "./solana-utils";
 import { CpiEventParser } from "./cpi-event-parser";
+import { SubstrateMonitor } from "./substrate-monitor";
 import { ethers } from "ethers";
 import * as borsh from "borsh";
 
@@ -28,6 +29,7 @@ class ChainSignatureServer {
   private program: Program<ChainSignaturesProject>;
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
+  private substrateMonitor: SubstrateMonitor;
 
   constructor() {
     this.connection = new Connection(
@@ -42,6 +44,9 @@ class ChainSignatureServer {
     anchor.setProvider(this.provider);
 
     this.program = new Program<ChainSignaturesProject>(IDL, this.provider);
+    this.substrateMonitor = new SubstrateMonitor(
+      process.env.SUBSTRATE_WS_URL || "ws://localhost:9944"
+    );
   }
 
   async start() {
@@ -58,6 +63,7 @@ class ChainSignatureServer {
     console.log("  ✅ Return transaction outputs when detected");
     console.log("  ✅ Support for CPI events (SignatureRequestedEvent)\n");
 
+    await this.connectToSubstrate();
     // Check wallet balance
     const balance = await this.connection.getBalance(this.wallet.publicKey);
     console.log("  💰 Wallet balance:", balance / 1e9, "SOL");
@@ -71,6 +77,187 @@ class ChainSignatureServer {
     this.setupEventListeners();
 
     console.log("\n✅ Server is running. Press Ctrl+C to exit.\n");
+  }
+
+  private async connectToSubstrate() {
+    try {
+      await this.substrateMonitor.connect();
+
+      // Set up Substrate event handlers
+      await this.substrateMonitor.subscribeToEvents({
+        onSignatureRequested: async (event) => {
+          console.log("\n📝 New Substrate SignatureRequested");
+          console.log("  👤 Sender:", event.sender);
+          console.log(
+            "  📊 Payload:",
+            Buffer.from(event.payload).toString("hex")
+          );
+          console.log("  🔗 Chain ID:", event.chainId);
+
+          try {
+            await this.handleSubstrateSignatureRequest(event);
+          } catch (error) {
+            console.error(
+              "❌ Error processing Substrate signature request:",
+              error
+            );
+          }
+        },
+
+        onSignRespondRequested: async (event) => {
+          console.log("\n📨 New Substrate SignRespondRequested");
+          console.log("  👤 Sender:", event.sender);
+          console.log("  🔗 Chain ID:", event.slip44ChainId);
+
+          try {
+            await this.handleSubstrateSignRespondRequest(event);
+          } catch (error) {
+            console.error(
+              "❌ Error processing Substrate sign-respond request:",
+              error
+            );
+          }
+        },
+
+        onReadResponded: async (event) => {
+          console.log("\n📖 Substrate ReadResponded received");
+          console.log("  🔑 Request ID:", event.requestId);
+          console.log("  👤 Responder:", event.responder);
+        },
+      });
+    } catch (error) {
+      console.error("❌ Failed to connect to Substrate:", error);
+    }
+  }
+
+  private async handleSubstrateSignatureRequest(event: any) {
+    console.log(event, "<< subs event");
+    const privateKey = process.env.PRIVATE_KEY_TESTNET!;
+    const wallet = new ethers.Wallet(privateKey);
+    console.log("Server's root public key:", wallet.signingKey.publicKey);
+    const path = Buffer.from(event.path.slice(2), "hex").toString();
+    const algo = Buffer.from(event.algo.slice(2), "hex").toString();
+    const dest =
+      event.dest === "0x"
+        ? ""
+        : Buffer.from(event.dest.slice(2), "hex").toString();
+    const params = Buffer.from(event.params.slice(2), "hex").toString();
+    const chainId = Buffer.from(event.chainId.slice(2), "hex").toString();
+
+    // Generate request ID (you'll need to adapt your RequestIdGenerator)
+    console.log("  Decoded values:");
+    console.log("    Path:", path);
+    console.log("    Algo:", algo);
+    console.log("    ChainId:", chainId);
+    console.log("    Params:", params);
+
+    // Generate request ID with all decoded values
+    const requestId = RequestIdGenerator.generateRequestIdStringChainId(
+      event.sender,
+      Array.from(event.payload),
+      path,
+      event.keyVersion,
+      chainId,
+      algo,
+      dest,
+      params
+    );
+
+    console.log("  🔑 Request ID:", requestId);
+
+    // Derive signing key
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      path,
+      event.sender,
+      process.env.PRIVATE_KEY_TESTNET!,
+      chainId
+    );
+
+    // Sign the payload
+    const signature = await CryptoUtils.signMessage(
+      event.payload,
+      derivedPrivateKey
+    );
+
+    // Send response to Substrate
+    await this.substrateMonitor.sendSignatureResponse(
+      Buffer.from(requestId.slice(2), "hex"),
+      signature,
+      event.sender
+    );
+
+    console.log("  ✅ Signature sent to Substrate!");
+  }
+
+  private async handleSubstrateSignRespondRequest(event: any) {
+    console.log(event, "<< subs event");
+    const path = Buffer.from(event.path.slice(2), "hex").toString();
+    const algo = Buffer.from(event.algo.slice(2), "hex").toString();
+    const dest =
+      event.dest === "0x"
+        ? ""
+        : Buffer.from(event.dest.slice(2), "hex").toString();
+    const params = Buffer.from(event.params.slice(2), "hex").toString();
+
+    // Generate request ID (you'll need to adapt your RequestIdGenerator)
+    console.log("  Decoded values:");
+    console.log("    Path:", path);
+    console.log("    Algo:", algo);
+    console.log("    Params:", params);
+    // Similar to handleSignRespondRequest but for Substrate
+    const requestId = RequestIdGenerator.generateSignRespondRequestId(
+      event.sender,
+      Array.from(event.transactionData),
+      event.slip44ChainId, // This is a number, not a hex string
+      event.keyVersion,
+      path,
+      algo,
+      dest,
+      params
+    );
+
+    console.log("  🔑 Request ID:", requestId);
+
+    // Derive signing key
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      path,
+      event.sender,
+      process.env.PRIVATE_KEY_TESTNET!,
+      "polkadot:2034"
+    );
+
+    const result = await TransactionProcessor.processTransactionForSigning(
+      event.transactionData,
+      derivedPrivateKey,
+      event.slip44ChainId
+    );
+
+    // Send signature response to Substrate
+    await this.substrateMonitor.sendSignatureResponse(
+      Buffer.from(requestId.slice(2), "hex"),
+      result.signature,
+      event.sender
+    );
+
+    // Add to pending transactions for monitoring
+    pendingTransactions.set(result.signedTxHash, {
+      txHash: result.signedTxHash,
+      requestId,
+      chainId: event.slip44ChainId,
+      explorerDeserializationFormat: event.explorerDeserializationFormat,
+      explorerDeserializationSchema: event.explorerDeserializationSchema,
+      callbackSerializationFormat: event.callbackSerializationFormat,
+      callbackSerializationSchema: event.callbackSerializationSchema,
+      sender: event.sender,
+      path: event.path,
+      fromAddress: result.fromAddress,
+      nonce: result.nonce,
+      checkCount: 0,
+      source: "polkadot", // Add this to track the source
+    });
+
+    console.log("  ✅ Signature sent to Substrate!");
+    console.log("  👀 Now monitoring for execution...");
   }
 
   private startTransactionMonitor() {
@@ -178,25 +365,48 @@ class ChainSignatureServer {
       serializedOutput
     );
 
+    console.log("\n🔍 Signature Debug:");
+    console.log("  Request ID:", txInfo.requestId);
+    console.log(
+      "  Serialized output (hex):",
+      Buffer.from(serializedOutput).toString("hex")
+    );
+    console.log("  Message hash:", ethers.hexlify(messageHash));
+    console.log(
+      "  Signing with root key address:",
+      new ethers.Wallet(process.env.PRIVATE_KEY_TESTNET!).address
+    );
+
     const signature = await CryptoUtils.signMessage(
       messageHash,
       process.env.PRIVATE_KEY_TESTNET!
     );
 
     try {
-      const tx = await this.program.methods
-        .readRespond(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
-          signature
-        )
-        .accounts({
-          responder: this.wallet.publicKey,
-        })
-        .rpc();
+      // Check source and send to appropriate chain
+      if (txInfo.source === "polkadot") {
+        await this.substrateMonitor.sendReadResponse(
+          requestIdBytes,
+          serializedOutput,
+          signature,
+          txInfo.sender
+        );
+        console.log("  ✅ Read response sent!");
+      } else {
+        const tx = await this.program.methods
+          .readRespond(
+            Array.from(requestIdBytes),
+            Buffer.from(serializedOutput),
+            signature
+          )
+          .accounts({
+            responder: this.wallet.publicKey,
+          })
+          .rpc();
 
-      console.log("  ✅ Read response sent!");
-      console.log("  🔗 Solana tx:", tx);
+        console.log("  ✅ Read response sent!");
+        console.log("  🔗 Solana tx:", tx);
+      }
 
       pendingTransactions.delete(txHash);
     } catch (error) {
@@ -399,6 +609,7 @@ class ChainSignatureServer {
       fromAddress: result.fromAddress,
       nonce: result.nonce,
       checkCount: 0,
+      source: "solana",
     });
 
     console.log("  👀 Now monitoring for execution...");
@@ -446,6 +657,7 @@ class ChainSignatureServer {
     if (this.cpiSubscriptionId !== null) {
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);
     }
+    await this.substrateMonitor.disconnect();
     process.exit(0);
   }
 }
