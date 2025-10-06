@@ -290,7 +290,7 @@ interface SignatureRequestedEvent {
 Supported chain identifiers:
 
 - `eip155:1` - Ethereum Mainnet (ABI serialization)
-- `eip155:11155111` - Sepolia Testnet (ABI serialization)
+- `eip155:1` - Sepolia Testnet (ABI serialization)
 - `solana:mainnet` - Solana Mainnet (Borsh serialization)
 - `solana:devnet` - Solana Devnet (Borsh serialization)
 - `solana:localnet` - Solana Localnet (Borsh serialization)
