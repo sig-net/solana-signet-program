@@ -11,7 +11,7 @@ export class RequestIdGenerator {
    *
    * @param sender - Solana public key of the requester
    * @param transactionData - Serialized transaction bytes
-   * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:11155111")
+   * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1")
    * @param keyVersion - MPC key version
    * @param path - Derivation path
    * @param algo - Signature algorithm
