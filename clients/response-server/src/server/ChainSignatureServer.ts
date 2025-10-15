@@ -9,18 +9,18 @@ import type {
   PendingTransaction,
   TransactionOutput,
   ServerConfig,
-} from './types';
-import { serverConfigSchema } from './types';
-import ChainSignaturesIDL from './idl/chain_signatures.json';
-import { CryptoUtils } from './crypto-utils';
-import { CONFIG } from './config';
-import { RequestIdGenerator } from './request-id-generator';
-import { TransactionProcessor } from './transaction-processor';
-import { EthereumMonitor } from './ethereum-monitor';
-import { OutputSerializer } from './output-serializer';
-import { CpiEventParser } from './cpi-event-parser';
+} from '../types';
+import { serverConfigSchema } from '../types';
+import ChainSignaturesIDL from '../../idl/chain_signatures.json';
+import { CryptoUtils } from '../modules/CryptoUtils';
+import { CONFIG } from '../config/Config';
+import { RequestIdGenerator } from '../modules/RequestIdGenerator';
+import { TransactionProcessor } from '../modules/TransactionProcessor';
+import { EthereumMonitor } from '../modules/EthereumMonitor';
+import { OutputSerializer } from '../modules/OutputSerializer';
+import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
-import { SerializationFormat } from './chain-utils';
+import { SerializationFormat } from '../modules/ChainUtils';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 

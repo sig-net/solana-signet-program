@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "start": "tsx run.ts",
+    "start": "tsx src/cli/Run.ts",
     "prepublishOnly": "yarn build",
     "test": "echo \"Error: no test specified\" && exit 1",
     "version:patch": "yarn version --patch --no-git-tag-version",

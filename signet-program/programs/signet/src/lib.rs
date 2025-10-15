@@ -144,6 +144,7 @@ pub mod chain_signatures {
      * @param algo The algorithm used for signing.
      * @param dest The response destination.
      * @param params Additional parameters.
+     * @param program_id Program to execute downstream operations.
      * @param output_deserialization_schema schema for transaction output deserialization
      * @param respond_serialization_schema serialization schema for read_respond payload
      */
@@ -156,6 +157,7 @@ pub mod chain_signatures {
         algo: String,
         dest: String,
         params: String,
+        program_id: Pubkey,
         output_deserialization_schema: Vec<u8>,
         respond_serialization_schema: Vec<u8>,
     ) -> Result<()> {
@@ -198,6 +200,7 @@ pub mod chain_signatures {
             algo,
             dest,
             params,
+            program_id,
             output_deserialization_schema,
             respond_serialization_schema
         });
@@ -444,6 +447,7 @@ pub struct SignatureRequestedEvent {
  * @param algo The algorithm used for signing.
  * @param dest The response destination.
  * @param params Additional parameters.
+ * @param program_id Program to execute downstream operations.
  * @param output_deserialization_schema Schema for transaction output deserialization.
  * @param respond_serialization_schema Serialization schema for read_respond payload.
  */
@@ -458,6 +462,7 @@ pub struct SignBidirectionalEvent {
     pub algo: String,
     pub dest: String,
     pub params: String,
+    pub program_id: Pubkey,
     pub output_deserialization_schema: Vec<u8>,
     pub respond_serialization_schema: Vec<u8>,
 }

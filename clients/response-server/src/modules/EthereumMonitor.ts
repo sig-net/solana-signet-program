@@ -1,10 +1,10 @@
 import { ethers } from 'ethers';
-import { TransactionOutput, TransactionStatus, ServerConfig } from './types';
+import { TransactionOutput, TransactionStatus, ServerConfig } from '../types';
 import {
   getNamespaceFromCaip2,
   getSerializationFormat,
   SerializationFormat,
-} from './chain-utils';
+} from './ChainUtils';
 
 export class EthereumMonitor {
   private static providerCache = new Map<string, ethers.JsonRpcProvider>();
