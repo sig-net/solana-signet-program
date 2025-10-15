@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/chain_signatures.json`.
  */
 export type ChainSignatures = {
-  "address": "85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV",
+  "address": "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS",
   "metadata": {
     "name": "chainSignatures",
     "version": "0.1.3",
@@ -403,7 +403,7 @@ export type ChainSignatures = {
     {
       "name": "signBidirectional",
       "docs": [
-        "* @dev Function to initiate bidirectional flow\n     * @param serialized_transaction transaction to be signed\n     * @param caip2_id chain identifier\n     * @param key_version The version of the key used for signing.\n     * @param path The derivation path for the user account.\n     * @param algo The algorithm used for signing.\n     * @param dest The response destination.\n     * @param params Additional parameters.\n     * @param program_id Program to execute downstream operations.\n     * @param output_deserialization_schema schema for transaction output deserialization\n     * @param respond_serialization_schema serialization schema for read_respond payload"
+        "* @dev Function to initiate bidirectional flow\n     * @param serialized_transaction transaction to be signed\n     * @param caip2_id chain identifier\n     * @param key_version The version of the key used for signing.\n     * @param path The derivation path for the user account.\n     * @param algo The algorithm used for signing.\n     * @param dest The response destination.\n     * @param params Additional parameters.\n     * @param program_id Program to execute downstream operations.\n     * @param output_deserialization_schema schema for transaction output deserialization\n     * @param respond_serialization_schema serialization schema for respond_bidirectional payload"
       ],
       "discriminator": [
         21,
@@ -959,7 +959,7 @@ export type ChainSignatures = {
     {
       "name": "signBidirectionalEvent",
       "docs": [
-        "* @dev Emitted when a sign_bidirectional request is made.\n * @param sender The address of the sender.\n * @param serialized_transaction The serialized transaction to be signed.\n * @param caip2_id The SLIP-44 chain ID.\n * @param key_version The version of the key used for signing.\n * @param deposit The deposit amount.\n * @param path The derivation path for the user account.\n * @param algo The algorithm used for signing.\n * @param dest The response destination.\n * @param params Additional parameters.\n * @param program_id Program to execute downstream operations.\n * @param output_deserialization_schema Schema for transaction output deserialization.\n * @param respond_serialization_schema Serialization schema for read_respond payload."
+        "* @dev Emitted when a sign_bidirectional request is made.\n * @param sender The address of the sender.\n * @param serialized_transaction The serialized transaction to be signed.\n * @param caip2_id The SLIP-44 chain ID.\n * @param key_version The version of the key used for signing.\n * @param deposit The deposit amount.\n * @param path The derivation path for the user account.\n * @param algo The algorithm used for signing.\n * @param dest The response destination.\n * @param params Additional parameters.\n * @param program_id Program to execute downstream operations.\n * @param output_deserialization_schema Schema for transaction output deserialization.\n * @param respond_serialization_schema Serialization schema for respond_bidirectional payload."
       ],
       "type": {
         "kind": "struct",
