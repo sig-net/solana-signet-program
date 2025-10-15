@@ -2,15 +2,15 @@
 seeds = false
 
 [programs.localnet]
-chain_signatures = "85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV"
+chain_signatures = "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.devnet]
-chain_signatures = "85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV"
+chain_signatures = "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.testnet]
-chain_signatures = "85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV"
+chain_signatures = "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [registry]

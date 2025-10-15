@@ -3,7 +3,7 @@
 #![allow(unexpected_cfgs)]
 use anchor_lang::prelude::*;
 
-declare_id!("85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV");
+declare_id!("H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS");
 
 #[program]
 pub mod chain_signatures {
