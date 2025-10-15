@@ -146,7 +146,7 @@ pub mod chain_signatures {
      * @param params Additional parameters.
      * @param program_id Program to execute downstream operations.
      * @param output_deserialization_schema schema for transaction output deserialization
-     * @param respond_serialization_schema serialization schema for read_respond payload
+     * @param respond_serialization_schema serialization schema for respond_bidirectional payload
      */
     pub fn sign_bidirectional(
         ctx: Context<SignBidirectional>,
@@ -449,7 +449,7 @@ pub struct SignatureRequestedEvent {
  * @param params Additional parameters.
  * @param program_id Program to execute downstream operations.
  * @param output_deserialization_schema Schema for transaction output deserialization.
- * @param respond_serialization_schema Serialization schema for read_respond payload.
+ * @param respond_serialization_schema Serialization schema for respond_bidirectional payload.
  */
 #[event]
 pub struct SignBidirectionalEvent {
