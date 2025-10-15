@@ -1,13 +1,13 @@
-export { ChainSignatureServer } from './sig-server';
-export { CryptoUtils } from './crypto-utils';
-export { TransactionProcessor } from './transaction-processor';
-export { EthereumMonitor } from './ethereum-monitor';
+export { ChainSignatureServer } from './src/server/ChainSignatureServer';
+export { CryptoUtils } from './src/modules/CryptoUtils';
+export { TransactionProcessor } from './src/modules/TransactionProcessor';
+export { EthereumMonitor } from './src/modules/EthereumMonitor';
 export {
   CpiEventParser,
   EMIT_CPI_INSTRUCTION_DISCRIMINATOR,
-} from './cpi-event-parser';
-export { RequestIdGenerator } from './request-id-generator';
-export { OutputSerializer } from './output-serializer';
-export * from './types/index';
-export * from './chain-utils';
-export { CONFIG } from './config';
+} from './src/events/CpiEventParser';
+export { RequestIdGenerator } from './src/modules/RequestIdGenerator';
+export { OutputSerializer } from './src/modules/OutputSerializer';
+export * from './src/types';
+export * from './src/modules/ChainUtils';
+export { CONFIG } from './src/config/Config';

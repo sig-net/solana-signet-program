@@ -1,7 +1,13 @@
-{
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/chain_signatures.json`.
+ */
+export type ChainSignatures = {
   "address": "85hZuPHErQ6y1o59oMGjVCjHz4xgzKzjVCpgPm6kdBTV",
   "metadata": {
-    "name": "chain_signatures",
+    "name": "chainSignatures",
     "version": "0.1.3",
     "spec": "0.1.0",
     "description": "Chain signatures program for cross-chain signing on Solana",
@@ -9,7 +15,7 @@
   },
   "instructions": [
     {
-      "name": "get_signature_deposit",
+      "name": "getSignatureDeposit",
       "docs": [
         "* @dev Function to get the current signature deposit amount.\n     * @return The current signature deposit amount."
       ],
@@ -25,7 +31,7 @@
       ],
       "accounts": [
         {
-          "name": "program_state",
+          "name": "programState",
           "pda": {
             "seeds": [
               {
@@ -70,7 +76,7 @@
       ],
       "accounts": [
         {
-          "name": "program_state",
+          "name": "programState",
           "writable": true,
           "pda": {
             "seeds": [
@@ -101,17 +107,17 @@
           "signer": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "signature_deposit",
+          "name": "signatureDeposit",
           "type": "u64"
         },
         {
-          "name": "chain_id",
+          "name": "chainId",
           "type": "string"
         }
       ]
@@ -137,7 +143,7 @@
           "signer": true
         },
         {
-          "name": "event_authority",
+          "name": "eventAuthority",
           "pda": {
             "seeds": [
               {
@@ -171,7 +177,7 @@
       ],
       "args": [
         {
-          "name": "request_ids",
+          "name": "requestIds",
           "type": {
             "vec": {
               "array": [
@@ -186,7 +192,7 @@
           "type": {
             "vec": {
               "defined": {
-                "name": "Signature"
+                "name": "signature"
               }
             }
           }
@@ -194,7 +200,7 @@
       ]
     },
     {
-      "name": "respond_bidirectional",
+      "name": "respondBidirectional",
       "docs": [
         "* @dev Function to finalize bidirectional flow\n     * @param request_id The ID of the signature request to respond to\n     * @param serialized_output output of the previously executed transaction\n     * @param signature ECDSA signature of the serialized output and request_id (keccak256(request_id.concat(serialized_output)))"
       ],
@@ -216,7 +222,7 @@
       ],
       "args": [
         {
-          "name": "request_id",
+          "name": "requestId",
           "type": {
             "array": [
               "u8",
@@ -225,21 +231,21 @@
           }
         },
         {
-          "name": "serialized_output",
+          "name": "serializedOutput",
           "type": "bytes"
         },
         {
           "name": "signature",
           "type": {
             "defined": {
-              "name": "Signature"
+              "name": "signature"
             }
           }
         }
       ]
     },
     {
-      "name": "respond_error",
+      "name": "respondError",
       "docs": [
         "* @dev Function to emit signature generation errors.\n     * @param errors The array of signature generation errors."
       ],
@@ -265,7 +271,7 @@
           "type": {
             "vec": {
               "defined": {
-                "name": "ErrorResponse"
+                "name": "errorResponse"
               }
             }
           }
@@ -289,7 +295,7 @@
       ],
       "accounts": [
         {
-          "name": "program_state",
+          "name": "programState",
           "writable": true,
           "pda": {
             "seeds": [
@@ -320,17 +326,17 @@
           "signer": true
         },
         {
-          "name": "fee_payer",
+          "name": "feePayer",
           "writable": true,
           "signer": true,
           "optional": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         },
         {
-          "name": "event_authority",
+          "name": "eventAuthority",
           "pda": {
             "seeds": [
               {
@@ -373,7 +379,7 @@
           }
         },
         {
-          "name": "key_version",
+          "name": "keyVersion",
           "type": "u32"
         },
         {
@@ -395,7 +401,7 @@
       ]
     },
     {
-      "name": "sign_bidirectional",
+      "name": "signBidirectional",
       "docs": [
         "* @dev Function to initiate bidirectional flow\n     * @param serialized_transaction transaction to be signed\n     * @param caip2_id chain identifier\n     * @param key_version The version of the key used for signing.\n     * @param path The derivation path for the user account.\n     * @param algo The algorithm used for signing.\n     * @param dest The response destination.\n     * @param params Additional parameters.\n     * @param program_id Program to execute downstream operations.\n     * @param output_deserialization_schema schema for transaction output deserialization\n     * @param respond_serialization_schema serialization schema for read_respond payload"
       ],
@@ -411,7 +417,7 @@
       ],
       "accounts": [
         {
-          "name": "program_state",
+          "name": "programState",
           "writable": true,
           "pda": {
             "seeds": [
@@ -442,13 +448,13 @@
           "signer": true
         },
         {
-          "name": "fee_payer",
+          "name": "feePayer",
           "writable": true,
           "signer": true,
           "optional": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         },
         {
@@ -456,7 +462,7 @@
           "optional": true
         },
         {
-          "name": "event_authority",
+          "name": "eventAuthority",
           "pda": {
             "seeds": [
               {
@@ -490,15 +496,15 @@
       ],
       "args": [
         {
-          "name": "serialized_transaction",
+          "name": "serializedTransaction",
           "type": "bytes"
         },
         {
-          "name": "caip2_id",
+          "name": "caip2Id",
           "type": "string"
         },
         {
-          "name": "key_version",
+          "name": "keyVersion",
           "type": "u32"
         },
         {
@@ -518,21 +524,21 @@
           "type": "string"
         },
         {
-          "name": "program_id",
+          "name": "programId",
           "type": "pubkey"
         },
         {
-          "name": "output_deserialization_schema",
+          "name": "outputDeserializationSchema",
           "type": "bytes"
         },
         {
-          "name": "respond_serialization_schema",
+          "name": "respondSerializationSchema",
           "type": "bytes"
         }
       ]
     },
     {
-      "name": "update_deposit",
+      "name": "updateDeposit",
       "docs": [
         "* @dev Function to set the signature deposit amount.\n     * @param new_deposit The new deposit amount."
       ],
@@ -548,7 +554,7 @@
       ],
       "accounts": [
         {
-          "name": "program_state",
+          "name": "programState",
           "writable": true,
           "pda": {
             "seeds": [
@@ -578,23 +584,23 @@
           "writable": true,
           "signer": true,
           "relations": [
-            "program_state"
+            "programState"
           ]
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "new_deposit",
+          "name": "newDeposit",
           "type": "u64"
         }
       ]
     },
     {
-      "name": "withdraw_funds",
+      "name": "withdrawFunds",
       "docs": [
         "* @dev Function to withdraw funds from the program.\n     * @param amount The amount to withdraw."
       ],
@@ -610,7 +616,7 @@
       ],
       "accounts": [
         {
-          "name": "program_state",
+          "name": "programState",
           "writable": true,
           "pda": {
             "seeds": [
@@ -640,7 +646,7 @@
           "writable": true,
           "signer": true,
           "relations": [
-            "program_state"
+            "programState"
           ]
         },
         {
@@ -651,7 +657,7 @@
           "writable": true
         },
         {
-          "name": "system_program",
+          "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
       ],
@@ -665,7 +671,7 @@
   ],
   "accounts": [
     {
-      "name": "ProgramState",
+      "name": "programState",
       "discriminator": [
         77,
         209,
@@ -680,7 +686,7 @@
   ],
   "events": [
     {
-      "name": "DepositUpdatedEvent",
+      "name": "depositUpdatedEvent",
       "discriminator": [
         215,
         193,
@@ -693,7 +699,7 @@
       ]
     },
     {
-      "name": "FundsWithdrawnEvent",
+      "name": "fundsWithdrawnEvent",
       "discriminator": [
         86,
         232,
@@ -706,7 +712,7 @@
       ]
     },
     {
-      "name": "RespondBidirectionalEvent",
+      "name": "respondBidirectionalEvent",
       "discriminator": [
         195,
         195,
@@ -719,7 +725,7 @@
       ]
     },
     {
-      "name": "SignBidirectionalEvent",
+      "name": "signBidirectionalEvent",
       "discriminator": [
         135,
         205,
@@ -732,7 +738,7 @@
       ]
     },
     {
-      "name": "SignatureErrorEvent",
+      "name": "signatureErrorEvent",
       "discriminator": [
         42,
         28,
@@ -745,7 +751,7 @@
       ]
     },
     {
-      "name": "SignatureRequestedEvent",
+      "name": "signatureRequestedEvent",
       "discriminator": [
         171,
         129,
@@ -758,7 +764,7 @@
       ]
     },
     {
-      "name": "SignatureRespondedEvent",
+      "name": "signatureRespondedEvent",
       "discriminator": [
         118,
         146,
@@ -774,43 +780,43 @@
   "errors": [
     {
       "code": 6000,
-      "name": "InsufficientDeposit",
+      "name": "insufficientDeposit",
       "msg": "Insufficient deposit amount"
     },
     {
       "code": 6001,
-      "name": "InvalidInputLength",
+      "name": "invalidInputLength",
       "msg": "Arrays must have the same length"
     },
     {
       "code": 6002,
-      "name": "Unauthorized",
+      "name": "unauthorized",
       "msg": "Unauthorized access"
     },
     {
       "code": 6003,
-      "name": "InsufficientFunds",
+      "name": "insufficientFunds",
       "msg": "Insufficient funds for withdrawal"
     },
     {
       "code": 6004,
-      "name": "InvalidRecipient",
+      "name": "invalidRecipient",
       "msg": "Invalid recipient address"
     },
     {
       "code": 6005,
-      "name": "InvalidTransaction",
+      "name": "invalidTransaction",
       "msg": "Invalid transaction data"
     },
     {
       "code": 6006,
-      "name": "MissingInstructionSysvar",
+      "name": "missingInstructionSysvar",
       "msg": "Missing instruction sysvar"
     }
   ],
   "types": [
     {
-      "name": "AffinePoint",
+      "name": "affinePoint",
       "type": {
         "kind": "struct",
         "fields": [
@@ -836,7 +842,7 @@
       }
     },
     {
-      "name": "DepositUpdatedEvent",
+      "name": "depositUpdatedEvent",
       "docs": [
         "* @dev Emitted when the deposit amount is updated.\n * @param old_deposit The previous deposit amount.\n * @param new_deposit The new deposit amount."
       ],
@@ -844,23 +850,23 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "old_deposit",
+            "name": "oldDeposit",
             "type": "u64"
           },
           {
-            "name": "new_deposit",
+            "name": "newDeposit",
             "type": "u64"
           }
         ]
       }
     },
     {
-      "name": "ErrorResponse",
+      "name": "errorResponse",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "request_id",
+            "name": "requestId",
             "type": {
               "array": [
                 "u8",
@@ -869,14 +875,14 @@
             }
           },
           {
-            "name": "error_message",
+            "name": "errorMessage",
             "type": "string"
           }
         ]
       }
     },
     {
-      "name": "FundsWithdrawnEvent",
+      "name": "fundsWithdrawnEvent",
       "docs": [
         "* @dev Emitted when a withdrawal is made.\n * @param amount The amount withdrawn.\n * @param recipient The address of the recipient."
       ],
@@ -895,7 +901,7 @@
       }
     },
     {
-      "name": "ProgramState",
+      "name": "programState",
       "type": {
         "kind": "struct",
         "fields": [
@@ -904,18 +910,18 @@
             "type": "pubkey"
           },
           {
-            "name": "signature_deposit",
+            "name": "signatureDeposit",
             "type": "u64"
           },
           {
-            "name": "chain_id",
+            "name": "chainId",
             "type": "string"
           }
         ]
       }
     },
     {
-      "name": "RespondBidirectionalEvent",
+      "name": "respondBidirectionalEvent",
       "docs": [
         "* @dev Emitted when a read response is received.\n * @param request_id The ID of the request. Must be calculated off-chain.\n * @param responder The address of the responder.\n * @param serialized_output The serialized output.\n * @param signature The signature."
       ],
@@ -923,7 +929,7 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "request_id",
+            "name": "requestId",
             "type": {
               "array": [
                 "u8",
@@ -936,14 +942,14 @@
             "type": "pubkey"
           },
           {
-            "name": "serialized_output",
+            "name": "serializedOutput",
             "type": "bytes"
           },
           {
             "name": "signature",
             "type": {
               "defined": {
-                "name": "Signature"
+                "name": "signature"
               }
             }
           }
@@ -951,7 +957,7 @@
       }
     },
     {
-      "name": "SignBidirectionalEvent",
+      "name": "signBidirectionalEvent",
       "docs": [
         "* @dev Emitted when a sign_bidirectional request is made.\n * @param sender The address of the sender.\n * @param serialized_transaction The serialized transaction to be signed.\n * @param caip2_id The SLIP-44 chain ID.\n * @param key_version The version of the key used for signing.\n * @param deposit The deposit amount.\n * @param path The derivation path for the user account.\n * @param algo The algorithm used for signing.\n * @param dest The response destination.\n * @param params Additional parameters.\n * @param program_id Program to execute downstream operations.\n * @param output_deserialization_schema Schema for transaction output deserialization.\n * @param respond_serialization_schema Serialization schema for read_respond payload."
       ],
@@ -963,15 +969,15 @@
             "type": "pubkey"
           },
           {
-            "name": "serialized_transaction",
+            "name": "serializedTransaction",
             "type": "bytes"
           },
           {
-            "name": "caip2_id",
+            "name": "caip2Id",
             "type": "string"
           },
           {
-            "name": "key_version",
+            "name": "keyVersion",
             "type": "u32"
           },
           {
@@ -995,30 +1001,30 @@
             "type": "string"
           },
           {
-            "name": "program_id",
+            "name": "programId",
             "type": "pubkey"
           },
           {
-            "name": "output_deserialization_schema",
+            "name": "outputDeserializationSchema",
             "type": "bytes"
           },
           {
-            "name": "respond_serialization_schema",
+            "name": "respondSerializationSchema",
             "type": "bytes"
           }
         ]
       }
     },
     {
-      "name": "Signature",
+      "name": "signature",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "big_r",
+            "name": "bigR",
             "type": {
               "defined": {
-                "name": "AffinePoint"
+                "name": "affinePoint"
               }
             }
           },
@@ -1032,14 +1038,14 @@
             }
           },
           {
-            "name": "recovery_id",
+            "name": "recoveryId",
             "type": "u8"
           }
         ]
       }
     },
     {
-      "name": "SignatureErrorEvent",
+      "name": "signatureErrorEvent",
       "docs": [
         "* @dev Emitted when a signature error is received.\n * @notice Any address can emit this event. Do not rely on it for business logic.\n * @param request_id The ID of the request. Must be calculated off-chain.\n * @param responder The address of the responder.\n * @param error The error message."
       ],
@@ -1047,7 +1053,7 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "request_id",
+            "name": "requestId",
             "type": {
               "array": [
                 "u8",
@@ -1067,7 +1073,7 @@
       }
     },
     {
-      "name": "SignatureRequestedEvent",
+      "name": "signatureRequestedEvent",
       "docs": [
         "* @dev Emitted when a signature is requested.\n * @param sender The address of the sender.\n * @param payload The payload to be signed.\n * @param key_version The version of the key used for signing.\n * @param deposit The deposit amount.\n * @param chain_id The CAIP-2 ID of the blockchain.\n * @param path The derivation path for the user account.\n * @param algo The algorithm used for signing.\n * @param dest The response destination.\n * @param params Additional parameters.\n * @param fee_payer Optional fee payer account."
       ],
@@ -1088,7 +1094,7 @@
             }
           },
           {
-            "name": "key_version",
+            "name": "keyVersion",
             "type": "u32"
           },
           {
@@ -1096,7 +1102,7 @@
             "type": "u64"
           },
           {
-            "name": "chain_id",
+            "name": "chainId",
             "type": "string"
           },
           {
@@ -1116,7 +1122,7 @@
             "type": "string"
           },
           {
-            "name": "fee_payer",
+            "name": "feePayer",
             "type": {
               "option": "pubkey"
             }
@@ -1125,7 +1131,7 @@
       }
     },
     {
-      "name": "SignatureRespondedEvent",
+      "name": "signatureRespondedEvent",
       "docs": [
         "* @dev Emitted when a signature response is received.\n * @notice Any address can emit this event. Clients should always verify the validity of the signature.\n * @param request_id The ID of the request. Must be calculated off-chain.\n * @param responder The address of the responder.\n * @param signature The signature response."
       ],
@@ -1133,7 +1139,7 @@
         "kind": "struct",
         "fields": [
           {
-            "name": "request_id",
+            "name": "requestId",
             "type": {
               "array": [
                 "u8",
@@ -1149,7 +1155,7 @@
             "name": "signature",
             "type": {
               "defined": {
-                "name": "Signature"
+                "name": "signature"
               }
             }
           }
@@ -1157,4 +1163,4 @@
       }
     }
   ]
-}
+};

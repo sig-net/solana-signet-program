@@ -1,6 +1,6 @@
-import { CONFIG } from './config';
+import { CONFIG } from '../config/Config';
 import { ethers } from 'ethers';
-import { SignatureResponse } from './types';
+import { SignatureResponse } from '../types';
 
 export class CryptoUtils {
   static deriveEpsilon(requester: string, path: string): bigint {

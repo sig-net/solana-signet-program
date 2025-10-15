@@ -1,6 +1,10 @@
 import { ethers } from 'ethers';
-import { ProcessedTransaction, ServerConfig, SignatureResponse } from './types';
-import { getNamespaceFromCaip2 } from './chain-utils';
+import {
+  ProcessedTransaction,
+  ServerConfig,
+  SignatureResponse,
+} from '../types';
+import { getNamespaceFromCaip2 } from './ChainUtils';
 
 export class TransactionProcessor {
   private static fundingProvider: ethers.JsonRpcProvider | null = null;

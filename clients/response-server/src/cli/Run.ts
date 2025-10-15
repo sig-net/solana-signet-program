@@ -1,6 +1,6 @@
-import { ChainSignatureServer } from './sig-server.js';
-import { envConfig } from './envConfig.js';
-import type { ServerConfig } from './types/index.js';
+import { ChainSignatureServer } from '../server/ChainSignatureServer.js';
+import { envConfig } from '../config/EnvConfig.js';
+import type { ServerConfig } from '../types/index.js';
 
 async function main() {
   const config: ServerConfig = {
