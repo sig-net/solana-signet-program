@@ -1,6 +1,7 @@
 import * as anchor from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import bs58 from 'bs58';
+import { CpiEventData } from '../types';
 
 // EMIT_CPI_INSTRUCTION_DISCRIMINATOR - identifies that this is an emit_cpi! instruction
 // This is a constant from Anchor that identifies the instruction type
@@ -11,7 +12,7 @@ export const EMIT_CPI_INSTRUCTION_DISCRIMINATOR = Buffer.from([
 
 export interface ParsedCpiEvent {
   name: string;
-  data: unknown;
+  data: CpiEventData;
 }
 
 export class CpiEventParser {
@@ -150,7 +151,7 @@ export class CpiEventParser {
   static subscribeToCpiEvents(
     connection: Connection,
     program: anchor.Program,
-    eventHandlers: Map<string, (event: unknown, slot: number) => Promise<void>>
+    eventHandlers: Map<string, (event: CpiEventData, slot: number) => Promise<void>>
   ): number {
     return connection.onLogs(
       program.programId,

@@ -77,14 +77,44 @@ export interface PendingTransaction {
   checkCount: number;
 }
 
+// Borsh schema types
+export interface BorshStructField {
+  [key: string]: string;
+}
+
+export interface BorshSchema {
+  struct?: BorshStructField;
+  enum?: Array<{ [key: string]: BorshStructField | string }>;
+}
+
+// ABI schema types
+export interface AbiSchemaField {
+  name: string;
+  type: string;
+}
+
+// Serialization output types
+export type SerializableValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | null
+  | SerializableValue[]
+  | { [key: string]: SerializableValue };
+
+export interface TransactionOutputData {
+  [key: string]: SerializableValue;
+}
+
 export interface TransactionOutput {
   success: boolean;
-  output: Record<string, unknown>;
+  output: TransactionOutputData;
 }
 
 export type TransactionStatus =
   | { status: 'pending' }
-  | { status: 'success'; success: boolean; output: Record<string, unknown> }
+  | { status: 'success'; success: boolean; output: TransactionOutputData }
   | { status: 'error'; reason: string }
   | { status: 'fatal_error'; reason: string };
 
@@ -101,4 +131,20 @@ export interface ProcessedTransaction {
   signedTransaction: string;
   fromAddress: string;
   nonce: number;
+}
+
+// CPI Event data types - union of all possible event data
+export type CpiEventData = SignBidirectionalEvent | SignatureRequestedEvent;
+
+// Type guard functions
+export function isSignBidirectionalEvent(
+  event: CpiEventData
+): event is SignBidirectionalEvent {
+  return 'serializedTransaction' in event && 'caip2Id' in event;
+}
+
+export function isSignatureRequestedEvent(
+  event: CpiEventData
+): event is SignatureRequestedEvent {
+  return 'payload' in event && 'chainId' in event;
 }
