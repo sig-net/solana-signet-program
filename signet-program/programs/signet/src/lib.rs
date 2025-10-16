@@ -144,7 +144,7 @@ pub mod chain_signatures {
      * @param algo The algorithm used for signing.
      * @param dest The response destination.
      * @param params Additional parameters.
-     * @param program_id Program to execute downstream operations.
+     * @param program_id Program ID to callback after execution (not yet enabled).
      * @param output_deserialization_schema schema for transaction output deserialization
      * @param respond_serialization_schema serialization schema for respond_bidirectional payload
      */
@@ -447,7 +447,7 @@ pub struct SignatureRequestedEvent {
  * @param algo The algorithm used for signing.
  * @param dest The response destination.
  * @param params Additional parameters.
- * @param program_id Program to execute downstream operations.
+ * @param program_id Program ID to callback after execution (not yet enabled).
  * @param output_deserialization_schema Schema for transaction output deserialization.
  * @param respond_serialization_schema Serialization schema for respond_bidirectional payload.
  */

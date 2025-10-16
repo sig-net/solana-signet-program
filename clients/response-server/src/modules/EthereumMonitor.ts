@@ -1,5 +1,11 @@
 import { ethers } from 'ethers';
-import { TransactionOutput, TransactionStatus, ServerConfig } from '../types';
+import {
+  TransactionOutput,
+  TransactionStatus,
+  ServerConfig,
+  TransactionOutputData,
+  AbiSchemaField,
+} from '../types';
 import {
   getNamespaceFromCaip2,
   getSerializationFormat,
@@ -147,16 +153,13 @@ export class EthereumMonitor {
                 new Uint8Array(explorerDeserializationSchema)
               );
 
-        const schema = JSON.parse(schemaStr) as Array<{
-          name: string;
-          type: string;
-        }>;
+        const schema = JSON.parse(schemaStr) as AbiSchemaField[];
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
           schema.map((s) => s.type),
           callResult
         );
 
-        const decodedOutput: Record<string, unknown> = {};
+        const decodedOutput: TransactionOutputData = {};
         schema.forEach((field, index) => {
           decodedOutput[field.name] = decoded[index];
         });

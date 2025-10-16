@@ -1,9 +1,16 @@
 import * as borsh from 'borsh';
+import type { Schema } from 'borsh';
 import { ethers } from 'ethers';
+import {
+  TransactionOutputData,
+  BorshSchema,
+  AbiSchemaField,
+  SerializableValue,
+} from '../types';
 
 export class OutputSerializer {
   static async serialize(
-    output: Record<string, unknown>,
+    output: TransactionOutputData,
     format: number,
     schema: Buffer | number[]
   ): Promise<Uint8Array> {
@@ -17,41 +24,37 @@ export class OutputSerializer {
   }
 
   private static async serializeBorsh(
-    output: Record<string, unknown>,
+    output: TransactionOutputData,
     schema: Buffer | number[]
   ): Promise<Uint8Array> {
     const schemaStr = this.getSchemaString(schema);
-    const borshSchema = JSON.parse(schemaStr) as Record<string, unknown>;
+    const borshSchema = JSON.parse(schemaStr) as BorshSchema;
 
-    let dataToSerialize: Record<string, unknown> | unknown = output;
+    let dataToSerialize: SerializableValue = output;
     if (output.isFunctionCall === false) {
       dataToSerialize = this.createBorshData(borshSchema);
     }
 
     // Handle single-field objects with empty key
     if (typeof dataToSerialize === 'object' && dataToSerialize !== null) {
-      const keys = Object.keys(dataToSerialize as Record<string, unknown>);
+      const keys = Object.keys(dataToSerialize as TransactionOutputData);
       if (keys.length === 1 && keys[0] === '') {
-        dataToSerialize = (dataToSerialize as Record<string, unknown>)[''];
+        dataToSerialize = (dataToSerialize as TransactionOutputData)[''];
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const serialized = borsh.serialize(borshSchema as any, dataToSerialize);
+    const serialized = borsh.serialize(borshSchema as Schema, dataToSerialize);
     return serialized;
   }
 
   private static async serializeAbi(
-    output: Record<string, unknown>,
+    output: TransactionOutputData,
     schema: Buffer | number[]
   ): Promise<Uint8Array> {
     const schemaStr = this.getSchemaString(schema);
-    const parsedSchema = JSON.parse(schemaStr) as Array<{
-      name: string;
-      type: string;
-    }>;
+    const parsedSchema = JSON.parse(schemaStr) as AbiSchemaField[];
 
-    let dataToEncode: Record<string, unknown> = output;
+    let dataToEncode: TransactionOutputData = output;
     if (output.isFunctionCall === false) {
       dataToEncode = this.createAbiData(parsedSchema);
     }
@@ -77,10 +80,8 @@ export class OutputSerializer {
       : new TextDecoder().decode(new Uint8Array(schema));
   }
 
-  private static createBorshData(
-    borshSchema: Record<string, unknown>
-  ): Record<string, unknown> {
-    const struct = borshSchema.struct as Record<string, string> | undefined;
+  private static createBorshData(borshSchema: BorshSchema): TransactionOutputData {
+    const struct = borshSchema.struct;
     if (struct && struct.message === 'string') {
       return { message: 'non_function_call_success' };
     } else if (struct && struct.success === 'bool') {
@@ -89,10 +90,8 @@ export class OutputSerializer {
     return { success: true };
   }
 
-  private static createAbiData(
-    schema: Array<{ name: string; type: string }>
-  ): Record<string, unknown> {
-    const data: Record<string, unknown> = {};
+  private static createAbiData(schema: AbiSchemaField[]): TransactionOutputData {
+    const data: TransactionOutputData = {};
     schema.forEach((field) => {
       if (field.type === 'string') {
         data[field.name] = 'non_function_call_success';

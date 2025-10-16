@@ -9,6 +9,11 @@ import type {
   PendingTransaction,
   TransactionOutput,
   ServerConfig,
+  CpiEventData,
+} from '../types';
+import {
+  isSignBidirectionalEvent,
+  isSignatureRequestedEvent,
 } from '../types';
 import { serverConfigSchema } from '../types';
 import ChainSignaturesIDL from '../../idl/chain_signatures.json';
@@ -282,20 +287,24 @@ export class ChainSignatureServer {
   private setupEventListeners() {
     const cpiEventHandlers = new Map<
       string,
-      (event: unknown, slot: number) => Promise<void>
+      (event: CpiEventData, slot: number) => Promise<void>
     >();
 
     cpiEventHandlers.set(
       'signBidirectionalEvent',
-      async (eventData: unknown, _slot: number) => {
-        const event = eventData as SignBidirectionalEvent;
+      async (eventData: CpiEventData, _slot: number) => {
+        if (!isSignBidirectionalEvent(eventData)) {
+          this.logger.error('Invalid event type for signBidirectionalEvent');
+          return;
+        }
+
         this.logger.info(
-          { sender: event.sender.toString() },
+          { sender: eventData.sender.toString() },
           '📨 SignBidirectionalEvent'
         );
 
         try {
-          await this.handleSignBidirectional(event);
+          await this.handleSignBidirectional(eventData);
         } catch (error) {
           this.logger.error({ error }, 'Error processing bidirectional');
         }
@@ -304,15 +313,19 @@ export class ChainSignatureServer {
 
     cpiEventHandlers.set(
       'signatureRequestedEvent',
-      async (eventData: unknown) => {
-        const event = eventData as SignatureRequestedEvent;
+      async (eventData: CpiEventData) => {
+        if (!isSignatureRequestedEvent(eventData)) {
+          this.logger.error('Invalid event type for signatureRequestedEvent');
+          return;
+        }
+
         this.logger.info(
-          { sender: event.sender.toString() },
+          { sender: eventData.sender.toString() },
           '📝 SignatureRequestedEvent'
         );
 
         try {
-          await this.handleSignatureRequest(event);
+          await this.handleSignatureRequest(eventData);
         } catch (error) {
           this.logger.error({ error }, 'Error sending signature');
         }
