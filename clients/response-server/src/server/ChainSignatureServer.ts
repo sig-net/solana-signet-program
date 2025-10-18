@@ -11,10 +11,7 @@ import type {
   ServerConfig,
   CpiEventData,
 } from '../types';
-import {
-  isSignBidirectionalEvent,
-  isSignatureRequestedEvent,
-} from '../types';
+import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
 import ChainSignaturesIDL from '../../idl/chain_signatures.json';
 import { CryptoUtils } from '../modules/CryptoUtils';

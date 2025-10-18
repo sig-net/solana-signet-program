@@ -151,7 +151,10 @@ export class CpiEventParser {
   static subscribeToCpiEvents(
     connection: Connection,
     program: anchor.Program,
-    eventHandlers: Map<string, (event: CpiEventData, slot: number) => Promise<void>>
+    eventHandlers: Map<
+      string,
+      (event: CpiEventData, slot: number) => Promise<void>
+    >
   ): number {
     return connection.onLogs(
       program.programId,
