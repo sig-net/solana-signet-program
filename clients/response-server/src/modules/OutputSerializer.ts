@@ -80,7 +80,9 @@ export class OutputSerializer {
       : new TextDecoder().decode(new Uint8Array(schema));
   }
 
-  private static createBorshData(borshSchema: BorshSchema): TransactionOutputData {
+  private static createBorshData(
+    borshSchema: BorshSchema
+  ): TransactionOutputData {
     const struct = borshSchema.struct;
     if (struct && struct.message === 'string') {
       return { message: 'non_function_call_success' };
@@ -90,7 +92,9 @@ export class OutputSerializer {
     return { success: true };
   }
 
-  private static createAbiData(schema: AbiSchemaField[]): TransactionOutputData {
+  private static createAbiData(
+    schema: AbiSchemaField[]
+  ): TransactionOutputData {
     const data: TransactionOutputData = {};
     schema.forEach((field) => {
       if (field.type === 'string') {

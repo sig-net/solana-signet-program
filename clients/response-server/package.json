@@ -1,6 +1,6 @@
 {
   "name": "fakenet-signer",
-  "version": "1.2.1-beta.3",
+  "version": "1.2.1-beta.5",
   "description": "Multi-chain signature orchestrator for Solana - listens for signature requests, executes transactions on target chains (Ethereum, etc.), and returns results",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -54,7 +54,7 @@
     "@solana/web3.js": "^1.98.0",
     "borsh": "^2.0.0",
     "bs58": "^6.0.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.2.3",
     "ethers": "^6.13.5",
     "pino": "^10.0.0",
     "tsx": "^4.19.2",
