@@ -20,6 +20,10 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === 'true'),
+  BITCOIN_REQUIRED_CONFIRMATIONS: z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseInt(val, 10) : undefined)),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -33,6 +37,8 @@ function validateEnv(): EnvConfig {
       INFURA_API_KEY: process.env.INFURA_API_KEY,
       PROGRAM_ID: process.env.PROGRAM_ID,
       VERBOSE: process.env.VERBOSE,
+      BITCOIN_REQUIRED_CONFIRMATIONS:
+        process.env.BITCOIN_REQUIRED_CONFIRMATIONS,
     });
 
     return env;

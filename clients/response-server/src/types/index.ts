@@ -11,6 +11,7 @@ export interface ServerConfig {
   signatureDeposit?: string;
   chainId?: string;
   verbose?: boolean;
+  bitcoinRequiredConfirmations?: number;
 }
 
 export const serverConfigSchema = z.object({
@@ -35,6 +36,7 @@ export const serverConfigSchema = z.object({
   signatureDeposit: z.string().optional(),
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
+  bitcoinRequiredConfirmations: z.number().optional(),
 });
 
 export interface SignBidirectionalEvent {
@@ -75,6 +77,7 @@ export interface PendingTransaction {
   fromAddress: string;
   nonce: number;
   checkCount: number;
+  namespace: string;
 }
 
 // Borsh schema types
@@ -125,9 +128,8 @@ export interface SignatureResponse {
 }
 
 export interface ProcessedTransaction {
-  unsignedTxHash: string;
   signedTxHash: string;
-  signature: SignatureResponse;
+  signature: SignatureResponse[];  // Array to support multiple inputs (e.g., Bitcoin PSBTs)
   signedTransaction: string;
   fromAddress: string;
   nonce: number;

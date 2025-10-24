@@ -2,6 +2,8 @@ export { ChainSignatureServer } from './src/server/ChainSignatureServer';
 export { CryptoUtils } from './src/modules/CryptoUtils';
 export { TransactionProcessor } from './src/modules/TransactionProcessor';
 export { EthereumMonitor } from './src/modules/EthereumMonitor';
+export { BitcoinTransactionProcessor } from './src/modules/BitcoinTransactionProcessor';
+export { BitcoinMonitor } from './src/modules/BitcoinMonitor';
 export {
   CpiEventParser,
   EMIT_CPI_INSTRUCTION_DISCRIMINATOR,

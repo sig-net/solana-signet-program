@@ -63,7 +63,7 @@ export class TransactionProcessor {
       signedTxHash = ethers.keccak256(signedTransaction);
     }
 
-    // Convert signature to Solana format
+    // Convert signature to Solana format (single signature for EVM transactions)
     const solanaSignature = this.toSolanaSignature(signature);
 
     const namespace = getNamespaceFromCaip2(caip2Id);
@@ -79,9 +79,8 @@ export class TransactionProcessor {
           'Funding provider is unavailable, skipping balance check'
         );
         return {
-          unsignedTxHash,
           signedTxHash,
-          signature: solanaSignature,
+          signature: [solanaSignature],  // EVM has single signature
           signedTransaction: ethers.hexlify(signedTransaction),
           fromAddress: wallet.address,
           nonce,
@@ -115,9 +114,8 @@ export class TransactionProcessor {
     }
 
     return {
-      unsignedTxHash,
       signedTxHash,
-      signature: solanaSignature,
+      signature: [solanaSignature],  // EVM has single signature
       signedTransaction: ethers.hexlify(signedTransaction),
       fromAddress: wallet.address,
       nonce,

@@ -11,6 +11,7 @@ async function main() {
     programId: envConfig.PROGRAM_ID,
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
     verbose: envConfig.VERBOSE,
+    bitcoinRequiredConfirmations: envConfig.BITCOIN_REQUIRED_CONFIRMATIONS,
   };
 
   const server = new ChainSignatureServer(config);

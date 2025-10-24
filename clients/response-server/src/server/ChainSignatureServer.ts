@@ -19,10 +19,15 @@ import { CONFIG } from '../config/Config';
 import { RequestIdGenerator } from '../modules/RequestIdGenerator';
 import { TransactionProcessor } from '../modules/TransactionProcessor';
 import { EthereumMonitor } from '../modules/EthereumMonitor';
+import { BitcoinTransactionProcessor } from '../modules/BitcoinTransactionProcessor';
+import { BitcoinMonitor } from '../modules/BitcoinMonitor';
 import { OutputSerializer } from '../modules/OutputSerializer';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
-import { SerializationFormat } from '../modules/ChainUtils';
+import {
+  SerializationFormat,
+  getNamespaceFromCaip2,
+} from '../modules/ChainUtils';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -127,34 +132,41 @@ export class ChainSignatureServer {
       }
 
       for (const [txHash, txInfo] of pendingTransactions.entries()) {
-        // CHANGE 4: Exponential backoff - check less frequently as time passes
         if (txInfo.checkCount > 0) {
-          // Skip checks based on how many times we've already checked
-          // 0-5 checks: every 5s
-          // 6-10 checks: every 10s
-          // 11-20 checks: every 30s
-          // 20+ checks: every 60s
           let skipFactor = 1;
-          if (txInfo.checkCount > 20) skipFactor = 12;
-          else if (txInfo.checkCount > 10) skipFactor = 6;
-          else if (txInfo.checkCount > 5) skipFactor = 2;
+
+          if (txInfo.namespace === 'bip122') {
+            if (txInfo.checkCount > 10) skipFactor = 12;
+            else if (txInfo.checkCount > 5) skipFactor = 6;
+            else skipFactor = 2;
+          } else {
+            if (txInfo.checkCount > 20) skipFactor = 12;
+            else if (txInfo.checkCount > 10) skipFactor = 6;
+            else if (txInfo.checkCount > 5) skipFactor = 2;
+          }
 
           if (this.pollCounter % skipFactor !== 0) {
-            continue; // Skip this check
+            continue;
           }
         }
 
         try {
-          const result = await EthereumMonitor.waitForTransactionAndGetOutput(
-            txHash,
-            txInfo.caip2Id,
-            txInfo.explorerDeserializationSchema,
-            txInfo.fromAddress,
-            txInfo.nonce,
-            this.config
-          );
+          const result =
+            txInfo.namespace === 'bip122'
+              ? await BitcoinMonitor.waitForTransactionAndGetOutput(
+                  txHash,
+                  txInfo.caip2Id,
+                  this.config
+                )
+              : await EthereumMonitor.waitForTransactionAndGetOutput(
+                  txHash,
+                  txInfo.caip2Id,
+                  txInfo.explorerDeserializationSchema,
+                  txInfo.fromAddress,
+                  txInfo.nonce,
+                  this.config
+                );
 
-          // Increment check count
           txInfo.checkCount++;
 
           switch (result.status) {
@@ -337,6 +349,8 @@ export class ChainSignatureServer {
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
+    const namespace = getNamespaceFromCaip2(event.caip2Id);
+
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
       event.sender.toString(),
       Array.from(event.serializedTransaction),
@@ -348,7 +362,7 @@ export class ChainSignatureServer {
       event.params
     );
 
-    this.logger.info({ requestId }, '🔑 Request ID');
+    this.logger.info({ requestId, namespace }, '🔑 Request ID');
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
@@ -356,16 +370,39 @@ export class ChainSignatureServer {
       this.config.mpcRootKey
     );
 
-    const result = await TransactionProcessor.processTransactionForSigning(
-      new Uint8Array(event.serializedTransaction),
-      derivedPrivateKey,
-      event.caip2Id,
-      this.config
-    );
+    let result;
+
+    if (namespace === 'bip122') {
+      this.logger.info('Processing Bitcoin transaction (P2WPKH)');
+
+      result = await BitcoinTransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        event.caip2Id,
+        this.config
+      );
+
+      this.logger.info(
+        '📝 Bitcoin transaction signed - client will broadcast'
+      );
+    } else {
+      this.logger.info('Processing EVM transaction');
+
+      result = await TransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        event.caip2Id,
+        this.config
+      );
+
+      this.logger.info(
+        '📝 EVM transaction signed - client will broadcast'
+      );
+    }
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
     await this.program.methods
-      .respond([requestIdBytes], [result.signature])
+      .respond([requestIdBytes], result.signature)  // result.signature is already an array
       .accounts({
         responder: this.wallet.publicKey,
       })
@@ -382,11 +419,12 @@ export class ChainSignatureServer {
       fromAddress: result.fromAddress,
       nonce: result.nonce,
       checkCount: 0,
+      namespace,
     });
 
     this.logger.info(
-      { txHash: result.signedTxHash },
-      '🔍 Monitoring transaction'
+      { txHash: result.signedTxHash, namespace },
+      '🔍 Monitoring transaction (waiting for client broadcast)'
     );
   }
 
