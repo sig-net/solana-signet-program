@@ -5,13 +5,15 @@ export class RequestIdGenerator {
    * Generate a request ID for bidirectional sign operations
    *
    * Use this for sign-and-respond flows where:
-   * - A transaction is signed on one chain (e.g., Ethereum)
+   * - A transaction is signed on one chain (e.g., Ethereum, Bitcoin)
    * - The transaction is executed
    * - The result is monitored and returned to Solana
    *
    * @param sender - Solana public key of the requester
-   * @param transactionData - Serialized transaction bytes
-   * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1")
+   * @param transactionData - Transaction identifier:
+   *   - For Bitcoin: 32-byte txid (transaction hash without witness)
+   *   - For EVM: Full RLP-encoded transaction bytes
+   * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1", "bip122:...")
    * @param keyVersion - MPC key version
    * @param path - Derivation path
    * @param algo - Signature algorithm

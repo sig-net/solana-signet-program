@@ -3,6 +3,7 @@ import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
 import pino from 'pino';
+import * as bitcoin from 'bitcoinjs-lib';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -351,9 +352,28 @@ export class ChainSignatureServer {
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
     const namespace = getNamespaceFromCaip2(event.caip2Id);
 
+    // For Bitcoin, extract canonical txid (without witness) from PSBT
+    // For EVM, use full transaction data
+    let transactionData: number[];
+
+    if (namespace === 'bip122') {
+      // Bitcoin: Extract txid from PSBT (canonical, excludes witness)
+      const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(event.serializedTransaction));
+      const tx = psbt.extractTransaction(true); // true = don't finalize, get unsigned tx
+      const txid = tx.getId(); // Returns hex string of txid
+
+      // Convert hex to bytes
+      transactionData = Array.from(Buffer.from(txid, 'hex'));
+
+      this.logger.info({ txid }, '📝 Bitcoin txid (canonical)');
+    } else {
+      // EVM: Use full transaction data
+      transactionData = Array.from(event.serializedTransaction);
+    }
+
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
       event.sender.toString(),
-      Array.from(event.serializedTransaction),
+      transactionData,
       event.caip2Id,
       event.keyVersion,
       event.path,
