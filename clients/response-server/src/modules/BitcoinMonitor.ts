@@ -29,7 +29,7 @@ export class BitcoinMonitor {
 
   static async waitForTransactionAndGetOutput(
     txid: string,
-    caip2Id: string,
+    _caip2Id: string,
     config: ServerConfig
   ): Promise<TransactionStatus> {
     const adapter = await this.getAdapter(config);
@@ -53,12 +53,10 @@ export class BitcoinMonitor {
       }
 
       console.log(
-        pc.green(`✅ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmations`)
+        pc.green(`✅ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmation(s)`)
       );
-      console.log(pc.blue(`  📦 Block: ${pc.white(tx.blockHeight?.toString() || 'N/A')}`));
-      console.log(pc.blue(`  🔗 Hash: ${pc.gray(tx.blockHash?.slice(0, 16) || 'N/A')}...`));
 
-      // Bitcoin output is just a boolean success value (matches Borsh schema)
+      // Bitcoin output is just boolean (Borsh schema expects boolean, not object)
       const output: TransactionOutputData = true;
 
       return {
@@ -68,12 +66,11 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
-        console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: not found yet`));
-        console.log(pc.gray(`   Verify client broadcast this EXACT txid (display format)`));
+        console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: not found`));
         return { status: 'pending' };
       }
 
-      console.error(pc.red(`❌ Error checking ${pc.magenta(networkName)} tx ${pc.cyan(txid)}:`), error);
+      console.error(pc.red(`❌ Error: ${error instanceof Error ? error.message : error}`));
       return { status: 'pending' };
     }
   }

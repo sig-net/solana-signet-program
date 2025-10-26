@@ -69,36 +69,21 @@ export class BitcoinTransactionProcessor {
       network,
     });
 
-    const networkName = config.bitcoinNetwork === 'regtest' ? 'Regtest' :
-                        config.bitcoinNetwork === 'testnet' ? 'Testnet4' : 'Mainnet';
-    console.log(pc.cyan(`\n🔐 Processing Bitcoin Transfer (P2WPKH - ${pc.magenta(networkName)})`));
-    console.log(pc.blue(`  👤 Address: ${pc.yellow(address!)}`));
-
-    // Parse PSBT (includes witnessUtxo metadata for SegWit signing)
     const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(psbtBytes), { network });
 
-    console.log(pc.blue(`  📥 Inputs: ${pc.white(psbt.data.inputs.length.toString())}`));
-    console.log(pc.blue(`  📤 Outputs: ${pc.white(psbt.data.outputs.length.toString())}`));
+    console.log(pc.cyan(`🔐 Bitcoin P2WPKH: ${pc.white(psbt.data.inputs.length)} input(s), ${pc.white(psbt.data.outputs.length)} output(s)`));
 
-    // Validate that all inputs have witnessUtxo (required for P2WPKH signing)
     for (let i = 0; i < psbt.data.inputs.length; i++) {
       const input = psbt.data.inputs[i];
       if (!input.witnessUtxo) {
-        throw new Error(
-          `Input ${i} is missing witnessUtxo field. ` +
-            `For P2WPKH (SegWit) transactions, each input must include witnessUtxo with: ` +
-            `{ script: Buffer (scriptPubKey), value: number (satoshis) }. ` +
-            `Example: psbt.addInput({ hash, index, witnessUtxo: { script: Buffer.from(scriptPubKey, 'hex'), value: amount } })`
-        );
+        throw new Error(`Input ${i} missing witnessUtxo (required for P2WPKH)`);
       }
     }
 
-    // Sign all inputs with derived key
     for (let i = 0; i < psbt.data.inputs.length; i++) {
       psbt.signInput(i, keyPair);
     }
 
-    // Validate all signatures
     const allSigned = psbt.validateSignaturesOfAllInputs(
       (pubkey, msghash, sig) =>
         ECPair.fromPublicKey(pubkey).verify(msghash, sig)
@@ -108,46 +93,16 @@ export class BitcoinTransactionProcessor {
       throw new Error('PSBT signature validation failed');
     }
 
-    // Finalize inputs (add witness data)
     psbt.finalizeAllInputs();
-
-    // Extract signed transaction
     const tx = psbt.extractTransaction();
-
-    // Calculate txid
-    // IMPORTANT: bitcoinjs-lib's getId() returns DISPLAY format (reversed for humans)
-    // This is what block explorers and RPC APIs use for monitoring
-    const txidDisplay = tx.getId(); // Display format (for monitoring)
-    const txidInternal = Buffer.from(txidDisplay, 'hex').reverse(); // Internal format (for reference)
-
-    console.log(pc.green(`\n  ✅ Signed transaction`));
-    console.log(pc.cyan(`  🔐 TXID Calculation Details:`));
-    console.log(pc.blue(`     • Method: tx.getId()`));
-    console.log(pc.blue(`     • Raw hash: doubleSHA256(serialize_without_witness(tx))`));
-    console.log(pc.blue(`     • Display format: ${pc.yellow('reverse(raw_hash)')} ← used by block explorers`));
-    console.log(pc.blue(`     • Internal format: ${pc.gray('raw_hash')} ← used by Rust txid()`));
-    console.log(pc.blue(`     • Canonical: ${pc.green('YES')} (excludes witness data)`));
-    console.log(pc.blue(`     • Stability: ${pc.green('STABLE')} (same before/after signing for SegWit)`));
-    console.log(pc.blue(`  📋 TXID Formats:`));
-    console.log(pc.blue(`     • Display (for monitoring): ${pc.yellow(txidDisplay)}`));
-    console.log(pc.blue(`     • Internal (Rust format):   ${pc.gray(txidInternal.toString('hex'))}`));
-    console.log(pc.blue(`     • Display bytes (first 8):  [${pc.yellow(Array.from(Buffer.from(txidDisplay, 'hex')).slice(0, 8).join(', '))}...]`));
-    console.log(pc.blue(`     • Internal bytes (first 8): [${pc.gray(Array.from(txidInternal).slice(0, 8).join(', '))}...]`));
-    console.log(pc.blue(`  📦 Size: ${pc.white(tx.virtualSize().toString())} vbytes (includes witness)`));
-
-    // Extract all signatures from witness data
-    const signatures = this.extractAllSolanaSignatures(tx);
-    console.log(
-      pc.blue(`  🔏 Extracted ${pc.white(signatures.length.toString())} signature(s) from ${pc.white(tx.ins.length.toString())} input(s)`)
-    );
-
+    const txidDisplay = tx.getId();
     const signedTxHex = tx.toHex();
-    console.log(pc.cyan(`\n  ⚠️  IMPORTANT: Client must broadcast this EXACT transaction:`));
-    console.log(pc.yellow(`     Signed TX Hex: ${signedTxHex.substring(0, 64)}...`));
-    console.log(pc.yellow(`     TXID (monitor): ${txidDisplay}`));
-    console.log(pc.gray(`     If client reconstructs tx from signatures, TXID MUST match!`));
 
-    // Return display format for monitoring (block explorers use this)
+    console.log(pc.green(`✅ Signed: ${pc.yellow(txidDisplay)}`));
+    console.log(pc.gray(`   Address: ${address}, Size: ${tx.virtualSize()} vbytes`));
+
+    const signatures = this.extractAllSolanaSignatures(tx);
+
     return {
       signedTxHash: txidDisplay,
       signature: signatures,
@@ -171,15 +126,6 @@ export class BitcoinTransactionProcessor {
     }
   }
 
-  /**
-   * Extracts all signatures from Bitcoin transaction for Solana verification.
-   *
-   * For PSBTs with multiple inputs, each input has its own signature.
-   * This implementation extracts and returns ALL signatures from ALL inputs.
-   *
-   * Note: Returns raw signatures (r, s) - clients are responsible for
-   * canonical encoding (BIP62/BIP66) when constructing Bitcoin transactions.
-   */
   private static extractAllSolanaSignatures(
     tx: bitcoin.Transaction
   ): SignatureResponse[] {
@@ -187,29 +133,20 @@ export class BitcoinTransactionProcessor {
 
     for (let i = 0; i < tx.ins.length; i++) {
       const witness = tx.ins[i]?.witness;
-
       if (!witness || witness.length < 2) {
         throw new Error(`Missing witness data in input ${i}`);
       }
 
-      // Witness[0] is DER signature + sighash byte
-      const signatureWithSighash = witness[0];
-
-      // Decode DER signature to get r and s (64 bytes total)
-      const decoded = bitcoin.script.signature.decode(signatureWithSighash);
+      const decoded = bitcoin.script.signature.decode(witness[0]);
       const r = Buffer.from(decoded.signature.subarray(0, 32));
       const s = Buffer.from(decoded.signature.subarray(32, 64));
 
-      // Reconstruct R point (x, y) from r value
-      // Try both possible y-coordinates (even=0x02, odd=0x03)
       let uncompressed: Uint8Array | null = null;
       let recoveryId = 0;
 
       for (const parity of [0x02, 0x03]) {
         const compressed = Buffer.concat([Buffer.from([parity]), r]);
-
         if (ecc.isPoint(compressed)) {
-          // Decompress to get full 65-byte point (0x04 + 32-byte x + 32-byte y)
           uncompressed = ecc.pointCompress(compressed, false);
           recoveryId = parity === 0x02 ? 0 : 1;
           break;
@@ -220,16 +157,11 @@ export class BitcoinTransactionProcessor {
         throw new Error(`Failed to reconstruct R point for input ${i}`);
       }
 
-      // Extract x and y coordinates (skip first byte 0x04)
       const rx = Buffer.from(uncompressed.subarray(1, 33));
       const ry = Buffer.from(uncompressed.subarray(33, 65));
 
-      // Return raw signature (client handles canonical encoding)
       signatures.push({
-        bigR: {
-          x: Array.from(rx),
-          y: Array.from(ry),
-        },
+        bigR: { x: Array.from(rx), y: Array.from(ry) },
         s: Array.from(s),
         recoveryId,
       });

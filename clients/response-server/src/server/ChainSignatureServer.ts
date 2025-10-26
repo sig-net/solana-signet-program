@@ -419,43 +419,15 @@ export class ChainSignatureServer {
         '✅ PSBT parsed successfully'
       );
 
-      // Access unsigned transaction from PSBT cache
-      // extractTransaction() requires finalized PSBT, so we use __CACHE.__TX
-      // This works for P2WPKH (SegWit) because TXID is stable before signing
       const tx = (psbt as any).__CACHE.__TX;
-
-      // Calculate txid
-      // IMPORTANT: bitcoinjs-lib's getId() returns DISPLAY format (reversed for humans)
-      // Rust's txid() returns INTERNAL format (raw hash output)
-      // For requestId calculation, we MUST use INTERNAL format to match Rust!
-      const txidDisplay = tx.getId(); // Display format (what block explorers show)
-      const txidInternal = Buffer.from(txidDisplay, 'hex').reverse(); // Convert to internal format
-
-      // Use INTERNAL format for requestId calculation (to match Rust)
+      const txidDisplay = tx.getId();
+      // Use internal format (reversed) for requestId to match Rust
+      const txidInternal = Buffer.from(txidDisplay, 'hex').reverse();
       transactionData = Array.from(txidInternal);
 
-      this.logger.info(
-        {
-          txidDisplay,
-          txidInternal: txidInternal.toString('hex'),
-          txidDisplayBytes: Array.from(Buffer.from(txidDisplay, 'hex')),
-          txidInternalBytes: Array.from(txidInternal),
-          format: 'INTERNAL (reversed from display) - matches Rust txid()',
-          calculation: 'doubleSHA256(serialize_without_witness(tx))',
-          displayCalculation: 'getId() = reverse(doubleSHA256(...))',
-          usingForRequestId: 'INTERNAL format (non-reversed hash output)',
-          sender: event.sender.toString(),
-          path: event.path,
-        },
-        '🔐 Bitcoin txid calculated (UNSIGNED - for requestId)'
-      );
+      this.logger.info({ txid: txidDisplay }, '🔐 Bitcoin PSBT parsed');
     } else {
-      // EVM: Use full transaction data
       transactionData = Array.from(event.serializedTransaction);
-      this.logger.info(
-        { txDataLength: transactionData.length },
-        '📝 EVM transaction data'
-      );
     }
 
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
@@ -477,55 +449,19 @@ export class ChainSignatureServer {
       this.config.mpcRootKey
     );
 
-    let result;
-
-    if (namespace === 'bip122') {
-      this.logger.info('Processing Bitcoin transaction (P2WPKH)');
-
-      // Store unsigned txid (internal format) for comparison
-      const unsignedTxidInternal = Buffer.from(transactionData).toString('hex');
-      const unsignedTxidDisplay = Buffer.from(transactionData).reverse().toString('hex');
-
-      result = await BitcoinTransactionProcessor.processTransactionForSigning(
-        new Uint8Array(event.serializedTransaction),
-        derivedPrivateKey,
-        event.caip2Id,
-        this.config
-      );
-
-      // result.signedTxHash is in DISPLAY format (from BitcoinTransactionProcessor)
-      // Convert it to internal format for comparison
-      const signedTxidDisplay = result.signedTxHash;
-      const signedTxidInternal = Buffer.from(signedTxidDisplay, 'hex').reverse().toString('hex');
-
-      // Verify txid stability (SegWit property) - compare INTERNAL formats
-      const txidsMatch = unsignedTxidInternal === signedTxidInternal;
-      this.logger.info(
-        {
-          unsignedTxidDisplay,
-          unsignedTxidInternal,
-          signedTxidDisplay,
-          signedTxidInternal,
-          txidsMatch,
-          segwitProperty: 'P2WPKH txid is stable (same before/after signing)',
-          note: 'Both internal formats must match for SegWit',
-        },
-        '🔐 Bitcoin txid verification (SIGNED vs UNSIGNED)'
-      );
-
-      this.logger.info('📝 Bitcoin transaction signed - client will broadcast');
-    } else {
-      this.logger.info('Processing EVM transaction');
-
-      result = await TransactionProcessor.processTransactionForSigning(
-        new Uint8Array(event.serializedTransaction),
-        derivedPrivateKey,
-        event.caip2Id,
-        this.config
-      );
-
-      this.logger.info('📝 EVM transaction signed - client will broadcast');
-    }
+    const result = namespace === 'bip122'
+      ? await BitcoinTransactionProcessor.processTransactionForSigning(
+          new Uint8Array(event.serializedTransaction),
+          derivedPrivateKey,
+          event.caip2Id,
+          this.config
+        )
+      : await TransactionProcessor.processTransactionForSigning(
+          new Uint8Array(event.serializedTransaction),
+          derivedPrivateKey,
+          event.caip2Id,
+          this.config
+        );
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
     const tx = await this.program.methods
@@ -551,24 +487,14 @@ export class ChainSignatureServer {
       namespace,
     });
 
-    if (namespace === 'bip122') {
-      this.logger.info(
-        {
-          txHash: result.signedTxHash,
-          txHashFormat: 'DISPLAY (for block explorers)',
-          fromAddress: result.fromAddress,
-          requiredConfirmations: 1,
-          network: this.config.bitcoinNetwork,
-          note: 'Client MUST broadcast this exact txid',
-        },
-        '🔍 Monitoring Bitcoin transaction'
-      );
-    } else {
-      this.logger.info(
-        { txHash: result.signedTxHash, namespace },
-        '🔍 Monitoring transaction (waiting for client broadcast)'
-      );
-    }
+    this.logger.info(
+      {
+        txHash: result.signedTxHash,
+        namespace,
+        network: namespace === 'bip122' ? this.config.bitcoinNetwork : undefined,
+      },
+      '🔍 Monitoring transaction'
+    );
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {
