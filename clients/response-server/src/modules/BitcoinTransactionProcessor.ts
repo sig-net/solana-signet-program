@@ -141,11 +141,17 @@ export class BitcoinTransactionProcessor {
       pc.blue(`  🔏 Extracted ${pc.white(signatures.length.toString())} signature(s) from ${pc.white(tx.ins.length.toString())} input(s)`)
     );
 
+    const signedTxHex = tx.toHex();
+    console.log(pc.cyan(`\n  ⚠️  IMPORTANT: Client must broadcast this EXACT transaction:`));
+    console.log(pc.yellow(`     Signed TX Hex: ${signedTxHex.substring(0, 64)}...`));
+    console.log(pc.yellow(`     TXID (monitor): ${txidDisplay}`));
+    console.log(pc.gray(`     If client reconstructs tx from signatures, TXID MUST match!`));
+
     // Return display format for monitoring (block explorers use this)
     return {
       signedTxHash: txidDisplay,
       signature: signatures,
-      signedTransaction: tx.toHex(),
+      signedTransaction: signedTxHex,
       fromAddress: address!,
       nonce: 0,
     };

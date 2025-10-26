@@ -23,7 +23,9 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
 
   async getTransaction(txid: string): Promise<BitcoinTransactionInfo> {
     try {
-      const tx = await this.client.command('gettransaction', txid);
+      // Use getrawtransaction with verbose=true to get ANY transaction
+      // (not just wallet transactions like gettransaction does)
+      const tx = await this.client.command('getrawtransaction', txid, true);
 
       return {
         txid: tx.txid,
@@ -35,9 +37,10 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
     } catch (error) {
       if (
         error instanceof Error &&
-        error.message.includes('Invalid or non-wallet transaction')
+        (error.message.includes('No such mempool or blockchain transaction') ||
+         error.message.includes('Invalid or non-wallet transaction'))
       ) {
-        throw new Error(`Transaction ${txid} not found in wallet`);
+        throw new Error(`Transaction ${txid} not found`);
       }
       throw error;
     }

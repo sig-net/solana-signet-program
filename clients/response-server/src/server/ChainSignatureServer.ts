@@ -551,10 +551,24 @@ export class ChainSignatureServer {
       namespace,
     });
 
-    this.logger.info(
-      { txHash: result.signedTxHash, namespace },
-      '🔍 Monitoring transaction (waiting for client broadcast)'
-    );
+    if (namespace === 'bip122') {
+      this.logger.info(
+        {
+          txHash: result.signedTxHash,
+          txHashFormat: 'DISPLAY (for block explorers)',
+          fromAddress: result.fromAddress,
+          requiredConfirmations: 1,
+          network: this.config.bitcoinNetwork,
+          note: 'Client MUST broadcast this exact txid',
+        },
+        '🔍 Monitoring Bitcoin transaction'
+      );
+    } else {
+      this.logger.info(
+        { txHash: result.signedTxHash, namespace },
+        '🔍 Monitoring transaction (waiting for client broadcast)'
+      );
+    }
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {

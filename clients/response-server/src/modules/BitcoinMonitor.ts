@@ -58,9 +58,8 @@ export class BitcoinMonitor {
       console.log(pc.blue(`  📦 Block: ${pc.white(tx.blockHeight?.toString() || 'N/A')}`));
       console.log(pc.blue(`  🔗 Hash: ${pc.gray(tx.blockHash?.slice(0, 16) || 'N/A')}...`));
 
-      const output: TransactionOutputData = {
-        success: true,
-      };
+      // Bitcoin output is just a boolean success value (matches Borsh schema)
+      const output: TransactionOutputData = true;
 
       return {
         status: 'success',
@@ -70,6 +69,7 @@ export class BitcoinMonitor {
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
         console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: not found yet`));
+        console.log(pc.gray(`   Verify client broadcast this EXACT txid (display format)`));
         return { status: 'pending' };
       }
 

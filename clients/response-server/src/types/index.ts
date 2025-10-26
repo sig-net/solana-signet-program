@@ -108,9 +108,11 @@ export type SerializableValue =
   | SerializableValue[]
   | { [key: string]: SerializableValue };
 
-export interface TransactionOutputData {
-  [key: string]: SerializableValue;
-}
+// Bitcoin outputs are just boolean success values
+// EVM outputs are objects with decoded data
+export type TransactionOutputData =
+  | boolean
+  | { [key: string]: SerializableValue };
 
 export interface TransactionOutput {
   success: boolean;
