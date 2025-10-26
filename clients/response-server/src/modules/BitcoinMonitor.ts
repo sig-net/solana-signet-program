@@ -3,87 +3,60 @@ import type {
   TransactionOutputData,
   ServerConfig,
 } from '../types';
-
-interface BitcoinTransaction {
-  txid: string;
-  status: {
-    confirmed: boolean;
-    block_height?: number;
-    block_hash?: string;
-  };
-}
+import { IBitcoinAdapter } from '../adapters/IBitcoinAdapter';
+import { BitcoinAdapterFactory } from '../adapters/BitcoinAdapterFactory';
+import pc from 'picocolors';
 
 /**
- * Bitcoin transaction monitor using mempool.space API
+ * Bitcoin transaction monitor using adapter pattern
  *
- * Networks:
- * - Testnet4: https://mempool.space/testnet4/api (isDevnet: true)
- * - Mainnet: https://mempool.space/api (isDevnet: false)
+ * Supports:
+ * - mempool.space API (testnet/mainnet)
+ * - Bitcoin Core RPC (regtest)
+ *
+ * Automatically selects adapter based on network:
+ * - regtest → Bitcoin Core RPC adapter (localhost:18443)
+ * - testnet → mempool.space API (testnet4)
+ * - mainnet → mempool.space API
  *
  * Features:
- * - Confirmation monitoring (default: 1 confirmation)
  * - Simple boolean output: { success: true }
  *
  * Note: Transactions are broadcast by the client, not the server.
- *
- * @example
- * // Monitor for confirmations (after client broadcasts)
- * const result = await BitcoinMonitor.waitForTransactionAndGetOutput(
- *   txid,
- *   "bip122:00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043",
- *   schema,
- *   fromAddress,
- *   0,
- *   config
- * );
- * // result = { status: 'success', success: true, output: { success: true } }
  */
 export class BitcoinMonitor {
-  private static providerCache = new Map<string, string>();
+  private static adapterCache = new Map<string, IBitcoinAdapter>();
 
   static async waitForTransactionAndGetOutput(
     txid: string,
     caip2Id: string,
     config: ServerConfig
   ): Promise<TransactionStatus> {
-    const apiBaseUrl = this.getApiBaseUrl(caip2Id, config);
-    const requiredConfs = config.bitcoinRequiredConfirmations || 1;
-    const networkName = config.isDevnet ? 'Testnet4' : 'Mainnet';
+    const adapter = await this.getAdapter(config);
+    const requiredConfs = 1;
+    const networkName = config.bitcoinNetwork === 'regtest' ? 'Regtest' :
+                        config.bitcoinNetwork === 'testnet' ? 'Testnet4' : 'Mainnet';
 
     try {
-      const txUrl = `${apiBaseUrl}/tx/${txid}`;
-      const response = await fetch(txUrl);
+      const tx = await adapter.getTransaction(txid);
 
-      if (!response.ok) {
-        console.log(`⏳ ${networkName} tx ${txid}: not found yet`);
+      if (!tx.confirmed) {
+        console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: in mempool (0 confs)`));
         return { status: 'pending' };
       }
 
-      const tx = (await response.json()) as BitcoinTransaction;
-
-      if (!tx.status?.confirmed) {
-        console.log(`⏳ ${networkName} tx ${txid}: in mempool (0 confs)`);
-        return { status: 'pending' };
-      }
-
-      const tipHeightUrl = `${apiBaseUrl}/blocks/tip/height`;
-      const tipResponse = await fetch(tipHeightUrl);
-      const currentHeight = parseInt(await tipResponse.text());
-
-      const confirmations = currentHeight - tx.status.block_height! + 1;
-
-      if (confirmations < requiredConfs) {
+      if (tx.confirmations < requiredConfs) {
         console.log(
-          `⏳ ${networkName} tx ${txid}: ${confirmations}/${requiredConfs} confirmations`
+          pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())}/${pc.white(requiredConfs.toString())} confirmations`)
         );
         return { status: 'pending' };
       }
 
       console.log(
-        `✅ ${networkName} tx ${txid}: ${confirmations} confirmations`
+        pc.green(`✅ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmations`)
       );
-      console.log(`  📦 Block: ${tx.status.block_height}`);
-      console.log(`  🔗 Hash: ${tx.status.block_hash?.slice(0, 16)}...`);
+      console.log(pc.blue(`  📦 Block: ${pc.white(tx.blockHeight?.toString() || 'N/A')}`));
+      console.log(pc.blue(`  🔗 Hash: ${pc.gray(tx.blockHash?.slice(0, 16) || 'N/A')}...`));
 
       const output: TransactionOutputData = {
         success: true,
@@ -95,23 +68,28 @@ export class BitcoinMonitor {
         output,
       };
     } catch (error) {
-      console.error(`❌ Error checking ${networkName} tx ${txid}:`, error);
+      if (error instanceof Error && error.message.includes('not found')) {
+        console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: not found yet`));
+        return { status: 'pending' };
+      }
+
+      console.error(pc.red(`❌ Error checking ${pc.magenta(networkName)} tx ${pc.cyan(txid)}:`), error);
       return { status: 'pending' };
     }
   }
 
-  private static getApiBaseUrl(caip2Id: string, config: ServerConfig): string {
-    const cacheKey = `${caip2Id}-${config.isDevnet}`;
+  private static async getAdapter(
+    config: ServerConfig
+  ): Promise<IBitcoinAdapter> {
+    const network = config.bitcoinNetwork;
 
-    if (this.providerCache.has(cacheKey)) {
-      return this.providerCache.get(cacheKey)!;
+    if (this.adapterCache.has(network)) {
+      return this.adapterCache.get(network)!;
     }
 
-    const baseUrl = config.isDevnet
-      ? 'https://mempool.space/testnet4/api'
-      : 'https://mempool.space/api';
+    const adapter = await BitcoinAdapterFactory.create(network);
 
-    this.providerCache.set(cacheKey, baseUrl);
-    return baseUrl;
+    this.adapterCache.set(network, adapter);
+    return adapter;
   }
 }

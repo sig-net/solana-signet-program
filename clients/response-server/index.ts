@@ -13,3 +13,14 @@ export { OutputSerializer } from './src/modules/OutputSerializer';
 export * from './src/types';
 export * from './src/modules/ChainUtils';
 export { CONFIG } from './src/config/Config';
+export type {
+  IBitcoinAdapter,
+  BitcoinTransactionInfo,
+  UTXO,
+} from './src/adapters';
+export {
+  MempoolSpaceAdapter,
+  BitcoinCoreRpcAdapter,
+  BitcoinAdapterFactory,
+  BitcoinCoreClient,
+} from './src/adapters';

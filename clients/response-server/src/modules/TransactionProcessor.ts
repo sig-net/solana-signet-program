@@ -80,7 +80,7 @@ export class TransactionProcessor {
         );
         return {
           signedTxHash,
-          signature: [solanaSignature],  // EVM has single signature
+          signature: [solanaSignature], // EVM has single signature
           signedTransaction: ethers.hexlify(signedTransaction),
           fromAddress: wallet.address,
           nonce,
@@ -115,7 +115,7 @@ export class TransactionProcessor {
 
     return {
       signedTxHash,
-      signature: [solanaSignature],  // EVM has single signature
+      signature: [solanaSignature], // EVM has single signature
       signedTransaction: ethers.hexlify(signedTransaction),
       fromAddress: wallet.address,
       nonce,

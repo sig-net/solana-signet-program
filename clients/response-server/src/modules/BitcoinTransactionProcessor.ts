@@ -1,6 +1,7 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import { ECPairFactory } from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
+import pc from 'picocolors';
 import type {
   ProcessedTransaction,
   SignatureResponse,
@@ -16,18 +17,24 @@ const ECPair = ECPairFactory(ecc);
  * PSBT format is REQUIRED because it includes witnessUtxo metadata needed for SegWit signing.
  *
  * Supported networks:
- * - Testnet4 (testing/development) - uses bitcoin.networks.testnet
+ * - Regtest (local development) - uses bitcoin.networks.regtest
+ * - Testnet4 (testing) - uses bitcoin.networks.testnet
  * - Mainnet (production) - uses bitcoin.networks.bitcoin
  *
  * Requirements:
  * - Client provides PSBT bytes (BIP-174 format)
- * - All inputs must be P2WPKH (native SegWit bc1q... addresses)
- * - Each input must have witnessUtxo set (scriptPubKey + value)
+ * - All inputs must be P2WPKH (native SegWit) addresses:
+ *   - Mainnet: bc1q...
+ *   - Testnet: tb1q...
+ *   - Regtest: bcrt1q...
+ * - Each input MUST have witnessUtxo with:
+ *   - script: Buffer containing the scriptPubKey
+ *   - value: Amount in satoshis (number)
  *
- * Why PSBT is required:
+ * Why PSBT with witnessUtxo is required:
  * - SegWit signing requires previous output value (not in raw transaction)
  * - SegWit signing requires previous scriptPubKey (not in raw transaction)
- * - PSBT embeds this metadata in witnessUtxo field
+ * - witnessUtxo provides this metadata efficiently for P2WPKH
  *
  * Integration with signet.rs:
  * - signet.rs must export transactions as PSBT format (NOT raw bytes)
@@ -62,15 +69,29 @@ export class BitcoinTransactionProcessor {
       network,
     });
 
-    const networkName = config.isDevnet ? 'Testnet4' : 'Mainnet';
-    console.log(`\n🔐 Processing Bitcoin Transfer (P2WPKH - ${networkName})`);
-    console.log(`  👤 Address: ${address}`);
+    const networkName = config.bitcoinNetwork === 'regtest' ? 'Regtest' :
+                        config.bitcoinNetwork === 'testnet' ? 'Testnet4' : 'Mainnet';
+    console.log(pc.cyan(`\n🔐 Processing Bitcoin Transfer (P2WPKH - ${pc.magenta(networkName)})`));
+    console.log(pc.blue(`  👤 Address: ${pc.yellow(address!)}`));
 
     // Parse PSBT (includes witnessUtxo metadata for SegWit signing)
     const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(psbtBytes), { network });
 
-    console.log(`  📥 Inputs: ${psbt.data.inputs.length}`);
-    console.log(`  📤 Outputs: ${psbt.data.outputs.length}`);
+    console.log(pc.blue(`  📥 Inputs: ${pc.white(psbt.data.inputs.length.toString())}`));
+    console.log(pc.blue(`  📤 Outputs: ${pc.white(psbt.data.outputs.length.toString())}`));
+
+    // Validate that all inputs have witnessUtxo (required for P2WPKH signing)
+    for (let i = 0; i < psbt.data.inputs.length; i++) {
+      const input = psbt.data.inputs[i];
+      if (!input.witnessUtxo) {
+        throw new Error(
+          `Input ${i} is missing witnessUtxo field. ` +
+            `For P2WPKH (SegWit) transactions, each input must include witnessUtxo with: ` +
+            `{ script: Buffer (scriptPubKey), value: number (satoshis) }. ` +
+            `Example: psbt.addInput({ hash, index, witnessUtxo: { script: Buffer.from(scriptPubKey, 'hex'), value: amount } })`
+        );
+      }
+    }
 
     // Sign all inputs with derived key
     for (let i = 0; i < psbt.data.inputs.length; i++) {
@@ -92,17 +113,37 @@ export class BitcoinTransactionProcessor {
 
     // Extract signed transaction
     const tx = psbt.extractTransaction();
-    const txid = tx.getId();
 
-    console.log(`  ✅ Signed transaction: ${txid}`);
-    console.log(`  📦 Size: ${tx.virtualSize()} vbytes`);
+    // Calculate txid
+    // IMPORTANT: bitcoinjs-lib's getId() returns DISPLAY format (reversed for humans)
+    // This is what block explorers and RPC APIs use for monitoring
+    const txidDisplay = tx.getId(); // Display format (for monitoring)
+    const txidInternal = Buffer.from(txidDisplay, 'hex').reverse(); // Internal format (for reference)
+
+    console.log(pc.green(`\n  ✅ Signed transaction`));
+    console.log(pc.cyan(`  🔐 TXID Calculation Details:`));
+    console.log(pc.blue(`     • Method: tx.getId()`));
+    console.log(pc.blue(`     • Raw hash: doubleSHA256(serialize_without_witness(tx))`));
+    console.log(pc.blue(`     • Display format: ${pc.yellow('reverse(raw_hash)')} ← used by block explorers`));
+    console.log(pc.blue(`     • Internal format: ${pc.gray('raw_hash')} ← used by Rust txid()`));
+    console.log(pc.blue(`     • Canonical: ${pc.green('YES')} (excludes witness data)`));
+    console.log(pc.blue(`     • Stability: ${pc.green('STABLE')} (same before/after signing for SegWit)`));
+    console.log(pc.blue(`  📋 TXID Formats:`));
+    console.log(pc.blue(`     • Display (for monitoring): ${pc.yellow(txidDisplay)}`));
+    console.log(pc.blue(`     • Internal (Rust format):   ${pc.gray(txidInternal.toString('hex'))}`));
+    console.log(pc.blue(`     • Display bytes (first 8):  [${pc.yellow(Array.from(Buffer.from(txidDisplay, 'hex')).slice(0, 8).join(', '))}...]`));
+    console.log(pc.blue(`     • Internal bytes (first 8): [${pc.gray(Array.from(txidInternal).slice(0, 8).join(', '))}...]`));
+    console.log(pc.blue(`  📦 Size: ${pc.white(tx.virtualSize().toString())} vbytes (includes witness)`));
 
     // Extract all signatures from witness data
     const signatures = this.extractAllSolanaSignatures(tx);
-    console.log(`  🔏 Extracted ${signatures.length} signature(s) from ${tx.ins.length} input(s)`);
+    console.log(
+      pc.blue(`  🔏 Extracted ${pc.white(signatures.length.toString())} signature(s) from ${pc.white(tx.ins.length.toString())} input(s)`)
+    );
 
+    // Return display format for monitoring (block explorers use this)
     return {
-      signedTxHash: txid,
+      signedTxHash: txidDisplay,
       signature: signatures,
       signedTransaction: tx.toHex(),
       fromAddress: address!,
@@ -114,9 +155,14 @@ export class BitcoinTransactionProcessor {
     _caip2Id: string,
     config: ServerConfig
   ): bitcoin.Network {
-    return config.isDevnet
-      ? bitcoin.networks.testnet
-      : bitcoin.networks.bitcoin;
+    switch (config.bitcoinNetwork) {
+      case 'mainnet':
+        return bitcoin.networks.bitcoin;
+      case 'testnet':
+        return bitcoin.networks.testnet;
+      case 'regtest':
+        return bitcoin.networks.regtest;
+    }
   }
 
   /**

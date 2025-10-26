@@ -62,6 +62,9 @@ export class ChainSignatureServer {
     this.logger = pino({
       enabled: this.config.verbose === true,
       level: 'info',
+      serializers: {
+        error: pino.stdSerializers.err,
+      },
     });
 
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
@@ -211,7 +214,15 @@ export class ChainSignatureServer {
             );
             pendingTransactions.delete(txHash);
           } else {
-            this.logger.error({ txHash, error }, 'Unexpected error polling');
+            this.logger.error(
+              {
+                txHash,
+                error,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+              },
+              'Unexpected error polling'
+            );
             txInfo.checkCount++;
           }
         }
@@ -253,7 +264,15 @@ export class ChainSignatureServer {
 
       pendingTransactions.delete(txHash);
     } catch (error) {
-      this.logger.error({ error }, 'Error sending response');
+      this.logger.error(
+        {
+          error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          txHash,
+        },
+        'Error sending response'
+      );
     }
   }
 
@@ -290,7 +309,15 @@ export class ChainSignatureServer {
         })
         .rpc();
     } catch (error) {
-      this.logger.error({ error }, 'Error sending error response');
+      this.logger.error(
+        {
+          error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          txHash,
+        },
+        'Error sending error response'
+      );
     }
   }
 
@@ -316,7 +343,14 @@ export class ChainSignatureServer {
         try {
           await this.handleSignBidirectional(eventData);
         } catch (error) {
-          this.logger.error({ error }, 'Error processing bidirectional');
+          this.logger.error(
+            {
+              error,
+              message: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            },
+            'Error processing bidirectional'
+          );
         }
       }
     );
@@ -337,7 +371,14 @@ export class ChainSignatureServer {
         try {
           await this.handleSignatureRequest(eventData);
         } catch (error) {
-          this.logger.error({ error }, 'Error sending signature');
+          this.logger.error(
+            {
+              error,
+              message: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            },
+            'Error sending signature'
+          );
         }
       }
     );
@@ -357,18 +398,64 @@ export class ChainSignatureServer {
     let transactionData: number[];
 
     if (namespace === 'bip122') {
+      this.logger.info('🔍 Bitcoin transaction detected');
+      this.logger.info(
+        {
+          psbtBytesLength: event.serializedTransaction.length,
+          caip2Id: event.caip2Id,
+        },
+        '📦 PSBT received'
+      );
+
       // Bitcoin: Extract txid from PSBT (canonical, excludes witness)
-      const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(event.serializedTransaction));
-      const tx = psbt.extractTransaction(true); // true = don't finalize, get unsigned tx
-      const txid = tx.getId(); // Returns hex string of txid
+      const psbt = bitcoin.Psbt.fromBuffer(
+        Buffer.from(event.serializedTransaction)
+      );
+      this.logger.info(
+        {
+          inputCount: psbt.data.inputs.length,
+          outputCount: psbt.data.outputs.length,
+        },
+        '✅ PSBT parsed successfully'
+      );
 
-      // Convert hex to bytes
-      transactionData = Array.from(Buffer.from(txid, 'hex'));
+      // Access unsigned transaction from PSBT cache
+      // extractTransaction() requires finalized PSBT, so we use __CACHE.__TX
+      // This works for P2WPKH (SegWit) because TXID is stable before signing
+      const tx = (psbt as any).__CACHE.__TX;
 
-      this.logger.info({ txid }, '📝 Bitcoin txid (canonical)');
+      // Calculate txid
+      // IMPORTANT: bitcoinjs-lib's getId() returns DISPLAY format (reversed for humans)
+      // Rust's txid() returns INTERNAL format (raw hash output)
+      // For requestId calculation, we MUST use INTERNAL format to match Rust!
+      const txidDisplay = tx.getId(); // Display format (what block explorers show)
+      const txidInternal = Buffer.from(txidDisplay, 'hex').reverse(); // Convert to internal format
+
+      // Use INTERNAL format for requestId calculation (to match Rust)
+      transactionData = Array.from(txidInternal);
+
+      this.logger.info(
+        {
+          txidDisplay,
+          txidInternal: txidInternal.toString('hex'),
+          txidDisplayBytes: Array.from(Buffer.from(txidDisplay, 'hex')),
+          txidInternalBytes: Array.from(txidInternal),
+          format: 'INTERNAL (reversed from display) - matches Rust txid()',
+          calculation: 'doubleSHA256(serialize_without_witness(tx))',
+          displayCalculation: 'getId() = reverse(doubleSHA256(...))',
+          usingForRequestId: 'INTERNAL format (non-reversed hash output)',
+          sender: event.sender.toString(),
+          path: event.path,
+        },
+        '🔐 Bitcoin txid calculated (UNSIGNED - for requestId)'
+      );
     } else {
       // EVM: Use full transaction data
       transactionData = Array.from(event.serializedTransaction);
+      this.logger.info(
+        { txDataLength: transactionData.length },
+        '📝 EVM transaction data'
+      );
     }
 
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
@@ -395,6 +482,10 @@ export class ChainSignatureServer {
     if (namespace === 'bip122') {
       this.logger.info('Processing Bitcoin transaction (P2WPKH)');
 
+      // Store unsigned txid (internal format) for comparison
+      const unsignedTxidInternal = Buffer.from(transactionData).toString('hex');
+      const unsignedTxidDisplay = Buffer.from(transactionData).reverse().toString('hex');
+
       result = await BitcoinTransactionProcessor.processTransactionForSigning(
         new Uint8Array(event.serializedTransaction),
         derivedPrivateKey,
@@ -402,9 +493,27 @@ export class ChainSignatureServer {
         this.config
       );
 
+      // result.signedTxHash is in DISPLAY format (from BitcoinTransactionProcessor)
+      // Convert it to internal format for comparison
+      const signedTxidDisplay = result.signedTxHash;
+      const signedTxidInternal = Buffer.from(signedTxidDisplay, 'hex').reverse().toString('hex');
+
+      // Verify txid stability (SegWit property) - compare INTERNAL formats
+      const txidsMatch = unsignedTxidInternal === signedTxidInternal;
       this.logger.info(
-        '📝 Bitcoin transaction signed - client will broadcast'
+        {
+          unsignedTxidDisplay,
+          unsignedTxidInternal,
+          signedTxidDisplay,
+          signedTxidInternal,
+          txidsMatch,
+          segwitProperty: 'P2WPKH txid is stable (same before/after signing)',
+          note: 'Both internal formats must match for SegWit',
+        },
+        '🔐 Bitcoin txid verification (SIGNED vs UNSIGNED)'
       );
+
+      this.logger.info('📝 Bitcoin transaction signed - client will broadcast');
     } else {
       this.logger.info('Processing EVM transaction');
 
@@ -415,18 +524,18 @@ export class ChainSignatureServer {
         this.config
       );
 
-      this.logger.info(
-        '📝 EVM transaction signed - client will broadcast'
-      );
+      this.logger.info('📝 EVM transaction signed - client will broadcast');
     }
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
-    await this.program.methods
-      .respond([requestIdBytes], result.signature)  // result.signature is already an array
+    const tx = await this.program.methods
+      .respond([requestIdBytes], result.signature) // result.signature is already an array
       .accounts({
         responder: this.wallet.publicKey,
       })
       .rpc();
+
+    this.logger.info({ tx, namespace }, '✅ Signatures sent to contract');
 
     pendingTransactions.set(result.signedTxHash, {
       txHash: result.signedTxHash,

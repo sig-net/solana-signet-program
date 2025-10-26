@@ -1,6 +1,8 @@
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 
+export type BitcoinNetwork = 'regtest' | 'testnet' | 'mainnet';
+
 export interface ServerConfig {
   solanaRpcUrl: string;
   solanaPrivateKey: string;
@@ -11,7 +13,7 @@ export interface ServerConfig {
   signatureDeposit?: string;
   chainId?: string;
   verbose?: boolean;
-  bitcoinRequiredConfirmations?: number;
+  bitcoinNetwork: BitcoinNetwork;
 }
 
 export const serverConfigSchema = z.object({
@@ -36,7 +38,7 @@ export const serverConfigSchema = z.object({
   signatureDeposit: z.string().optional(),
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
-  bitcoinRequiredConfirmations: z.number().optional(),
+  bitcoinNetwork: z.enum(['regtest', 'testnet', 'mainnet']),
 });
 
 export interface SignBidirectionalEvent {
@@ -129,7 +131,7 @@ export interface SignatureResponse {
 
 export interface ProcessedTransaction {
   signedTxHash: string;
-  signature: SignatureResponse[];  // Array to support multiple inputs (e.g., Bitcoin PSBTs)
+  signature: SignatureResponse[]; // Array to support multiple inputs (e.g., Bitcoin PSBTs)
   signedTransaction: string;
   fromAddress: string;
   nonce: number;
