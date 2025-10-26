@@ -170,6 +170,9 @@ export class BitcoinTransactionProcessor {
    *
    * For PSBTs with multiple inputs, each input has its own signature.
    * This implementation extracts and returns ALL signatures from ALL inputs.
+   *
+   * Note: Returns raw signatures (r, s) - clients are responsible for
+   * canonical encoding (BIP62/BIP66) when constructing Bitcoin transactions.
    */
   private static extractAllSolanaSignatures(
     tx: bitcoin.Transaction
@@ -215,6 +218,7 @@ export class BitcoinTransactionProcessor {
       const rx = Buffer.from(uncompressed.subarray(1, 33));
       const ry = Buffer.from(uncompressed.subarray(33, 65));
 
+      // Return raw signature (client handles canonical encoding)
       signatures.push({
         bigR: {
           x: Array.from(rx),
