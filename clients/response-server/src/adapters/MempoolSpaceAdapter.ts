@@ -14,6 +14,49 @@ interface MempoolTransaction {
   };
 }
 
+/**
+ * Mempool.space REST API Adapter
+ *
+ * Public API for Bitcoin testnet and mainnet.
+ * No authentication required. Rate limits apply.
+ *
+ * Network Support:
+ * ┌──────────┬─────────────────────────────────┬─────────────────────┐
+ * │ Network  │ API Endpoint                    │ Address Format      │
+ * ├──────────┼─────────────────────────────────┼─────────────────────┤
+ * │ Mainnet  │ mempool.space/api               │ bc1q... (P2WPKH)    │
+ * │ Testnet  │ mempool.space/testnet4/api      │ tb1q... (P2WPKH)    │
+ * └──────────┴─────────────────────────────────┴─────────────────────┘
+ *
+ * API Endpoints Used:
+ * - GET /tx/{txid} - Transaction details
+ * - GET /blocks/tip/height - Current block height
+ * - GET /address/{address}/utxo - Unspent outputs
+ * - GET /tx/{txid}/hex - Raw transaction hex
+ * - POST /tx - Broadcast transaction
+ *
+ * Units: All amounts returned in SATOSHIS (1 BTC = 100,000,000 sats)
+ *
+ * Rate Limits (as of 2024):
+ * - 10 requests per second (burst)
+ * - 1 request per second (sustained)
+ * - No API key required
+ *
+ * Note: Does NOT support regtest (use BitcoinCoreRpcAdapter instead).
+ *
+ * @example
+ * // Create testnet adapter
+ * const adapter = MempoolSpaceAdapter.create('testnet');
+ *
+ * // Get testnet transaction
+ * const tx = await adapter.getTransaction('abc123...');
+ * console.log(`Confirmations: ${tx.confirmations}`);
+ *
+ * // Get UTXOs for testnet address
+ * const utxos = await adapter.getAddressUtxos('tb1q...');
+ * const totalSats = utxos.reduce((sum, u) => sum + u.value, 0);
+ * console.log(`Balance: ${totalSats} sats (${totalSats / 100000000} BTC)`);
+ */
 export class MempoolSpaceAdapter implements IBitcoinAdapter {
   private baseUrl: string;
 
