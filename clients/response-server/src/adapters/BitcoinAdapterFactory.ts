@@ -24,7 +24,7 @@ export class BitcoinAdapterFactory {
         );
       }
 
-      console.log(pc.green('✅ Using Bitcoin Core RPC adapter ') + pc.magenta('(regtest mode)'));
+      console.log(pc.green('✅ Using Bitcoin Core RPC adapter ') + pc.magenta(`(${network})`));
       return adapter;
     }
 
@@ -40,8 +40,7 @@ export class BitcoinAdapterFactory {
       );
     }
 
-    const networkLabel = network === 'testnet' ? 'testnet4' : 'mainnet';
-    console.log(pc.green('✅ Using mempool.space adapter ') + pc.magenta(`(${networkLabel})`));
+    console.log(pc.green('✅ Using mempool.space adapter ') + pc.magenta(`(${network})`));
     return adapter;
   }
 }

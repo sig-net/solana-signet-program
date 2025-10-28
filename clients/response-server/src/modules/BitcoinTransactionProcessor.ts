@@ -56,10 +56,9 @@ export class BitcoinTransactionProcessor {
   static async processTransactionForSigning(
     psbtBytes: Uint8Array,
     privateKeyHex: string,
-    caip2Id: string,
     config: ServerConfig
   ): Promise<ProcessedTransaction> {
-    const network = this.getNetwork(caip2Id, config);
+    const network = this.getNetwork(config);
 
     const privateKeyBuffer = Buffer.from(privateKeyHex.slice(2), 'hex');
     const keyPair = ECPair.fromPrivateKey(privateKeyBuffer, { network });
@@ -71,7 +70,11 @@ export class BitcoinTransactionProcessor {
 
     const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(psbtBytes), { network });
 
-    console.log(pc.cyan(`🔐 Bitcoin P2WPKH: ${pc.white(psbt.data.inputs.length)} input(s), ${pc.white(psbt.data.outputs.length)} output(s)`));
+    console.log(
+      pc.cyan(
+        `🔐 Bitcoin P2WPKH: ${pc.white(psbt.data.inputs.length)} input(s), ${pc.white(psbt.data.outputs.length)} output(s)`
+      )
+    );
 
     for (let i = 0; i < psbt.data.inputs.length; i++) {
       const input = psbt.data.inputs[i];
@@ -99,7 +102,9 @@ export class BitcoinTransactionProcessor {
     const signedTxHex = tx.toHex();
 
     console.log(pc.green(`✅ Signed: ${pc.yellow(txidDisplay)}`));
-    console.log(pc.gray(`   Address: ${address}, Size: ${tx.virtualSize()} vbytes`));
+    console.log(
+      pc.gray(`   Address: ${address}, Size: ${tx.virtualSize()} vbytes`)
+    );
 
     const signatures = this.extractAllSolanaSignatures(tx);
 
@@ -112,10 +117,7 @@ export class BitcoinTransactionProcessor {
     };
   }
 
-  private static getNetwork(
-    _caip2Id: string,
-    config: ServerConfig
-  ): bitcoin.Network {
+  private static getNetwork(config: ServerConfig): bitcoin.Network {
     switch (config.bitcoinNetwork) {
       case 'mainnet':
         return bitcoin.networks.bitcoin;

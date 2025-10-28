@@ -159,7 +159,6 @@ export class ChainSignatureServer {
             txInfo.namespace === 'bip122'
               ? await BitcoinMonitor.waitForTransactionAndGetOutput(
                   txHash,
-                  txInfo.caip2Id,
                   this.config
                 )
               : await EthereumMonitor.waitForTransactionAndGetOutput(
@@ -453,7 +452,6 @@ export class ChainSignatureServer {
       ? await BitcoinTransactionProcessor.processTransactionForSigning(
           new Uint8Array(event.serializedTransaction),
           derivedPrivateKey,
-          event.caip2Id,
           this.config
         )
       : await TransactionProcessor.processTransactionForSigning(

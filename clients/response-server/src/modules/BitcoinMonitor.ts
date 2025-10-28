@@ -29,34 +29,28 @@ export class BitcoinMonitor {
 
   static async waitForTransactionAndGetOutput(
     txid: string,
-    _caip2Id: string,
     config: ServerConfig
   ): Promise<TransactionStatus> {
     const adapter = await this.getAdapter(config);
     const requiredConfs = 1;
-    const networkName = config.bitcoinNetwork === 'regtest' ? 'Regtest' :
-                        config.bitcoinNetwork === 'testnet' ? 'Testnet4' : 'Mainnet';
 
     try {
       const tx = await adapter.getTransaction(txid);
 
       if (!tx.confirmed) {
-        console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: in mempool (0 confs)`));
+        console.log(pc.yellow(`⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: in mempool (0 confs)`));
         return { status: 'pending' };
       }
 
       if (tx.confirmations < requiredConfs) {
         console.log(
-          pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())}/${pc.white(requiredConfs.toString())} confirmations`)
+          pc.yellow(`⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())}/${pc.white(requiredConfs.toString())} confirmations`)
         );
         return { status: 'pending' };
       }
 
-      console.log(
-        pc.green(`✅ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmation(s)`)
-      );
+      console.log(pc.green(`✅ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmation(s)`));
 
-      // Bitcoin output is just boolean (Borsh schema expects boolean, not object)
       const output: TransactionOutputData = true;
 
       return {
@@ -66,7 +60,7 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
-        console.log(pc.yellow(`⏳ ${pc.magenta(networkName)} tx ${pc.cyan(txid)}: not found`));
+        console.log(pc.yellow(`⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: not found`));
         return { status: 'pending' };
       }
 
