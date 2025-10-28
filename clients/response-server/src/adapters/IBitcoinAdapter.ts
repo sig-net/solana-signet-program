@@ -1,11 +1,5 @@
 /**
- * Bitcoin Transaction Information
- *
- * @property txid - Transaction ID (64-char hex string)
- * @property confirmed - Whether transaction is in a block (not just mempool)
- * @property blockHeight - Block number (undefined if in mempool)
- * @property blockHash - Block hash (undefined if in mempool)
- * @property confirmations - Number of confirmations (0 = mempool)
+ * Bitcoin transaction information with confirmation status
  */
 export interface BitcoinTransactionInfo {
   txid: string;
@@ -16,25 +10,9 @@ export interface BitcoinTransactionInfo {
 }
 
 /**
- * Unspent Transaction Output (UTXO)
+ * Unspent Transaction Output
  *
- * Bitcoin uses UTXOs as inputs for new transactions.
- *
- * Units: Value is always in SATOSHIS (1 BTC = 100,000,000 satoshis)
- *
- * @property txid - Transaction ID containing this output
- * @property vout - Output index in the transaction (0-indexed)
- * @property value - Amount in SATOSHIS (not BTC)
- * @property status - Confirmation status (optional, from mempool.space)
- *
- * @example
- * // UTXO with 0.001 BTC (100,000 satoshis)
- * {
- *   txid: "abc123...",
- *   vout: 0,
- *   value: 100000,  // satoshis
- *   status: { confirmed: true }
- * }
+ * Value is always in satoshis (1 BTC = 100,000,000 sats)
  */
 export interface UTXO {
   txid: string;
@@ -47,92 +25,64 @@ export interface UTXO {
 }
 
 /**
- * Bitcoin Client Abstraction Layer
+ * Bitcoin adapter - unified interface for regtest, testnet, and mainnet
  *
- * Unified interface for Bitcoin operations across different networks.
- *
- * Network & Address Formats:
- * ┌──────────┬────────────────────┬─────────────────────┐
- * │ Network  │ Address Prefix     │ Example             │
- * ├──────────┼────────────────────┼─────────────────────┤
- * │ Mainnet  │ bc1q... (P2WPKH)   │ bc1qxy2kgdygjrsq... │
- * │ Testnet  │ tb1q... (P2WPKH)   │ tb1qxy2kgdygjrsq... │
- * │ Regtest  │ bcrt1q... (P2WPKH) │ bcrt1qxy2kgdygj...   │
- * └──────────┴────────────────────┴─────────────────────┘
- *
- * Units: All amounts are in SATOSHIS (1 BTC = 100,000,000 sats)
- *
- * Implementations:
- * - BitcoinCoreRpcAdapter: Uses Bitcoin Core RPC (regtest/local node)
- * - MempoolSpaceAdapter: Uses mempool.space REST API (testnet/mainnet)
- *
- * Network selection is automatic via BitcoinAdapterFactory.create(network).
+ * Address formats: bc1q... (mainnet), tb1q... (testnet), bcrt1q... (regtest)
+ * All amounts are in satoshis (1 BTC = 100,000,000 sats)
  */
 export interface IBitcoinAdapter {
   /**
-   * Retrieves transaction information including confirmation status
-   *
-   * @param txid - Transaction ID (64-char hex, display format)
+   * Get transaction information including confirmation status
+   * @param txid Transaction ID (hex string)
    * @returns Transaction info with confirmations
-   * @throws Error if transaction not found
    */
   getTransaction(txid: string): Promise<BitcoinTransactionInfo>;
 
   /**
-   * Gets the current blockchain height (latest block number)
-   *
+   * Get current blockchain height
    * @returns Current block height
    */
   getCurrentBlockHeight(): Promise<number>;
 
   /**
-   * Checks if the Bitcoin backend is available/responding
-   *
-   * @returns true if available, false otherwise
+   * Check if Bitcoin backend is available
+   * @returns True if backend is reachable
    */
   isAvailable(): Promise<boolean>;
 
   /**
-   * Fetches all unspent outputs (UTXOs) for a given address
-   *
-   * Used for building new transactions (inputs).
-   *
-   * @param address - Bitcoin address (bc1q.../tb1q.../bcrt1q...)
-   * @returns Array of UTXOs with amounts in SATOSHIS
+   * Get unspent transaction outputs for an address
+   * @param address Bitcoin address (bc1q..., tb1q..., or bcrt1q...)
+   * @returns Array of UTXOs with values in satoshis
    */
   getAddressUtxos(address: string): Promise<UTXO[]>;
 
   /**
-   * Retrieves raw transaction hex (signed, ready to broadcast)
-   *
-   * @param txid - Transaction ID
-   * @returns Hex-encoded transaction
+   * Get raw transaction as hex string
+   * @param txid Transaction ID
+   * @returns Raw transaction hex
    */
   getTransactionHex(txid: string): Promise<string>;
 
   /**
-   * Broadcasts a signed transaction to the Bitcoin network
-   *
-   * @param txHex - Hex-encoded signed transaction
+   * Broadcast signed transaction to network
+   * @param txHex Raw transaction hex string
    * @returns Transaction ID of broadcast transaction
-   * @throws Error if broadcast fails (e.g., invalid signature, insufficient fees)
    */
   broadcastTransaction(txHex: string): Promise<string>;
 
   /**
-   * Mines blocks (regtest only)
-   *
-   * @param count - Number of blocks to mine
-   * @param address - Address to receive mining rewards
+   * Mine blocks (regtest only)
+   * @param count Number of blocks to mine
+   * @param address Optional mining reward address (generates new address if omitted)
    * @returns Array of block hashes
    */
-  mineBlocks?(count: number, address: string): Promise<string[]>;
+  mineBlocks?(count: number, address?: string): Promise<string[]>;
 
   /**
-   * Sends BTC to an address and mines confirmation (regtest only)
-   *
-   * @param address - Recipient address
-   * @param amount - Amount in BTC (not satoshis)
+   * Fund address and confirm transaction (regtest only)
+   * @param address Recipient address
+   * @param amount Amount in BTC (not satoshis)
    * @returns Transaction ID
    */
   fundAddress?(address: string, amount: number): Promise<string>;

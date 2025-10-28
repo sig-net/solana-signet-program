@@ -5,46 +5,11 @@ import type { BitcoinNetwork } from '../types/index.js';
 import pc from 'picocolors';
 
 /**
- * Bitcoin Adapter Factory
- *
- * Automatically selects the appropriate Bitcoin backend based on network:
- *
- * Network Routing:
- * ┌──────────┬──────────────────────┬─────────────────────────────────┐
- * │ Network  │ Backend              │ Connection                      │
- * ├──────────┼──────────────────────┼─────────────────────────────────┤
- * │ regtest  │ Bitcoin Core RPC     │ localhost:18443 (Docker)        │
- * │ testnet  │ mempool.space API    │ mempool.space/testnet4/api      │
- * │ mainnet  │ mempool.space API    │ mempool.space/api               │
- * └──────────┴──────────────────────┴─────────────────────────────────┘
- *
- * Address Formats by Network:
- * - Mainnet: bc1q... (P2WPKH/Bech32)
- * - Testnet: tb1q... (P2WPKH/Bech32)
- * - Regtest: bcrt1q... (P2WPKH/Bech32)
- *
- * All addresses are native SegWit (Bech32) format for lower fees.
- *
- * @example
- * // Auto-select adapter based on network
- * const adapter = await BitcoinAdapterFactory.create('testnet');
- *
- * // Query testnet transaction
- * const tx = await adapter.getTransaction('abc123...');
- * console.log(`Confirmations: ${tx.confirmations}`);
- *
- * // Get UTXOs for testnet address
- * const utxos = await adapter.getAddressUtxos('tb1q...');
- * console.log(`Total: ${utxos.reduce((sum, u) => sum + u.value, 0)} sats`);
+ * Auto-selects Bitcoin backend based on network:
+ * - regtest → Bitcoin Core RPC (localhost:18443)
+ * - testnet/mainnet → mempool.space API
  */
 export class BitcoinAdapterFactory {
-  /**
-   * Creates appropriate Bitcoin adapter for the specified network
-   *
-   * @param network - 'regtest' | 'testnet' | 'mainnet'
-   * @returns Configured adapter ready to use
-   * @throws Error if regtest backend is not running
-   */
   static async create(network: BitcoinNetwork): Promise<IBitcoinAdapter> {
     if (network === 'regtest') {
       const adapter = BitcoinCoreRpcAdapter.createRegtestAdapter();
