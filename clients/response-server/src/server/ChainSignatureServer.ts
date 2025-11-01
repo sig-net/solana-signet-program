@@ -418,10 +418,11 @@ export class ChainSignatureServer {
         '✅ PSBT parsed successfully'
       );
 
-      const tx = (psbt as any).__CACHE.__TX;
-      const txidDisplay = tx.getId();
-      // Use internal format (reversed) for requestId to match Rust
-      const txidInternal = Buffer.from(txidDisplay, 'hex').reverse();
+      const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
+      const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
+      const txidDisplay = unsignedTx.getId();
+      // Use little-endian hash bytes for requestId (matches Rust implementation)
+      const txidInternal = unsignedTx.getHash();
       transactionData = Array.from(txidInternal);
 
       this.logger.info({ txid: txidDisplay }, '🔐 Bitcoin PSBT parsed');
@@ -448,22 +449,29 @@ export class ChainSignatureServer {
       this.config.mpcRootKey
     );
 
-    const result = namespace === 'bip122'
-      ? await BitcoinTransactionProcessor.processTransactionForSigning(
-          new Uint8Array(event.serializedTransaction),
-          derivedPrivateKey,
-          this.config
-        )
-      : await TransactionProcessor.processTransactionForSigning(
-          new Uint8Array(event.serializedTransaction),
-          derivedPrivateKey,
-          event.caip2Id,
-          this.config
-        );
+    const result =
+      namespace === 'bip122'
+        ? await BitcoinTransactionProcessor.processTransactionForSigning(
+            new Uint8Array(event.serializedTransaction),
+            derivedPrivateKey,
+            this.config
+          )
+        : await TransactionProcessor.processTransactionForSigning(
+            new Uint8Array(event.serializedTransaction),
+            derivedPrivateKey,
+            event.caip2Id,
+            this.config
+          );
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
+    const requestIds = result.signature.map(() => Array.from(requestIdBytes));
+    // TODO: explore upstream contract change so a single request id can carry many
+    // signatures without duplication. Options: (1) special-case 1→N in the program
+    // while still emitting per-signature events; or (2) introduce a batch event.
+    // Both would be a breaking change and diverge from the existing Ethereum contract,
+    // so we keep duplication for now.
     const tx = await this.program.methods
-      .respond([requestIdBytes], result.signature) // result.signature is already an array
+      .respond(requestIds, result.signature)
       .accounts({
         responder: this.wallet.publicKey,
       })
@@ -489,7 +497,8 @@ export class ChainSignatureServer {
       {
         txHash: result.signedTxHash,
         namespace,
-        network: namespace === 'bip122' ? this.config.bitcoinNetwork : undefined,
+        network:
+          namespace === 'bip122' ? this.config.bitcoinNetwork : undefined,
       },
       '🔍 Monitoring transaction'
     );
