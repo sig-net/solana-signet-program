@@ -56,7 +56,6 @@
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e",
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
-    "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.0",
     "bitcoin-core": "^5.0.0",
     "bitcoinjs-lib": "^6.1.5",

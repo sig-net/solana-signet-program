@@ -93,8 +93,7 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
     const txid = await this.client.command('sendtoaddress', address, amount);
 
     // Mine 1 block to confirm the transaction
-    const minerAddress = await this.client.command('getnewaddress');
-    await this.client.command('generatetoaddress', 1, minerAddress);
+    this.mineBlocks(1);
 
     return txid;
   }

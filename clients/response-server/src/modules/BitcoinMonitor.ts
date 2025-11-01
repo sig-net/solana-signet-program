@@ -37,19 +37,22 @@ export class BitcoinMonitor {
     try {
       const tx = await adapter.getTransaction(txid);
 
-      if (!tx.confirmed) {
-        console.log(pc.yellow(`⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: in mempool (0 confs)`));
-        return { status: 'pending' };
-      }
-
       if (tx.confirmations < requiredConfs) {
+        const hint = `${tx.confirmations}/${requiredConfs} confirmations`;
+
         console.log(
-          pc.yellow(`⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())}/${pc.white(requiredConfs.toString())} confirmations`)
+          pc.yellow(
+            `⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(hint)}`
+          )
         );
         return { status: 'pending' };
       }
 
-      console.log(pc.green(`✅ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmation(s)`));
+      console.log(
+        pc.green(
+          `✅ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmation(s)`
+        )
+      );
 
       const output: TransactionOutputData = true;
 
@@ -60,11 +63,17 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
-        console.log(pc.yellow(`⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: not found`));
+        console.log(
+          pc.yellow(
+            `⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: not found`
+          )
+        );
         return { status: 'pending' };
       }
 
-      console.error(pc.red(`❌ Error: ${error instanceof Error ? error.message : error}`));
+      console.error(
+        pc.red(`❌ Error: ${error instanceof Error ? error.message : error}`)
+      );
       return { status: 'pending' };
     }
   }

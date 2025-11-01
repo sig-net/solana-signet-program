@@ -11,6 +11,7 @@ import type {
   TransactionOutput,
   ServerConfig,
   CpiEventData,
+  ProcessedTransaction,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
@@ -394,7 +395,7 @@ export class ChainSignatureServer {
 
     // For Bitcoin, extract canonical txid (without witness) from PSBT
     // For EVM, use full transaction data
-    let transactionData: number[];
+    let transactionData: number[] | undefined;
 
     if (namespace === 'bip122') {
       this.logger.info('🔍 Bitcoin transaction detected');
@@ -420,14 +421,17 @@ export class ChainSignatureServer {
 
       const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
       const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
-      const txidDisplay = unsignedTx.getId();
       // Use little-endian hash bytes for requestId (matches Rust implementation)
       const txidInternal = unsignedTx.getHash();
       transactionData = Array.from(txidInternal);
+    }
 
-      this.logger.info({ txid: txidDisplay }, '🔐 Bitcoin PSBT parsed');
-    } else {
+    if (namespace === 'eip155') {
       transactionData = Array.from(event.serializedTransaction);
+    }
+
+    if (!transactionData) {
+      throw new Error(`Unsupported chain namespace: ${namespace}`);
     }
 
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
@@ -449,19 +453,28 @@ export class ChainSignatureServer {
       this.config.mpcRootKey
     );
 
-    const result =
-      namespace === 'bip122'
-        ? await BitcoinTransactionProcessor.processTransactionForSigning(
-            new Uint8Array(event.serializedTransaction),
-            derivedPrivateKey,
-            this.config
-          )
-        : await TransactionProcessor.processTransactionForSigning(
-            new Uint8Array(event.serializedTransaction),
-            derivedPrivateKey,
-            event.caip2Id,
-            this.config
-          );
+    let result: ProcessedTransaction | undefined;
+
+    if (namespace === 'bip122') {
+      result = await BitcoinTransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        this.config
+      );
+    }
+
+    if (namespace === 'eip155') {
+      result = await TransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        event.caip2Id,
+        this.config
+      );
+    }
+
+    if (!result) {
+      throw new Error(`Unsupported chain namespace: ${namespace}`);
+    }
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
     const requestIds = result.signature.map(() => Array.from(requestIdBytes));
