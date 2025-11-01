@@ -479,10 +479,13 @@ export class ChainSignatureServer {
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
     const requestIds = result.signature.map(() => Array.from(requestIdBytes));
     // TODO: explore upstream contract change so a single request id can carry many
-    // signatures without duplication. Options: (1) special-case 1→N in the program
-    // while still emitting per-signature events; or (2) introduce a batch event.
-    // Both would be a breaking change and diverge from the existing Ethereum contract,
-    // so we keep duplication for now.
+    // signatures without duplication. Today each entry packs the 32-byte request id
+    // plus a 97-byte signature (affine R = 2×32 bytes, s = 32 bytes, recovery id = 1 byte),
+    // so we spend ~129 bytes per signer. With the double vec<u32> prefixes and instruction
+    // discriminator that pushes us to ~1,200 bytes at 9 signatures, just shy of Solana’s
+    // ~1,232-byte transaction payload cap. Options: (1) special-case 1→N in the program while
+    // still emitting per-signature events; or (2) introduce a batch event. Both would be a
+    // breaking change and diverge from the existing Ethereum contract, so we keep duplication for now.
     const tx = await this.program.methods
       .respond(requestIds, result.signature)
       .accounts({
