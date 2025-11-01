@@ -212,6 +212,7 @@ pub mod chain_signatures {
      * @dev Function to respond to signature requests.
      * @param request_ids The array of request IDs.
      * @param signatures The array of signature responses.
+     * @notice When multiple entries reuse a request id, events emit in canonical signature order (PSBT-style).
      */
     pub fn respond(
         ctx: Context<Respond>,
