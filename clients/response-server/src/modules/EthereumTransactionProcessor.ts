@@ -6,7 +6,7 @@ import {
 } from '../types';
 import { getNamespaceFromCaip2 } from './ChainUtils';
 
-export class TransactionProcessor {
+export class EthereumTransactionProcessor {
   private static fundingProvider: ethers.JsonRpcProvider | null = null;
   private static fundingProviderError: boolean = false;
 

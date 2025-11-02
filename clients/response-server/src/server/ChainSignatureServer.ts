@@ -19,7 +19,7 @@ import ChainSignaturesIDL from '../../idl/chain_signatures.json';
 import { CryptoUtils } from '../modules/CryptoUtils';
 import { CONFIG } from '../config/Config';
 import { RequestIdGenerator } from '../modules/RequestIdGenerator';
-import { TransactionProcessor } from '../modules/TransactionProcessor';
+import { EthereumTransactionProcessor } from '../modules/EthereumTransactionProcessor';
 import { EthereumMonitor } from '../modules/EthereumMonitor';
 import { BitcoinTransactionProcessor } from '../modules/BitcoinTransactionProcessor';
 import { BitcoinMonitor } from '../modules/BitcoinMonitor';
@@ -464,7 +464,7 @@ export class ChainSignatureServer {
     }
 
     if (namespace === 'eip155') {
-      result = await TransactionProcessor.processTransactionForSigning(
+      result = await EthereumTransactionProcessor.processTransactionForSigning(
         new Uint8Array(event.serializedTransaction),
         derivedPrivateKey,
         event.caip2Id,

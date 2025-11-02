@@ -1,6 +1,6 @@
 export { ChainSignatureServer } from './src/server/ChainSignatureServer';
 export { CryptoUtils } from './src/modules/CryptoUtils';
-export { TransactionProcessor } from './src/modules/TransactionProcessor';
+export { EthereumTransactionProcessor } from './src/modules/EthereumTransactionProcessor';
 export { EthereumMonitor } from './src/modules/EthereumMonitor';
 export { BitcoinTransactionProcessor } from './src/modules/BitcoinTransactionProcessor';
 export { BitcoinMonitor } from './src/modules/BitcoinMonitor';

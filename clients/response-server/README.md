@@ -385,7 +385,7 @@ Handles cryptographic operations:
 - **Key Derivation**: `derived_key = (root_key + epsilon) % secp256k1_n`
 - **Signature Formatting**: Converts ECDSA signatures to Solana format
 
-#### `TransactionProcessor`
+#### `EthereumTransactionProcessor`
 
 Signs and prepares transactions:
 
@@ -466,8 +466,8 @@ await CryptoUtils.signMessage(msgHash, privateKeyHex);
 await CryptoUtils.signBidirectionalResponse(requestId, output, privateKey);
 
 // Transaction processing
-import { TransactionProcessor } from 'fakenet-signer';
-await TransactionProcessor.processTransactionForSigning(
+import { EthereumTransactionProcessor } from 'fakenet-signer';
+await EthereumTransactionProcessor.processTransactionForSigning(
   rlpEncodedTx,
   privateKey,
   caip2Id,
