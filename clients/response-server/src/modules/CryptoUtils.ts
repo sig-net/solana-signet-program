@@ -9,12 +9,35 @@ export class CryptoUtils {
     return BigInt(hash);
   }
 
+  static deriveEpsilonWithChainId(
+    requester: string,
+    path: string,
+    chainId: string
+  ): bigint {
+    const derivationPath = `${CONFIG.EPSILON_DERIVATION_PREFIX},${chainId},${requester},${path}`;
+    const hash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
+    return BigInt(hash);
+  }
+
   static async deriveSigningKey(
     path: string,
     predecessor: string,
     basePrivateKey: string
   ): Promise<string> {
     const epsilon = this.deriveEpsilon(predecessor, path);
+    const privateKeyBigInt = BigInt(basePrivateKey);
+    const derivedPrivateKey =
+      (privateKeyBigInt + epsilon) % BigInt(CONFIG.SECP256K1_N);
+    return '0x' + derivedPrivateKey.toString(16).padStart(64, '0');
+  }
+
+  static async deriveSigningKeyWithChainId(
+    path: string,
+    predecessor: string,
+    basePrivateKey: string,
+    chainId: string
+  ): Promise<string> {
+    const epsilon = this.deriveEpsilonWithChainId(predecessor, path, chainId);
     const privateKeyBigInt = BigInt(basePrivateKey);
     const derivedPrivateKey =
       (privateKeyBigInt + epsilon) % BigInt(CONFIG.SECP256K1_N);

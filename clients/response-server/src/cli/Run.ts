@@ -12,6 +12,7 @@ async function main() {
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
     verbose: envConfig.VERBOSE,
     bitcoinNetwork: envConfig.BITCOIN_NETWORK,
+    substrateWsUrl: envConfig.SUBSTRATE_WS_URL
   };
 
   const server = new ChainSignatureServer(config);

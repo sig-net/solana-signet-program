@@ -28,6 +28,11 @@ import {
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
+import { SubstrateMonitor } from '../modules/SubstrateMonitor';
+import type {
+  SubstrateSignatureRequest,
+  SubstrateBidirectionalRequest,
+} from '../modules/SubstrateMonitor';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -42,6 +47,7 @@ export class ChainSignatureServer {
   private monitorIntervalId: NodeJS.Timeout | null = null;
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
+  private substrateMonitor: SubstrateMonitor | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -77,6 +83,9 @@ export class ChainSignatureServer {
     const idl = ChainSignaturesIDL as anchor.Idl;
     idl.address = this.config.programId;
     this.program = new Program(idl, this.provider);
+    if (this.config.substrateWsUrl) {
+      this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
+    }
   }
 
   async start() {
@@ -86,11 +95,65 @@ export class ChainSignatureServer {
 
     await this.ensureInitialized();
 
+    if (this.substrateMonitor) {
+      await this.connectToSubstrate();
+    }
+
     this.startTransactionMonitor();
     this.setupEventListeners();
 
     // Resolve readiness so callers can await server.waitUntilReady()
     this.resolveReady?.();
+  }
+
+  private async connectToSubstrate() {
+    if (!this.substrateMonitor) return;
+
+    try {
+      await this.substrateMonitor.connect();
+      this.logger.info('✅ Connected to Substrate node');
+
+      await this.substrateMonitor.subscribeToEvents({
+        onSignatureRequested: async (event: SubstrateSignatureRequest) => {
+          this.logger.info(
+            { sender: event.sender },
+            '📝 Substrate SignatureRequested'
+          );
+          try {
+            await this.handleSubstrateSignatureRequest(event);
+          } catch (error) {
+            this.logger.error(
+              { error },
+              'Error processing Substrate signature request'
+            );
+          }
+        },
+
+        onSignBidirectional: async (event: SubstrateBidirectionalRequest) => {
+          this.logger.info(
+            { sender: event.sender, caip2Id: event.caip2Id },
+            '📨 Substrate SignBidirectionalRequested'
+          );
+          try {
+            await this.handleSubstrateBidirectional(event);
+          } catch (error) {
+            this.logger.error(
+              { error },
+              'Error processing Substrate bidirectional request'
+            );
+          }
+        },
+
+        onRespondBidirectional: async (event: any) => {
+          this.logger.info(
+            { requestId: event.requestId, responder: event.responder },
+            '📖 Substrate RespondBidirectionalEvent'
+          );
+        },
+      });
+    } catch (error) {
+      this.logger.error({ error }, 'Failed to connect to Substrate');
+    }
   }
 
   private async ensureInitialized() {
@@ -235,7 +298,7 @@ export class ChainSignatureServer {
     }
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
-      SerializationFormat.Borsh, // Server only respond to Solana for now
+      SerializationFormat.Borsh,
       txInfo.callbackSerializationSchema
     );
 
@@ -247,16 +310,27 @@ export class ChainSignatureServer {
     );
 
     try {
-      await this.program.methods
-        .respondBidirectional(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
-          signature
-        )
-        .accounts({
-          responder: this.wallet.publicKey,
-        })
-        .rpc();
+      if (txInfo.source === 'polkadot' && this.substrateMonitor) {
+        await this.substrateMonitor.sendRespondBidirectional(
+          requestIdBytes,
+          serializedOutput,
+          signature,
+          txInfo.sender
+        );
+        this.logger.info('✅ Response sent to Substrate');
+      } else {
+        await this.program.methods
+          .respondBidirectional(
+            Array.from(requestIdBytes),
+            Buffer.from(serializedOutput),
+            signature
+          )
+          .accounts({
+            responder: this.wallet.publicKey,
+          })
+          .rpc();
+        this.logger.info('✅ Response sent to Solana');
+      }
 
       pendingTransactions.delete(txHash);
     } catch (error) {
@@ -451,6 +525,129 @@ export class ChainSignatureServer {
       pendingTransactions,
     };
   }
+  
+  private async handleSubstrateSignatureRequest(
+    event: SubstrateSignatureRequest
+  ) {
+    const path = Buffer.from(event.path.slice(2), 'hex').toString();
+    const algo = Buffer.from(event.algo.slice(2), 'hex').toString();
+    const dest =
+      event.dest === '0x'
+        ? ''
+        : Buffer.from(event.dest.slice(2), 'hex').toString();
+    const params = Buffer.from(event.params.slice(2), 'hex').toString();
+    const chainId = Buffer.from(event.chainId.slice(2), 'hex').toString();
+
+    this.logger.info({ path, algo, chainId, params: params || '(empty)' });
+
+    const requestId = RequestIdGenerator.generateRequestIdStringChainId(
+      event.sender,
+      Array.from(event.payload),
+      path,
+      event.keyVersion,
+      chainId,
+      algo,
+      dest,
+      params
+    );
+
+    this.logger.info({ requestId }, '🔑 Request ID');
+
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      path,
+      event.sender,
+      this.config.mpcRootKey,
+      'polkadot:2034'
+    );
+
+    const signature = await CryptoUtils.signMessage(
+      Array.from(event.payload), // Convert Uint8Array to number[]
+      derivedPrivateKey
+    );
+
+    await this.substrateMonitor!.sendSignatureResponse(
+      Buffer.from(requestId.slice(2), 'hex'),
+      signature,
+      event.sender
+    );
+
+    this.logger.info('✅ Signature sent to Substrate');
+  }
+
+  private async handleSubstrateBidirectional(
+    event: SubstrateBidirectionalRequest
+  ) {
+    const path = Buffer.from(event.path.slice(2), 'hex').toString();
+    const algo = Buffer.from(event.algo.slice(2), 'hex').toString();
+    const dest =
+      event.dest === '0x'
+        ? ''
+        : Buffer.from(event.dest.slice(2), 'hex').toString();
+    const params = Buffer.from(event.params.slice(2), 'hex').toString();
+
+    this.logger.info({
+      path,
+      algo,
+      params: params || '(empty)',
+      caip2Id: event.caip2Id,
+    });
+
+    const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
+      event.sender,
+      Array.from(event.serializedTransaction),
+      event.caip2Id,
+      event.keyVersion,
+      path,
+      algo,
+      dest,
+      params
+    );
+
+    this.logger.info({ requestId }, '🔑 Request ID');
+
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      path,
+      event.sender,
+      this.config.mpcRootKey,
+      'polkadot:2034'
+    );
+
+    const result = await TransactionProcessor.processTransactionForSigning(
+      event.serializedTransaction,
+      derivedPrivateKey,
+      event.caip2Id,
+      this.config
+    );
+
+    await this.substrateMonitor!.sendSignatureResponse(
+      Buffer.from(requestId.slice(2), 'hex'),
+      result.signature,
+      event.sender
+    );
+
+    pendingTransactions.set(result.signedTxHash, {
+      txHash: result.signedTxHash,
+      requestId,
+      caip2Id: event.caip2Id,
+      explorerDeserializationSchema: Buffer.from(
+        event.outputDeserializationSchema
+      ),
+      callbackSerializationSchema: Buffer.from(
+        event.respondSerializationSchema
+      ),
+      sender: event.sender,
+      path: event.path,
+      fromAddress: result.fromAddress,
+      nonce: result.nonce,
+      checkCount: 0,
+      source: 'polkadot',
+    });
+
+    this.logger.info(
+      { txHash: result.signedTxHash },
+      '🔍 Monitoring transaction'
+    );
+  }
 
   /**
    * Await until the server has finished its startup sequence and listeners are registered.
@@ -480,6 +677,10 @@ export class ChainSignatureServer {
     if (this.cpiSubscriptionId !== null) {
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);
       this.cpiSubscriptionId = null;
+    }
+    if (this.substrateMonitor) {
+      await this.substrateMonitor.disconnect();
+      this.substrateMonitor = null;
     }
   }
 }

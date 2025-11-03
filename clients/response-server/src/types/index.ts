@@ -14,6 +14,7 @@ export interface ServerConfig {
   chainId?: string;
   verbose?: boolean;
   bitcoinNetwork: BitcoinNetwork;
+  substrateWsUrl?: string;
 }
 
 export const serverConfigSchema = z.object({
@@ -39,6 +40,7 @@ export const serverConfigSchema = z.object({
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
   bitcoinNetwork: z.enum(['regtest', 'testnet']),
+  substrateWsUrl: z.string().optional(),
 });
 
 export interface SignBidirectionalEvent {
@@ -114,6 +116,7 @@ export interface PendingTransaction {
    * the monitor can detect if any input was double-spent elsewhere.
    */
   prevouts?: PrevoutRef[];
+  source?: 'solana' | 'polkadot';
 }
 
 // Borsh schema types

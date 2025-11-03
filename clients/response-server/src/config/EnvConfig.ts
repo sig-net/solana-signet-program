@@ -21,6 +21,7 @@ const envSchema = z.object({
     .optional()
     .transform((val) => val === 'true'),
   BITCOIN_NETWORK: z.enum(['regtest', 'testnet']).optional().default('testnet'),
+  SUBSTRATE_WS_URL: z.string().url().default('ws://localhost:8000'),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -35,6 +36,7 @@ function validateEnv(): EnvConfig {
       PROGRAM_ID: process.env.PROGRAM_ID,
       VERBOSE: process.env.VERBOSE,
       BITCOIN_NETWORK: process.env.BITCOIN_NETWORK,
+      SUBSTRATE_WS_URL: process.env.SUBSTRATE_WS_URL
     });
 
     return env;
