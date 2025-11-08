@@ -15,7 +15,7 @@ interface MempoolTransaction {
 }
 
 /**
- * Mempool.space API adapter for testnet and mainnet
+ * Mempool.space API adapter for Bitcoin testnet
  *
  * Public API (no auth required, ~1 req/sec rate limit)
  * Does NOT support regtest - use BitcoinCoreRpcAdapter instead
@@ -28,10 +28,13 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
   }
 
   static create(network: BitcoinNetwork): MempoolSpaceAdapter {
-    const baseUrl = network === 'testnet'
-      ? 'https://mempool.space/testnet4/api'
-      : 'https://mempool.space/api';
-    return new MempoolSpaceAdapter(baseUrl);
+    if (network !== 'testnet') {
+      throw new Error(
+        `Unsupported mempool.space network '${network}'. Only testnet requests use this adapter.`
+      );
+    }
+
+    return new MempoolSpaceAdapter('https://mempool.space/testnet4/api');
   }
 
   async isAvailable(): Promise<boolean> {

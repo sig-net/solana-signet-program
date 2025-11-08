@@ -11,13 +11,12 @@ import pc from 'picocolors';
  * Bitcoin transaction monitor using adapter pattern
  *
  * Supports:
- * - mempool.space API (testnet/mainnet)
+ * - mempool.space API (testnet)
  * - Bitcoin Core RPC (regtest)
  *
  * Automatically selects adapter based on network:
  * - regtest → Bitcoin Core RPC adapter (localhost:18443)
  * - testnet → mempool.space API (testnet4)
- * - mainnet → mempool.space API
  *
  * Features:
  * - Simple boolean output: { success: true }

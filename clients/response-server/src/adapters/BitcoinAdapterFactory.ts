@@ -7,7 +7,7 @@ import pc from 'picocolors';
 /**
  * Auto-selects Bitcoin backend based on network:
  * - regtest → Bitcoin Core RPC (localhost:18443)
- * - testnet/mainnet → mempool.space API
+ * - testnet → mempool.space API
  */
 export class BitcoinAdapterFactory {
   static async create(network: BitcoinNetwork): Promise<IBitcoinAdapter> {
@@ -33,19 +33,24 @@ export class BitcoinAdapterFactory {
       return adapter;
     }
 
+    if (network !== 'testnet') {
+      throw new Error(`Unsupported Bitcoin network '${network}'. Only regtest and testnet are available.`);
+    }
+
     const adapter = MempoolSpaceAdapter.create(network);
 
     const available = await adapter.isAvailable();
     if (!available) {
-      const url = network === 'testnet'
-        ? 'https://mempool.space/testnet4/api'
-        : 'https://mempool.space/api';
       console.warn(
-        pc.yellow(`⚠️  Warning: mempool.space API at ${pc.cyan(url)} is not responding`)
+        pc.yellow(
+          `⚠️  Warning: mempool.space API at ${pc.cyan(
+            adapter.getBaseUrl()
+          )} is not responding`
+        )
       );
     }
 
-    console.log(pc.green('✅ Using mempool.space adapter ') + pc.magenta(`(${network})`));
+    console.log(pc.green('✅ Using mempool.space adapter ') + pc.magenta('(testnet)'));
     return adapter;
   }
 }

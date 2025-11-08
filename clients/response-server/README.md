@@ -43,7 +43,7 @@ PROGRAM_ID=YourProgramIdHere11111111111111111111111
 VERBOSE=true  # Optional: enable detailed logging
 
 # Bitcoin Configuration
-BITCOIN_NETWORK=testnet  # Options: regtest, testnet, mainnet
+BITCOIN_NETWORK=testnet  # Options: regtest, testnet
 ```
 
 ### 2. Basic Usage
@@ -59,7 +59,7 @@ const config = {
   programId: process.env.PROGRAM_ID,
   isDevnet: true,
   verbose: true,
-  bitcoinNetwork: 'testnet', // 'regtest' | 'testnet' | 'mainnet'
+  bitcoinNetwork: 'testnet', // 'regtest' | 'testnet'
 };
 
 const server = new ChainSignatureServer(config);
@@ -86,10 +86,8 @@ The package provides a unified interface for Bitcoin operations across different
 
 - **regtest** → Bitcoin Core RPC (localhost:18443)
 - **testnet** → mempool.space testnet4 API
-- **mainnet** → mempool.space mainnet API
 
-Each network uses different address prefixes:
-- **Mainnet**: `bc1q...` addresses
+Each supported network uses different address prefixes:
 - **Testnet**: `tb1q...` addresses
 - **Regtest**: `bcrt1q...` addresses
 
@@ -123,17 +121,16 @@ console.log('Broadcast successful! txid:', txid);
 
 #### MempoolSpaceAdapter
 
-For testnet/mainnet using mempool.space API:
+For testnet using mempool.space API:
 
 ```typescript
 import { MempoolSpaceAdapter } from 'fakenet-signer';
 
-const adapter = new MempoolSpaceAdapter('https://mempool.space/testnet4/api');
+const adapter = MempoolSpaceAdapter.create('testnet');
 
 // Supported networks:
-// - Mainnet: https://mempool.space/api
 // - Testnet4: https://mempool.space/testnet4/api
-// - Signet: https://mempool.space/signet/api
+// (regtest uses Bitcoin Core RPC via Docker)
 ```
 
 #### BitcoinCoreRpcAdapter
@@ -415,8 +412,8 @@ Handles Bitcoin PSBT signing:
 
 Monitors Bitcoin transaction lifecycle:
 
-- Uses adapter pattern for testnet/mainnet/regtest
-- Tracks confirmations (1 for testnet, 6 for mainnet)
+- Uses adapter pattern for testnet/regtest
+- Tracks confirmations (1 for both testnet and regtest)
 - Auto-selects Bitcoin Core RPC or mempool.space API
 - Caches adapters for efficiency
 

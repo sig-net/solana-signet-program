@@ -36,7 +36,7 @@ export function getNamespaceFromCaip2(caip2Id: string): string {
  * Formats:
  * - Borsh (0): Solana chains
  * - ABI (1): EVM chains (Ethereum, Polygon, BSC, etc.)
- * - BitcoinSimple (2): Bitcoin (testnet4/mainnet) - returns { success: bool } only
+ * - BitcoinSimple (2): Bitcoin (testnet4/regtest) - returns { success: bool } only
  *
  * @example
  * getSerializationFormat("eip155:1") // SerializationFormat.ABI

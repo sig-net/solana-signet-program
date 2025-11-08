@@ -18,13 +18,11 @@ const ECPair = ECPairFactory(ecc);
  *
  * Supported networks:
  * - Regtest (local development) - uses bitcoin.networks.regtest
- * - Testnet4 (testing) - uses bitcoin.networks.testnet
- * - Mainnet (production) - uses bitcoin.networks.bitcoin
+ * - Testnet4 (public testing) - uses bitcoin.networks.testnet
  *
  * Requirements:
  * - Client provides PSBT bytes (BIP-174 format)
  * - All inputs must be P2WPKH (native SegWit) addresses:
- *   - Mainnet: bc1q...
  *   - Testnet: tb1q...
  *   - Regtest: bcrt1q...
  * - Each input MUST have witnessUtxo with:
@@ -106,12 +104,14 @@ export class BitcoinTransactionProcessor {
 
   private static getNetwork(config: ServerConfig): bitcoin.Network {
     switch (config.bitcoinNetwork) {
-      case 'mainnet':
-        return bitcoin.networks.bitcoin;
       case 'testnet':
         return bitcoin.networks.testnet;
       case 'regtest':
         return bitcoin.networks.regtest;
+      default:
+        throw new Error(
+          `Unsupported Bitcoin network '${config.bitcoinNetwork}'. Only regtest and testnet are available.`
+        );
     }
   }
 

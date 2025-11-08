@@ -25,9 +25,9 @@ export interface UTXO {
 }
 
 /**
- * Bitcoin adapter - unified interface for regtest, testnet, and mainnet
+ * Bitcoin adapter - unified interface for regtest and testnet
  *
- * Address formats: bc1q... (mainnet), tb1q... (testnet), bcrt1q... (regtest)
+ * Address formats: tb1q... (testnet), bcrt1q... (regtest)
  * All amounts are in satoshis (1 BTC = 100,000,000 sats)
  */
 export interface IBitcoinAdapter {
@@ -52,7 +52,7 @@ export interface IBitcoinAdapter {
 
   /**
    * Get unspent transaction outputs for an address
-   * @param address Bitcoin address (bc1q..., tb1q..., or bcrt1q...)
+   * @param address Bitcoin address (tb1q... or bcrt1q...)
    * @returns Array of UTXOs with values in satoshis
    */
   getAddressUtxos(address: string): Promise<UTXO[]>;

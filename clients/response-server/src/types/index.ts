@@ -1,7 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 
-export type BitcoinNetwork = 'regtest' | 'testnet' | 'mainnet';
+export type BitcoinNetwork = 'regtest' | 'testnet';
 
 export interface ServerConfig {
   solanaRpcUrl: string;
@@ -38,7 +38,7 @@ export const serverConfigSchema = z.object({
   signatureDeposit: z.string().optional(),
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
-  bitcoinNetwork: z.enum(['regtest', 'testnet', 'mainnet']),
+  bitcoinNetwork: z.enum(['regtest', 'testnet']),
 });
 
 export interface SignBidirectionalEvent {

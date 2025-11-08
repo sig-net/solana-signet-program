@@ -20,10 +20,7 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === 'true'),
-  BITCOIN_NETWORK: z
-    .enum(['regtest', 'testnet', 'mainnet'])
-    .optional()
-    .default('testnet'),
+  BITCOIN_NETWORK: z.enum(['regtest', 'testnet']).optional().default('testnet'),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
