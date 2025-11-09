@@ -39,6 +39,24 @@ export async function handleBitcoinBidirectional(
   await handleBitcoinSigningPlan(event, bitcoinPlan, derivedPrivateKey, context);
 }
 
+/**
+ * Processes a PSBT into per-input signing jobs and registers the pending tx.
+ *
+ * Flow mirrors the "Bitcoin Per-Input Signing" doc:
+ *  - Uses {@link BitcoinTransactionProcessor} to parse the PSBT once, yielding
+ *    the canonical txid plus per-input witness metadata and BIP-143 sighashes.
+ *  - Immediately records the txid in `pendingTransactions` with the schemas and
+ *    prevouts so {@link BitcoinMonitor} can watch for confirmations or spent
+ *    inputs (isPrevoutSpent via the adapters).
+ *  - For each PSBT input, derives a deterministic request ID by hashing the
+ *    little-endian txid bytes concatenated with the input index (u32 LE) and
+ *    signs the corresponding sighash with the single MPC-derived private key.
+ *  - Streams every signature back to the Solana program individually via
+ *    `respond`, logging `{ txid, inputIndex, requestId }` for traceability.
+ *  - The external client finalizes/broadcasts the PSBT; the server only signs
+ *    and monitors until {@link handleCompletedTransaction} /
+ *    {@link handleFailedTransaction} respond bidirectionally.
+ */
 async function handleBitcoinSigningPlan(
   event: SignBidirectionalEvent,
   plan: BitcoinSigningPlan,
