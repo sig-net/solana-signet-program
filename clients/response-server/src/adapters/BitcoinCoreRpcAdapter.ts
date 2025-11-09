@@ -112,4 +112,9 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
 
     return new BitcoinCoreRpcAdapter(client);
   }
+
+  async isPrevoutSpent(txid: string, vout: number): Promise<boolean> {
+    const utxo = await this.client.command('gettxout', txid, vout, true);
+    return utxo === null;
+  }
 }

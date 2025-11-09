@@ -120,4 +120,30 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
   getBaseUrl(): string {
     return this.baseUrl;
   }
+
+  async isPrevoutSpent(txid: string, vout: number): Promise<boolean> {
+    const response = await fetch(`${this.baseUrl}/tx/${txid}/outspends`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        // If the parent tx is unknown, treat as not spent yet
+        return false;
+      }
+      throw new Error(
+        `Failed to fetch outspends for ${txid}: ${response.statusText}`
+      );
+    }
+
+    const outspends = (await response.json()) as Array<
+      | {
+          spent: boolean;
+          txid: string;
+          vin: number;
+        }
+      | null
+    >;
+
+    const info = outspends[vout];
+    return info !== null && info !== undefined && info.spent === true;
+  }
 }

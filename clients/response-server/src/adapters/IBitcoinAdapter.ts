@@ -86,4 +86,12 @@ export interface IBitcoinAdapter {
    * @returns Transaction ID
    */
   fundAddress?(address: string, amount: number): Promise<string>;
+
+  /**
+   * Check if a specific prevout has already been spent
+   * @param txid Source transaction ID of the UTXO
+   * @param vout Output index within the transaction
+   * @returns True if the UTXO is spent
+   */
+  isPrevoutSpent(txid: string, vout: number): Promise<boolean>;
 }

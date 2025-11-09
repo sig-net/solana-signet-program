@@ -3,7 +3,6 @@ import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
 import pino from 'pino';
-import * as bitcoin from 'bitcoinjs-lib';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -11,7 +10,6 @@ import type {
   TransactionOutput,
   ServerConfig,
   CpiEventData,
-  ProcessedTransaction,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
@@ -19,10 +17,8 @@ import ChainSignaturesIDL from '../../idl/chain_signatures.json';
 import { CryptoUtils } from '../modules/CryptoUtils';
 import { CONFIG } from '../config/Config';
 import { RequestIdGenerator } from '../modules/RequestIdGenerator';
-import { EthereumTransactionProcessor } from '../modules/EthereumTransactionProcessor';
-import { EthereumMonitor } from '../modules/EthereumMonitor';
-import { BitcoinTransactionProcessor } from '../modules/BitcoinTransactionProcessor';
-import { BitcoinMonitor } from '../modules/BitcoinMonitor';
+import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
+import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 import { OutputSerializer } from '../modules/OutputSerializer';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
@@ -30,6 +26,9 @@ import {
   SerializationFormat,
   getNamespaceFromCaip2,
 } from '../modules/ChainUtils';
+import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
+import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
+import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -160,6 +159,7 @@ export class ChainSignatureServer {
             txInfo.namespace === 'bip122'
               ? await BitcoinMonitor.waitForTransactionAndGetOutput(
                   txHash,
+                  txInfo.prevouts,
                   this.config
                 )
               : await EthereumMonitor.waitForTransactionAndGetOutput(
@@ -237,13 +237,17 @@ export class ChainSignatureServer {
   ) {
     this.logger.info({ txHash }, '✅ Transaction completed');
 
+    const requestId = txInfo.requestId;
+    if (!requestId) {
+      throw new Error(`Missing request ID for tx ${txHash}`);
+    }
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
       SerializationFormat.Borsh, // Server only respond to Solana for now
       txInfo.callbackSerializationSchema
     );
 
-    const requestIdBytes = Buffer.from(txInfo.requestId.slice(2), 'hex');
+    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
       serializedOutput,
@@ -291,7 +295,11 @@ export class ChainSignatureServer {
 
       const serializedOutput = new Uint8Array(errorData);
 
-      const requestIdBytes = Buffer.from(txInfo.requestId.slice(2), 'hex');
+      const requestId = txInfo.requestId;
+      if (!requestId) {
+        throw new Error(`Missing request ID for tx ${txHash}`);
+      }
+      const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
       const signature = await CryptoUtils.signBidirectionalResponse(
         requestIdBytes,
         serializedOutput,
@@ -392,132 +400,31 @@ export class ChainSignatureServer {
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
     const namespace = getNamespaceFromCaip2(event.caip2Id);
-
-    // For Bitcoin, extract canonical txid (without witness) from PSBT
-    // For EVM, use full transaction data
-    let transactionData: number[] | undefined;
-
-    if (namespace === 'bip122') {
-      this.logger.info('🔍 Bitcoin transaction detected');
-      this.logger.info(
-        {
-          psbtBytesLength: event.serializedTransaction.length,
-          caip2Id: event.caip2Id,
-        },
-        '📦 PSBT received'
-      );
-
-      // Bitcoin: Extract txid from PSBT (canonical, excludes witness)
-      const psbt = bitcoin.Psbt.fromBuffer(
-        Buffer.from(event.serializedTransaction)
-      );
-      this.logger.info(
-        {
-          inputCount: psbt.data.inputs.length,
-          outputCount: psbt.data.outputs.length,
-        },
-        '✅ PSBT parsed successfully'
-      );
-
-      const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
-      const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
-      // Use little-endian hash bytes for requestId (matches Rust implementation)
-      const txidInternal = unsignedTx.getHash();
-      transactionData = Array.from(txidInternal);
-    }
-
-    if (namespace === 'eip155') {
-      transactionData = Array.from(event.serializedTransaction);
-    }
-
-    if (!transactionData) {
-      throw new Error(`Unsupported chain namespace: ${namespace}`);
-    }
-
-    const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
-      event.sender.toString(),
-      transactionData,
-      event.caip2Id,
-      event.keyVersion,
-      event.path,
-      event.algo,
-      event.dest,
-      event.params
-    );
-
-    this.logger.info({ requestId, namespace }, '🔑 Request ID');
-
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
       this.config.mpcRootKey
     );
 
-    let result: ProcessedTransaction | undefined;
-
     if (namespace === 'bip122') {
-      result = await BitcoinTransactionProcessor.processTransactionForSigning(
-        new Uint8Array(event.serializedTransaction),
-        derivedPrivateKey,
-        this.config
+      await handleBitcoinBidirectional(
+        event,
+        this.getBidirectionalContext(),
+        derivedPrivateKey
       );
+      return;
     }
 
     if (namespace === 'eip155') {
-      result = await EthereumTransactionProcessor.processTransactionForSigning(
-        new Uint8Array(event.serializedTransaction),
-        derivedPrivateKey,
-        event.caip2Id,
-        this.config
+      await handleEthereumBidirectional(
+        event,
+        this.getBidirectionalContext(),
+        derivedPrivateKey
       );
+      return;
     }
 
-    if (!result) {
-      throw new Error(`Unsupported chain namespace: ${namespace}`);
-    }
-
-    const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
-    const requestIds = result.signature.map(() => Array.from(requestIdBytes));
-    // TODO: explore upstream contract change so a single request id can carry many
-    // signatures without duplication. Today each entry packs the 32-byte request id
-    // plus a 97-byte signature (affine R = 2×32 bytes, s = 32 bytes, recovery id = 1 byte),
-    // so we spend ~129 bytes per signer. With the double vec<u32> prefixes and instruction
-    // discriminator that pushes us to ~1,200 bytes at 9 signatures, just shy of Solana’s
-    // ~1,232-byte transaction payload cap. Options: (1) special-case 1→N in the program while
-    // still emitting per-signature events; or (2) introduce a batch event. Both would be a
-    // breaking change and diverge from the existing Ethereum contract, so we keep duplication for now.
-    const tx = await this.program.methods
-      .respond(requestIds, result.signature)
-      .accounts({
-        responder: this.wallet.publicKey,
-      })
-      .rpc();
-
-    this.logger.info({ tx, namespace }, '✅ Signatures sent to contract');
-
-    pendingTransactions.set(result.signedTxHash, {
-      txHash: result.signedTxHash,
-      requestId,
-      caip2Id: event.caip2Id,
-      explorerDeserializationSchema: event.outputDeserializationSchema,
-      callbackSerializationSchema: event.respondSerializationSchema,
-      sender: event.sender.toString(),
-      path: event.path,
-      fromAddress: result.fromAddress,
-      nonce: result.nonce,
-      checkCount: 0,
-      namespace,
-    });
-
-    this.logger.info(
-      {
-        txHash: result.signedTxHash,
-        namespace,
-        network:
-          namespace === 'bip122' ? this.config.bitcoinNetwork : undefined,
-      },
-      '🔍 Monitoring transaction'
-    );
+    throw new Error(`Unsupported chain namespace: ${namespace}`);
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {
@@ -554,6 +461,16 @@ export class ChainSignatureServer {
       .rpc();
 
     this.logger.info({ tx }, '✅ Signature sent!');
+  }
+
+  private getBidirectionalContext(): BidirectionalHandlerContext {
+    return {
+      program: this.program,
+      wallet: this.wallet,
+      config: this.config,
+      logger: this.logger,
+      pendingTransactions,
+    };
   }
 
   async shutdown() {

@@ -3,8 +3,8 @@ import {
   ProcessedTransaction,
   ServerConfig,
   SignatureResponse,
-} from '../types';
-import { getNamespaceFromCaip2 } from './ChainUtils';
+} from '../../types';
+import { getNamespaceFromCaip2 } from '../ChainUtils';
 
 export class EthereumTransactionProcessor {
   private static fundingProvider: ethers.JsonRpcProvider | null = null;

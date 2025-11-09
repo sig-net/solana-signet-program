@@ -171,11 +171,11 @@ Auto-selects the appropriate adapter:
 ```typescript
 import { BitcoinAdapterFactory } from 'fakenet-signer';
 
-// Automatically chooses based on URL:
-// - Contains localhost/127.0.0.1 -> BitcoinCoreRpcAdapter
-// - Otherwise -> MempoolSpaceAdapter
+// Automatically chooses based on network:
+// - 'regtest' -> BitcoinCoreRpcAdapter
+// - 'testnet' -> MempoolSpaceAdapter
 
-const adapter = await BitcoinAdapterFactory.create(rpcUrl);
+const adapter = await BitcoinAdapterFactory.create('testnet');
 
 // If regtest not running, throws helpful error message:
 // ❌ Bitcoin regtest is not running!
@@ -401,20 +401,21 @@ Monitors Ethereum transaction lifecycle:
 
 #### `BitcoinTransactionProcessor`
 
-Handles Bitcoin PSBT signing:
+Builds per-input signing plans from PSBTs:
 
 - Parses PSBT (Partially Signed Bitcoin Transaction)
-- Signs inputs using derived private key
-- Returns signed PSBT for client broadcasting
-- Supports P2WPKH (SegWit) transactions
+- Validates SegWit metadata (witnessUtxo)
+- Computes canonical txid and BIP-143 sighashes per input
+- Allows MPC services to emit one signature per UTXO
 
 #### `BitcoinMonitor`
 
 Monitors Bitcoin transaction lifecycle:
 
-- Uses adapter pattern for testnet/regtest
-- Tracks confirmations (1 for both testnet and regtest)
+- Uses adapter pattern for regtest/testnet only
+- Tracks confirmations (default 1)
 - Auto-selects Bitcoin Core RPC or mempool.space API
+- Drops pending jobs if any prevout is spent elsewhere
 - Caches adapters for efficiency
 
 #### `OutputSerializer`
@@ -494,16 +495,18 @@ import {
 
 // Bitcoin transaction processing
 import { BitcoinTransactionProcessor } from 'fakenet-signer';
-await BitcoinTransactionProcessor.processTransactionForSigning(
-  psbtBytes,
-  privateKey,
-  caip2Id,
-  config
-);
+const plan = BitcoinTransactionProcessor.createSigningPlan(psbtBytes, config);
+for (const input of plan.inputs) {
+  // Sign input.sighash with your derived key and respond per input
+}
 
 // Bitcoin monitoring
 import { BitcoinMonitor } from 'fakenet-signer';
-await BitcoinMonitor.waitForTransactionAndGetOutput(txid, caip2Id, config);
+await BitcoinMonitor.waitForTransactionAndGetOutput(
+  txid,
+  plan.inputs.map(({ prevTxid, vout }) => ({ txid: prevTxid, vout })),
+  config
+);
 
 // Output serialization
 import { OutputSerializer } from 'fakenet-signer';

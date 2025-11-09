@@ -1,9 +1,9 @@
 export { ChainSignatureServer } from './src/server/ChainSignatureServer';
 export { CryptoUtils } from './src/modules/CryptoUtils';
-export { EthereumTransactionProcessor } from './src/modules/EthereumTransactionProcessor';
-export { EthereumMonitor } from './src/modules/EthereumMonitor';
-export { BitcoinTransactionProcessor } from './src/modules/BitcoinTransactionProcessor';
-export { BitcoinMonitor } from './src/modules/BitcoinMonitor';
+export { EthereumTransactionProcessor } from './src/modules/ethereum/EthereumTransactionProcessor';
+export { EthereumMonitor } from './src/modules/ethereum/EthereumMonitor';
+export { BitcoinTransactionProcessor } from './src/modules/bitcoin/BitcoinTransactionProcessor';
+export { BitcoinMonitor } from './src/modules/bitcoin/BitcoinMonitor';
 export {
   CpiEventParser,
   EMIT_CPI_INSTRUCTION_DISCRIMINATOR,

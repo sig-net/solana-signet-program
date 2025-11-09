@@ -2,9 +2,10 @@ import type {
   TransactionStatus,
   TransactionOutputData,
   ServerConfig,
-} from '../types';
-import { IBitcoinAdapter } from '../adapters/IBitcoinAdapter';
-import { BitcoinAdapterFactory } from '../adapters/BitcoinAdapterFactory';
+  PrevoutRef,
+} from '../../types';
+import { IBitcoinAdapter } from '../../adapters/IBitcoinAdapter';
+import { BitcoinAdapterFactory } from '../../adapters/BitcoinAdapterFactory';
 import pc from 'picocolors';
 
 /**
@@ -19,7 +20,7 @@ import pc from 'picocolors';
  * - testnet → mempool.space API (testnet4)
  *
  * Features:
- * - Simple boolean output: { success: true }
+ * - Structured output object `{ success: true, isFunctionCall: false }`
  *
  * Note: Transactions are broadcast by the client, not the server.
  */
@@ -28,6 +29,7 @@ export class BitcoinMonitor {
 
   static async waitForTransactionAndGetOutput(
     txid: string,
+    prevouts: PrevoutRef[] | undefined,
     config: ServerConfig
   ): Promise<TransactionStatus> {
     const adapter = await this.getAdapter(config);
@@ -37,6 +39,19 @@ export class BitcoinMonitor {
       const tx = await adapter.getTransaction(txid);
 
       if (tx.confirmations < requiredConfs) {
+        const conflicted = await this.getConflictedPrevout(
+          prevouts,
+          adapter
+        );
+        if (conflicted) {
+          console.log(
+            pc.red(
+              `❌ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: input ${pc.white(`${conflicted.txid}:${conflicted.vout}`)} was spent elsewhere`
+            )
+          );
+          return { status: 'error', reason: 'inputs_spent' };
+        }
+
         const hint = `${tx.confirmations}/${requiredConfs} confirmations`;
 
         console.log(
@@ -53,7 +68,10 @@ export class BitcoinMonitor {
         )
       );
 
-      const output: TransactionOutputData = true;
+      const output: TransactionOutputData = {
+        success: true,
+        isFunctionCall: false,
+      };
 
       return {
         status: 'success',
@@ -62,6 +80,19 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
+        const conflicted = await this.getConflictedPrevout(
+          prevouts,
+          adapter
+        );
+        if (conflicted) {
+          console.log(
+            pc.red(
+              `❌ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: input ${pc.white(`${conflicted.txid}:${conflicted.vout}`)} was spent elsewhere`
+            )
+          );
+          return { status: 'error', reason: 'inputs_spent' };
+        }
+
         console.log(
           pc.yellow(
             `⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: not found`
@@ -90,5 +121,33 @@ export class BitcoinMonitor {
 
     this.adapterCache.set(network, adapter);
     return adapter;
+  }
+
+  private static async getConflictedPrevout(
+    prevouts: PrevoutRef[] | undefined,
+    adapter: IBitcoinAdapter
+  ): Promise<PrevoutRef | null> {
+    if (!prevouts || prevouts.length === 0) {
+      return null;
+    }
+
+    for (const prev of prevouts) {
+      try {
+        const spent = await adapter.isPrevoutSpent(prev.txid, prev.vout);
+        if (spent) {
+          return prev;
+        }
+      } catch (error) {
+        console.error(
+          pc.red(
+            `❌ Error checking prevout ${prev.txid}:${prev.vout}: ${
+              error instanceof Error ? error.message : error
+            }`
+          )
+        );
+      }
+    }
+
+    return null;
   }
 }
