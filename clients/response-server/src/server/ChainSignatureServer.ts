@@ -33,8 +33,21 @@ import type {
   SubstrateSignatureRequest,
   SubstrateBidirectionalRequest,
 } from '../modules/SubstrateMonitor';
+import { ECPairFactory } from 'ecpair';
+import * as ecc from 'tiny-secp256k1';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
+
+const getNetwork = (config: ServerConfig) => {
+  switch (config.bitcoinNetwork) {
+    case 'mainnet':
+      return bitcoin.networks.bitcoin;
+    case 'testnet':
+      return bitcoin.networks.testnet;
+    case 'regtest':
+      return bitcoin.networks.regtest;
+  }
+};
 
 export class ChainSignatureServer {
   private connection: Connection;
@@ -577,6 +590,9 @@ export class ChainSignatureServer {
   private async handleSubstrateBidirectional(
     event: SubstrateBidirectionalRequest
   ) {
+    console.log(`🔍 Server received sender: ${event.sender}`);
+    console.log(`🔍 Server received path: ${event.path}`);
+
     const path = Buffer.from(event.path.slice(2), 'hex').toString();
     const algo = Buffer.from(event.algo.slice(2), 'hex').toString();
     const dest =
@@ -585,16 +601,29 @@ export class ChainSignatureServer {
         : Buffer.from(event.dest.slice(2), 'hex').toString();
     const params = Buffer.from(event.params.slice(2), 'hex').toString();
 
-    this.logger.info({
-      path,
-      algo,
-      params: params || '(empty)',
-      caip2Id: event.caip2Id,
-    });
+    const namespace = getNamespaceFromCaip2(event.caip2Id);
 
+    // Extract txid from PSBT for Bitcoin transactions
+    let transactionData: number[];
+
+    if (namespace === 'bip122') {
+      const psbt = bitcoin.Psbt.fromBuffer(
+        Buffer.from(event.serializedTransaction)
+      );
+      const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
+      const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
+      const txidInternal = unsignedTx.getHash(); // Little-endian!
+      transactionData = Array.from(txidInternal);
+    } else if (namespace === 'eip155') {
+      transactionData = Array.from(event.serializedTransaction);
+    } else {
+      throw new Error(`Unsupported namespace: ${namespace}`);
+    }
+
+    // Calculate request ID with txid bytes (not full PSBT)
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
       event.sender,
-      Array.from(event.serializedTransaction),
+      transactionData,
       event.caip2Id,
       event.keyVersion,
       path,
@@ -611,22 +640,45 @@ export class ChainSignatureServer {
       this.config.mpcRootKey,
       'polkadot:2034'
     );
+    const ECPair = ECPairFactory(ecc);
 
-    const result = await TransactionProcessor.processTransactionForSigning(
-      event.serializedTransaction,
-      derivedPrivateKey,
-      event.caip2Id,
-      this.config
+    const keyPair = ECPair.fromPrivateKey(
+      Buffer.from(derivedPrivateKey.slice(2), 'hex')
     );
+    const { address } = bitcoin.payments.p2wpkh({
+      pubkey: keyPair.publicKey,
+      network: getNetwork(this.config),
+    });
+    console.log(`🔍 Server derived BTC address: ${address}`);
 
-    await this.substrateMonitor!.sendSignatureResponse(
-      Buffer.from(requestId.slice(2), 'hex'),
-      result.signature,
-      event.sender
-    );
+    let result;
+    if (namespace === 'bip122') {
+      result = await BitcoinTransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        this.config
+      );
+    }
 
-    pendingTransactions.set(result.signedTxHash, {
-      txHash: result.signedTxHash,
+    if (namespace === 'eip155') {
+      result = await EthereumTransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        event.caip2Id,
+        this.config
+      );
+    }
+
+    for (let sig in result!.signature) {
+      await this.substrateMonitor!.sendSignatureResponse(
+        Buffer.from(requestId.slice(2), 'hex'),
+        result!.signature[sig],
+        event.sender
+      );
+    }
+
+    pendingTransactions.set(result!.signedTxHash, {
+      txHash: result!.signedTxHash,
       requestId,
       caip2Id: event.caip2Id,
       explorerDeserializationSchema: Buffer.from(
@@ -637,14 +689,15 @@ export class ChainSignatureServer {
       ),
       sender: event.sender,
       path: event.path,
-      fromAddress: result.fromAddress,
-      nonce: result.nonce,
+      fromAddress: result!.fromAddress,
+      nonce: result!.nonce,
       checkCount: 0,
       source: 'polkadot',
+      namespace,
     });
 
     this.logger.info(
-      { txHash: result.signedTxHash },
+      { txHash: result!.signedTxHash },
       '🔍 Monitoring transaction'
     );
   }
