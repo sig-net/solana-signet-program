@@ -42,6 +42,8 @@ export class ChainSignatureServer {
   private config: ServerConfig;
   private logger: AppLogger;
   private monitorIntervalId: NodeJS.Timeout | null = null;
+  private readyPromise: Promise<void>;
+  private resolveReady: (() => void) | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -61,6 +63,10 @@ export class ChainSignatureServer {
 
     this.logger = AppLogger.create({
       enabled: this.config.verbose === true,
+    });
+
+    this.readyPromise = new Promise((resolve) => {
+      this.resolveReady = resolve;
     });
 
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
@@ -88,6 +94,9 @@ export class ChainSignatureServer {
 
     this.startTransactionMonitor();
     this.setupEventListeners();
+
+    // Resolve readiness so callers can await server.waitUntilReady()
+    this.resolveReady?.();
   }
 
   private async ensureInitialized() {
@@ -271,8 +280,18 @@ export class ChainSignatureServer {
           message: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
           txHash,
+          serializedOutputHex: Buffer.from(serializedOutput).toString('hex'),
+          callbackSchema: txInfo.callbackSerializationSchema,
+          resultOutput: result.output,
         },
         'Error sending response'
+      );
+      this.logger.error(
+        {
+          callbackSchema: txInfo.callbackSerializationSchema,
+          output: result.output,
+        },
+        '🔍 Borsh serialization context'
       );
     }
   }
@@ -397,6 +416,19 @@ export class ChainSignatureServer {
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
     const namespace = getNamespaceFromCaip2(event.caip2Id);
+    this.logger.info(
+      {
+        namespace,
+        caip2Id: event.caip2Id,
+        keyVersion: event.keyVersion,
+        path: event.path,
+        algo: event.algo,
+        dest: event.dest,
+        params: event.params,
+        sender: event.sender.toString(),
+      },
+      '🧾 SignBidirectional payload'
+    );
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
@@ -468,6 +500,25 @@ export class ChainSignatureServer {
       logger: this.logger,
       pendingTransactions,
     };
+  }
+
+  /**
+   * Await until the server has finished its startup sequence and listeners are registered.
+   * Useful in tests to avoid racing the first request against the log subscription.
+   */
+  async waitUntilReady(timeoutMs = 2_000): Promise<void> {
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      const id = setTimeout(() => {
+        clearTimeout(id);
+        reject(
+          new Error(
+            `ChainSignatureServer readiness timed out after ${timeoutMs}ms`
+          )
+        );
+      }, timeoutMs);
+    });
+
+    await Promise.race([this.readyPromise, timeoutPromise]);
   }
 
   async shutdown() {

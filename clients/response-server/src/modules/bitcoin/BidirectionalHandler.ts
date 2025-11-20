@@ -41,7 +41,12 @@ export async function handleBitcoinBidirectional(
     `✅ PSBT parsed successfully → tx ${colors.txid(bitcoinPlan.txid)}`
   );
 
-  await handleBitcoinSigningPlan(event, bitcoinPlan, derivedPrivateKey, context);
+  await handleBitcoinSigningPlan(
+    event,
+    bitcoinPlan,
+    derivedPrivateKey,
+    context
+  );
 }
 
 /**
@@ -81,21 +86,17 @@ async function handleBitcoinSigningPlan(
     vout,
   }));
 
-  const aggregateRequestId = RequestIdGenerator.generateSignBidirectionalRequestId(
-    event.sender.toString(),
-    Array.from(txidBytes),
-    event.caip2Id,
-    event.keyVersion,
-    event.path,
-    event.algo,
-    event.dest,
-    event.params
-  );
-
-  logger.info(
-    { requestId: aggregateRequestId, namespace: 'bip122' },
-    `🔑 Request ID for ${colors.txid(plan.txid)}`
-  );
+  const aggregateRequestId =
+    RequestIdGenerator.generateSignBidirectionalRequestId(
+      event.sender.toString(),
+      Array.from(txidBytes),
+      event.caip2Id,
+      event.keyVersion,
+      event.path,
+      event.algo,
+      event.dest,
+      event.params
+    );
 
   pendingTransactions.set(plan.txid, {
     txHash: plan.txid,

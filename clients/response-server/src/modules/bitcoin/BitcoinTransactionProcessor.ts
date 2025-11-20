@@ -10,7 +10,7 @@ export interface BitcoinInputSigningPlan {
 }
 
 export interface BitcoinSigningPlan {
-  txid: string; // canonical (big-endian) txid
+  txid: string; // Transaction.getId(): explorer-friendly (reversed) txid hex
   inputs: BitcoinInputSigningPlan[];
 }
 
@@ -28,8 +28,14 @@ export class BitcoinTransactionProcessor {
   ): BitcoinSigningPlan {
     const network = this.getNetwork(config);
     const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(psbtBytes), { network });
-    const unsignedTx = psbt.data.globalMap
-      .unsignedTx as unknown as bitcoin.Transaction;
+    /**
+     * In bitcoinjs-lib v6 the unsigned transaction inside a PSBT is a
+     * `PsbtTransaction` (no hash helpers). Convert it to a full
+     * `bitcoin.Transaction` via its `toBuffer()` method so we can call
+     * `hashForWitnessV0` idiomatically without peeking at private caches.
+     */
+    const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
+    const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
 
     const colors = AppLogger.colors;
     logger.info(
@@ -48,13 +54,38 @@ export class BitcoinTransactionProcessor {
         );
       }
 
+      // Derive the correct scriptCode for SegWit v0 P2WPKH:
+      // scriptCode = legacy P2PKH script over the witness program's pubkey hash.
+      const isP2wpkh =
+        witnessUtxo.script.length === 22 &&
+        witnessUtxo.script[0] === 0x00 &&
+        witnessUtxo.script[1] === 0x14;
+      const scriptCode = isP2wpkh
+        ? bitcoin.payments.p2pkh({
+            hash: witnessUtxo.script.slice(2),
+            network,
+          }).output!
+        : witnessUtxo.script;
+
       const sighashType =
         inputData.sighashType ?? bitcoin.Transaction.SIGHASH_ALL;
       const sighash = unsignedTx.hashForWitnessV0(
         i,
-        witnessUtxo.script,
+        scriptCode,
         witnessUtxo.value,
         sighashType
+      );
+
+      logger.info(
+        {
+          inputIndex: i,
+          scriptCodeHex: Buffer.from(scriptCode).toString('hex'),
+          witnessScriptHex: Buffer.from(witnessUtxo.script).toString('hex'),
+          value: witnessUtxo.value,
+          sighashType,
+          sighashHex: Buffer.from(sighash).toString('hex'),
+        },
+        '🧮 Computed sighash for input'
       );
 
       const prevTxid = Buffer.from(psbt.txInputs[i].hash)
