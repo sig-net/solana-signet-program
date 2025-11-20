@@ -2,7 +2,6 @@ import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
-import pino from 'pino';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -29,6 +28,7 @@ import {
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
+import { AppLogger } from '../modules/logger/AppLogger';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -40,7 +40,7 @@ export class ChainSignatureServer {
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
-  private logger: pino.Logger;
+  private logger: AppLogger;
   private monitorIntervalId: NodeJS.Timeout | null = null;
 
   constructor(config: ServerConfig) {
@@ -59,12 +59,8 @@ export class ChainSignatureServer {
       throw new Error('Invalid server configuration');
     }
 
-    this.logger = pino({
+    this.logger = AppLogger.create({
       enabled: this.config.verbose === true,
-      level: 'info',
-      serializers: {
-        error: pino.stdSerializers.err,
-      },
     });
 
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
@@ -160,7 +156,8 @@ export class ChainSignatureServer {
               ? await BitcoinMonitor.waitForTransactionAndGetOutput(
                   txHash,
                   txInfo.prevouts,
-                  this.config
+                  this.config,
+                  this.logger
                 )
               : await EthereumMonitor.waitForTransactionAndGetOutput(
                   txHash,

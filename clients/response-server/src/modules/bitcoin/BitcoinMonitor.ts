@@ -6,7 +6,7 @@ import type {
 } from '../../types';
 import { IBitcoinAdapter } from '../../adapters/IBitcoinAdapter';
 import { BitcoinAdapterFactory } from '../../adapters/BitcoinAdapterFactory';
-import pc from 'picocolors';
+import { AppLogger } from '../logger/AppLogger';
 
 /**
  * Bitcoin transaction monitor using adapter pattern
@@ -30,9 +30,11 @@ export class BitcoinMonitor {
   static async waitForTransactionAndGetOutput(
     txid: string,
     prevouts: PrevoutRef[] | undefined,
-    config: ServerConfig
+    config: ServerConfig,
+    logger: AppLogger
   ): Promise<TransactionStatus> {
-    const adapter = await this.getAdapter(config);
+    const adapter = await this.getAdapter(config, logger);
+    const colors = AppLogger.colors;
     const requiredConfs = 1;
 
     try {
@@ -41,31 +43,38 @@ export class BitcoinMonitor {
       if (tx.confirmations < requiredConfs) {
         const conflicted = await this.getConflictedPrevout(
           prevouts,
-          adapter
+          adapter,
+          logger
         );
         if (conflicted) {
-          console.log(
-            pc.red(
-              `❌ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: input ${pc.white(`${conflicted.txid}:${conflicted.vout}`)} was spent elsewhere`
-            )
+          logger.error(
+            {
+              txid,
+              network: config.bitcoinNetwork,
+              conflictedPrevout: conflicted,
+            },
+            `❌ ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(txid)}: input ${colors.value(`${conflicted.txid}:${conflicted.vout}`)} was spent elsewhere`
           );
           return { status: 'error', reason: 'inputs_spent' };
         }
 
         const hint = `${tx.confirmations}/${requiredConfs} confirmations`;
 
-        console.log(
-          pc.yellow(
-            `⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(hint)}`
-          )
+        logger.pending(
+          {
+            txid,
+            network: config.bitcoinNetwork,
+            confirmations: tx.confirmations,
+            requiredConfs,
+          },
+          `⏳ ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(txid)}: ${colors.hint(hint)}`
         );
         return { status: 'pending' };
       }
 
-      console.log(
-        pc.green(
-          `✅ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: ${pc.white(tx.confirmations.toString())} confirmation(s)`
-        )
+      logger.success(
+        { txid, network: config.bitcoinNetwork, confirmations: tx.confirmations },
+        `✅ ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(txid)}: ${colors.value(tx.confirmations)} confirmation(s)`
       );
 
       const output: TransactionOutputData = {
@@ -82,34 +91,44 @@ export class BitcoinMonitor {
       if (error instanceof Error && error.message.includes('not found')) {
         const conflicted = await this.getConflictedPrevout(
           prevouts,
-          adapter
+          adapter,
+          logger
         );
         if (conflicted) {
-          console.log(
-            pc.red(
-              `❌ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: input ${pc.white(`${conflicted.txid}:${conflicted.vout}`)} was spent elsewhere`
-            )
+          logger.error(
+            {
+              txid,
+              network: config.bitcoinNetwork,
+              conflictedPrevout: conflicted,
+            },
+            `❌ ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(txid)}: input ${colors.value(`${conflicted.txid}:${conflicted.vout}`)} was spent elsewhere`
           );
           return { status: 'error', reason: 'inputs_spent' };
         }
 
-        console.log(
-          pc.yellow(
-            `⏳ ${config.bitcoinNetwork} tx ${pc.cyan(txid)}: not found`
-          )
+        logger.pending(
+          { txid, network: config.bitcoinNetwork },
+          `⏳ ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(txid)}: ${colors.hint('not found')}`
         );
         return { status: 'pending' };
       }
 
-      console.error(
-        pc.red(`❌ Error: ${error instanceof Error ? error.message : error}`)
+      logger.error(
+        {
+          txid,
+          network: config.bitcoinNetwork,
+          error:
+            error instanceof Error ? error.message : (error as string | number),
+        },
+        `❌ Error while monitoring ${colors.txid(txid)}`
       );
       return { status: 'pending' };
     }
   }
 
   private static async getAdapter(
-    config: ServerConfig
+    config: ServerConfig,
+    logger: AppLogger
   ): Promise<IBitcoinAdapter> {
     const network = config.bitcoinNetwork;
 
@@ -117,7 +136,7 @@ export class BitcoinMonitor {
       return this.adapterCache.get(network)!;
     }
 
-    const adapter = await BitcoinAdapterFactory.create(network);
+    const adapter = await BitcoinAdapterFactory.create(network, logger);
 
     this.adapterCache.set(network, adapter);
     return adapter;
@@ -125,7 +144,8 @@ export class BitcoinMonitor {
 
   private static async getConflictedPrevout(
     prevouts: PrevoutRef[] | undefined,
-    adapter: IBitcoinAdapter
+    adapter: IBitcoinAdapter,
+    logger: AppLogger
   ): Promise<PrevoutRef | null> {
     if (!prevouts || prevouts.length === 0) {
       return null;
@@ -138,12 +158,13 @@ export class BitcoinMonitor {
           return prev;
         }
       } catch (error) {
-        console.error(
-          pc.red(
-            `❌ Error checking prevout ${prev.txid}:${prev.vout}: ${
-              error instanceof Error ? error.message : error
-            }`
-          )
+        logger.error(
+          {
+            prevout: prev,
+            error:
+              error instanceof Error ? error.message : (error as string | number),
+          },
+          `❌ Error checking prevout ${prev.txid}:${prev.vout}`
         );
       }
     }

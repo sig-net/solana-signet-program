@@ -2,7 +2,7 @@ import { IBitcoinAdapter } from './IBitcoinAdapter';
 import { MempoolSpaceAdapter } from './MempoolSpaceAdapter';
 import { BitcoinCoreRpcAdapter } from './BitcoinCoreRpcAdapter';
 import type { BitcoinNetwork } from '../types/index.js';
-import pc from 'picocolors';
+import { AppLogger } from '../modules/logger/AppLogger';
 
 /**
  * Auto-selects Bitcoin backend based on network:
@@ -10,7 +10,10 @@ import pc from 'picocolors';
  * - testnet → mempool.space API
  */
 export class BitcoinAdapterFactory {
-  static async create(network: BitcoinNetwork): Promise<IBitcoinAdapter> {
+  static async create(
+    network: BitcoinNetwork,
+    logger: AppLogger
+  ): Promise<IBitcoinAdapter> {
     if (network === 'regtest') {
       const adapter = BitcoinCoreRpcAdapter.createRegtestAdapter();
 
@@ -29,7 +32,9 @@ export class BitcoinAdapterFactory {
         );
       }
 
-      console.log(pc.green('✅ Using Bitcoin Core RPC adapter ') + pc.magenta(`(${network})`));
+      logger.success(
+        `✅ Using Bitcoin Core RPC adapter (${AppLogger.colors.network(network)})`
+      );
       return adapter;
     }
 
@@ -41,16 +46,16 @@ export class BitcoinAdapterFactory {
 
     const available = await adapter.isAvailable();
     if (!available) {
-      console.warn(
-        pc.yellow(
-          `⚠️  Warning: mempool.space API at ${pc.cyan(
-            adapter.getBaseUrl()
-          )} is not responding`
-        )
+      logger.warn(
+        `⚠️  Warning: mempool.space API at ${AppLogger.colors.value(
+          adapter.getBaseUrl()
+        )} is not responding`
       );
     }
 
-    console.log(pc.green('✅ Using mempool.space adapter ') + pc.magenta('(testnet)'));
+    logger.success(
+      `✅ Using mempool.space adapter (${AppLogger.colors.network('testnet')})`
+    );
     return adapter;
   }
 }

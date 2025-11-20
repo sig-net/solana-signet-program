@@ -1,6 +1,6 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import pc from 'picocolors';
 import type { ServerConfig } from '../../types';
+import { AppLogger } from '../logger/AppLogger';
 
 export interface BitcoinInputSigningPlan {
   inputIndex: number;
@@ -23,17 +23,17 @@ export interface BitcoinSigningPlan {
 export class BitcoinTransactionProcessor {
   static createSigningPlan(
     psbtBytes: Uint8Array,
-    config: ServerConfig
+    config: ServerConfig,
+    logger: AppLogger
   ): BitcoinSigningPlan {
     const network = this.getNetwork(config);
     const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(psbtBytes), { network });
     const unsignedTx = psbt.data.globalMap
       .unsignedTx as unknown as bitcoin.Transaction;
 
-    console.log(
-      pc.cyan(
-        `🔐 Bitcoin PSBT: ${pc.white(psbt.data.inputs.length)} input(s), ${pc.white(psbt.data.outputs.length)} output(s)`
-      )
+    const colors = AppLogger.colors;
+    logger.info(
+      `🔐 Bitcoin PSBT: ${colors.value(psbt.data.inputs.length)} input(s), ${colors.value(psbt.data.outputs.length)} output(s)`
     );
 
     const inputs: BitcoinInputSigningPlan[] = [];

@@ -6,6 +6,7 @@ import {
 } from './BitcoinTransactionProcessor';
 import type { SignBidirectionalEvent } from '../../types';
 import type { BidirectionalHandlerContext } from '../shared/BidirectionalContext';
+import { AppLogger } from '../logger/AppLogger';
 
 export async function handleBitcoinBidirectional(
   event: SignBidirectionalEvent,
@@ -13,19 +14,23 @@ export async function handleBitcoinBidirectional(
   derivedPrivateKey: string
 ): Promise<void> {
   const { logger, config } = context;
+  const colors = AppLogger.colors;
 
-  logger.info('🔍 Bitcoin transaction detected');
+  logger.info(
+    `🔍 Bitcoin transaction detected on ${colors.network(config.bitcoinNetwork)}`
+  );
   logger.info(
     {
       psbtBytesLength: event.serializedTransaction.length,
       caip2Id: event.caip2Id,
     },
-    '📦 PSBT received'
+    `📦 PSBT received (${colors.value(event.serializedTransaction.length)} bytes, ${colors.value(event.caip2Id)})`
   );
 
   const bitcoinPlan = BitcoinTransactionProcessor.createSigningPlan(
     new Uint8Array(event.serializedTransaction),
-    config
+    config,
+    logger
   );
 
   logger.info(
@@ -33,7 +38,7 @@ export async function handleBitcoinBidirectional(
       inputCount: bitcoinPlan.inputs.length,
       txHash: bitcoinPlan.txid,
     },
-    '✅ PSBT parsed successfully'
+    `✅ PSBT parsed successfully → tx ${colors.txid(bitcoinPlan.txid)}`
   );
 
   await handleBitcoinSigningPlan(event, bitcoinPlan, derivedPrivateKey, context);
@@ -68,6 +73,7 @@ async function handleBitcoinSigningPlan(
   }
 
   const { program, wallet, logger, config, pendingTransactions } = context;
+  const colors = AppLogger.colors;
 
   const txidBytes = Buffer.from(plan.txid, 'hex');
   const prevouts = plan.inputs.map(({ prevTxid, vout }) => ({
@@ -88,7 +94,7 @@ async function handleBitcoinSigningPlan(
 
   logger.info(
     { requestId: aggregateRequestId, namespace: 'bip122' },
-    '🔑 Request ID'
+    `🔑 Request ID for ${colors.txid(plan.txid)}`
   );
 
   pendingTransactions.set(plan.txid, {
@@ -137,14 +143,14 @@ async function handleBitcoinSigningPlan(
       })
       .rpc();
 
-    logger.info(
+    logger.success(
       {
         tx,
         txHash: plan.txid,
         inputIndex: inputPlan.inputIndex,
         requestId: perInputRequestId,
       },
-      '✅ Bitcoin signature sent'
+      `✅ Signed input ${colors.value(inputPlan.inputIndex)} for ${colors.txid(plan.txid)}`
     );
   }
 
@@ -154,6 +160,6 @@ async function handleBitcoinSigningPlan(
       namespace: 'bip122',
       network: config.bitcoinNetwork,
     },
-    '🔍 Monitoring transaction'
+    `🔍 Monitoring ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(plan.txid)}`
   );
 }
