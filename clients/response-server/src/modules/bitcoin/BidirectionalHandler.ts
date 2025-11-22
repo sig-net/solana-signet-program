@@ -36,9 +36,9 @@ export async function handleBitcoinBidirectional(
   logger.info(
     {
       inputCount: bitcoinPlan.inputs.length,
-      txHash: bitcoinPlan.txid,
+      txHash: bitcoinPlan.explorerTxid,
     },
-    `✅ PSBT parsed successfully → tx ${colors.txid(bitcoinPlan.txid)}`
+    `✅ PSBT parsed successfully → tx ${colors.txid(bitcoinPlan.explorerTxid)}`
   );
 
   await handleBitcoinSigningPlan(
@@ -59,7 +59,7 @@ export async function handleBitcoinBidirectional(
  *    prevouts so {@link BitcoinMonitor} can watch for confirmations or spent
  *    inputs (isPrevoutSpent via the adapters).
  *  - For each PSBT input, derives a deterministic request ID by hashing the
- *    little-endian txid bytes concatenated with the input index (u32 LE) and
+ *    explorer-facing txid bytes concatenated with the input index (u32 LE) and
  *    signs the corresponding sighash with the single MPC-derived private key.
  *  - Streams every signature back to the Solana program individually via
  *    `respond`, logging `{ txid, inputIndex, requestId }` for traceability.
@@ -80,7 +80,9 @@ async function handleBitcoinSigningPlan(
   const { program, wallet, logger, config, pendingTransactions } = context;
   const colors = AppLogger.colors;
 
-  const txidBytes = Buffer.from(plan.txid, 'hex');
+  // Use the explorer-facing txid (big-endian) for all aggregated request IDs;
+  // never flip the byte order here.
+  const txidBytes = Buffer.from(plan.explorerTxid, 'hex');
   const prevouts = plan.inputs.map(({ prevTxid, vout }) => ({
     txid: prevTxid,
     vout,
@@ -98,8 +100,8 @@ async function handleBitcoinSigningPlan(
       event.params
     );
 
-  pendingTransactions.set(plan.txid, {
-    txHash: plan.txid,
+  pendingTransactions.set(plan.explorerTxid, {
+    txHash: plan.explorerTxid,
     requestId: aggregateRequestId,
     caip2Id: event.caip2Id,
     explorerDeserializationSchema: event.outputDeserializationSchema,
@@ -147,20 +149,20 @@ async function handleBitcoinSigningPlan(
     logger.success(
       {
         tx,
-        txHash: plan.txid,
+        txHash: plan.explorerTxid,
         inputIndex: inputPlan.inputIndex,
         requestId: perInputRequestId,
       },
-      `✅ Signed input ${colors.value(inputPlan.inputIndex)} for ${colors.txid(plan.txid)}`
+      `✅ Signed input ${colors.value(inputPlan.inputIndex)} for ${colors.txid(plan.explorerTxid)}`
     );
   }
 
   logger.info(
     {
-      txHash: plan.txid,
+      txHash: plan.explorerTxid,
       namespace: 'bip122',
       network: config.bitcoinNetwork,
     },
-    `🔍 Monitoring ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(plan.txid)}`
+    `🔍 Monitoring ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(plan.explorerTxid)}`
   );
 }

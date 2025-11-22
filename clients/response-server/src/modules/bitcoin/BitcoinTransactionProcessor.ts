@@ -10,7 +10,12 @@ export interface BitcoinInputSigningPlan {
 }
 
 export interface BitcoinSigningPlan {
-  txid: string; // Transaction.getId(): explorer-friendly (reversed) txid hex
+  /**
+   * Explorer-facing txid (Transaction.getId). Always the hex string you would
+   * paste into a block explorer; never the little-endian buffer that
+   * bitcoinjs-lib exposes internally.
+   */
+  explorerTxid: string;
   inputs: BitcoinInputSigningPlan[];
 }
 
@@ -102,7 +107,7 @@ export class BitcoinTransactionProcessor {
     }
 
     return {
-      txid: unsignedTx.getId(),
+      explorerTxid: unsignedTx.getId(),
       inputs,
     };
   }
