@@ -29,8 +29,7 @@ export async function handleBitcoinBidirectional(
 
   const bitcoinPlan = BitcoinTransactionProcessor.createSigningPlan(
     new Uint8Array(event.serializedTransaction),
-    config,
-    logger
+    config
   );
 
   logger.info(
@@ -54,10 +53,11 @@ export async function handleBitcoinBidirectional(
  *
  * Flow mirrors the "Bitcoin Per-Input Signing" doc:
  *  - Uses {@link BitcoinTransactionProcessor} to parse the PSBT once, yielding
- *    the canonical txid plus per-input witness metadata and BIP-143 sighashes.
- *  - Immediately records the txid in `pendingTransactions` with the schemas and
- *    prevouts so {@link BitcoinMonitor} can watch for confirmations or spent
- *    inputs (isPrevoutSpent via the adapters).
+ *    the explorer-facing txid plus per-input witness metadata and BIP-143
+ *    sighashes.
+ *  - Immediately records the txid in `pendingTransactions` with the schemas
+ *    and prevouts so {@link BitcoinMonitor} can watch for confirmations or
+ *    spent inputs (isPrevoutSpent via the adapters).
  *  - For each PSBT input, derives a deterministic request ID by hashing the
  *    explorer-facing txid bytes concatenated with the input index (u32 LE) and
  *    signs the corresponding sighash with the single MPC-derived private key.

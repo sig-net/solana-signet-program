@@ -1,6 +1,5 @@
 import * as bitcoin from 'bitcoinjs-lib';
 import type { ServerConfig } from '../../types';
-import { AppLogger } from '../logger/AppLogger';
 
 export interface BitcoinInputSigningPlan {
   inputIndex: number;
@@ -28,8 +27,7 @@ export interface BitcoinSigningPlan {
 export class BitcoinTransactionProcessor {
   static createSigningPlan(
     psbtBytes: Uint8Array,
-    config: ServerConfig,
-    logger: AppLogger
+    config: ServerConfig
   ): BitcoinSigningPlan {
     const network = this.getNetwork(config);
     const psbt = bitcoin.Psbt.fromBuffer(Buffer.from(psbtBytes), { network });
@@ -41,11 +39,6 @@ export class BitcoinTransactionProcessor {
      */
     const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
     const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
-
-    const colors = AppLogger.colors;
-    logger.info(
-      `🔐 Bitcoin PSBT: ${colors.value(psbt.data.inputs.length)} input(s), ${colors.value(psbt.data.outputs.length)} output(s)`
-    );
 
     const inputs: BitcoinInputSigningPlan[] = [];
 
@@ -59,21 +52,27 @@ export class BitcoinTransactionProcessor {
         );
       }
 
-      // Derive the correct scriptCode for SegWit v0 P2WPKH:
-      // scriptCode = legacy P2PKH script over the witness program's pubkey hash.
-      const isP2wpkh =
-        witnessUtxo.script.length === 22 &&
-        witnessUtxo.script[0] === 0x00 &&
-        witnessUtxo.script[1] === 0x14;
-      const scriptCode = isP2wpkh
-        ? bitcoin.payments.p2pkh({
-            hash: witnessUtxo.script.slice(2),
-            network,
-          }).output!
-        : witnessUtxo.script;
+      // Only SegWit v0 P2WPKH is supported; derive the legacy P2PKH
+      // scriptCode required by BIP-143.
+      const script = witnessUtxo.script;
+      const isP2wpkhV0 =
+        script.length === 22 && script[0] === 0x00 && script[1] === 0x14;
+
+      if (!isP2wpkhV0) {
+        const scriptHex = Buffer.from(script).toString('hex');
+        throw new Error(
+          `Input ${i} must be SegWit v0 P2WPKH (got script ${scriptHex})`
+        );
+      }
+
+      const scriptCode = bitcoin.payments.p2pkh({
+        hash: script.slice(2),
+        network,
+      }).output!;
 
       const sighashType =
         inputData.sighashType ?? bitcoin.Transaction.SIGHASH_ALL;
+
       const sighash = unsignedTx.hashForWitnessV0(
         i,
         scriptCode,
@@ -81,21 +80,10 @@ export class BitcoinTransactionProcessor {
         sighashType
       );
 
-      logger.info(
-        {
-          inputIndex: i,
-          scriptCodeHex: Buffer.from(scriptCode).toString('hex'),
-          witnessScriptHex: Buffer.from(witnessUtxo.script).toString('hex'),
-          value: witnessUtxo.value,
-          sighashType,
-          sighashHex: Buffer.from(sighash).toString('hex'),
-        },
-        '🧮 Computed sighash for input'
-      );
-
       const prevTxid = Buffer.from(psbt.txInputs[i].hash)
         .reverse()
         .toString('hex');
+
       const vout = psbt.txInputs[i].index;
 
       inputs.push({
