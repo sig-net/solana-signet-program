@@ -6,25 +6,19 @@ import {
 } from './BitcoinTransactionProcessor';
 import type { SignBidirectionalEvent } from '../../types';
 import type { BidirectionalHandlerContext } from '../shared/BidirectionalContext';
-import { AppLogger } from '../logger/AppLogger';
 
 export async function handleBitcoinBidirectional(
   event: SignBidirectionalEvent,
   context: BidirectionalHandlerContext,
   derivedPrivateKey: string
 ): Promise<void> {
-  const { logger, config } = context;
-  const colors = AppLogger.colors;
+  const { config } = context;
 
-  logger.info(
-    `🔍 Bitcoin transaction detected on ${colors.network(config.bitcoinNetwork)}`
+  console.log(
+    `🔍 Bitcoin transaction detected on ${config.bitcoinNetwork}`
   );
-  logger.info(
-    {
-      psbtBytesLength: event.serializedTransaction.length,
-      caip2Id: event.caip2Id,
-    },
-    `📦 PSBT received (${colors.value(event.serializedTransaction.length)} bytes, ${colors.value(event.caip2Id)})`
+  console.log(
+    `📦 PSBT received (${event.serializedTransaction.length} bytes, ${event.caip2Id})`
   );
 
   const bitcoinPlan = BitcoinTransactionProcessor.createSigningPlan(
@@ -32,12 +26,8 @@ export async function handleBitcoinBidirectional(
     config
   );
 
-  logger.info(
-    {
-      inputCount: bitcoinPlan.inputs.length,
-      txHash: bitcoinPlan.explorerTxid,
-    },
-    `✅ PSBT parsed successfully → tx ${colors.txid(bitcoinPlan.explorerTxid)}`
+  console.log(
+    `✅ PSBT parsed successfully → tx ${bitcoinPlan.explorerTxid} (${bitcoinPlan.inputs.length} input(s))`
   );
 
   await handleBitcoinSigningPlan(
@@ -77,8 +67,7 @@ async function handleBitcoinSigningPlan(
     throw new Error('Bitcoin PSBT must contain at least one input');
   }
 
-  const { program, wallet, logger, config, pendingTransactions } = context;
-  const colors = AppLogger.colors;
+  const { program, wallet, config, pendingTransactions } = context;
 
   // Use the explorer-facing txid (big-endian) for all aggregated request IDs;
   // never flip the byte order here.
@@ -146,23 +135,12 @@ async function handleBitcoinSigningPlan(
       })
       .rpc();
 
-    logger.success(
-      {
-        tx,
-        txHash: plan.explorerTxid,
-        inputIndex: inputPlan.inputIndex,
-        requestId: perInputRequestId,
-      },
-      `✅ Signed input ${colors.value(inputPlan.inputIndex)} for ${colors.txid(plan.explorerTxid)}`
+    console.log(
+      `✅ Signed input ${inputPlan.inputIndex} for ${plan.explorerTxid} (tx: ${tx})`
     );
   }
 
-  logger.info(
-    {
-      txHash: plan.explorerTxid,
-      namespace: 'bip122',
-      network: config.bitcoinNetwork,
-    },
-    `🔍 Monitoring ${colors.network(config.bitcoinNetwork)} tx ${colors.txid(plan.explorerTxid)}`
+  console.log(
+    `🔍 Monitoring ${config.bitcoinNetwork} tx ${plan.explorerTxid}`
   );
 }

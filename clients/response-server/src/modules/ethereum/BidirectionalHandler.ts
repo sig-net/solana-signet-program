@@ -8,7 +8,7 @@ export async function handleEthereumBidirectional(
   context: BidirectionalHandlerContext,
   derivedPrivateKey: string
 ): Promise<void> {
-  const { logger, config, program, wallet, pendingTransactions } = context;
+  const { config, program, wallet, pendingTransactions } = context;
 
   const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
     event.sender.toString(),
@@ -21,7 +21,7 @@ export async function handleEthereumBidirectional(
     event.params
   );
 
-  logger.info({ requestId, namespace: 'eip155' }, '🔑 Request ID');
+  console.log(`🔑 Request ID (eip155): ${requestId}`);
 
   const result =
     await EthereumTransactionProcessor.processTransactionForSigning(
@@ -41,7 +41,7 @@ export async function handleEthereumBidirectional(
     })
     .rpc();
 
-  logger.info({ tx, namespace: 'eip155' }, '✅ Signatures sent to contract');
+  console.log(`✅ Signatures sent to contract (tx=${tx})`);
 
   pendingTransactions.set(result.signedTxHash, {
     txHash: result.signedTxHash,
@@ -55,11 +55,5 @@ export async function handleEthereumBidirectional(
     namespace: 'eip155',
   });
 
-  logger.info(
-    {
-      txHash: result.signedTxHash,
-      namespace: 'eip155',
-    },
-    '🔍 Monitoring transaction'
-  );
+  console.log(`🔍 Monitoring transaction ${result.signedTxHash} (eip155)`);
 }

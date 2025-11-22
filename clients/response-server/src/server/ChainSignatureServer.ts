@@ -28,7 +28,6 @@ import {
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
-import { AppLogger } from '../modules/logger/AppLogger';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -40,7 +39,6 @@ export class ChainSignatureServer {
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
-  private logger: AppLogger;
   private monitorIntervalId: NodeJS.Timeout | null = null;
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
@@ -60,10 +58,6 @@ export class ChainSignatureServer {
       }
       throw new Error('Invalid server configuration');
     }
-
-    this.logger = AppLogger.create({
-      enabled: this.config.verbose === true,
-    });
 
     this.readyPromise = new Promise((resolve) => {
       this.resolveReady = resolve;
@@ -86,9 +80,9 @@ export class ChainSignatureServer {
   }
 
   async start() {
-    this.logger.info('🚀 Response Server');
-    this.logger.info({ wallet: this.wallet.publicKey.toString() }, 'Wallet');
-    this.logger.info({ program: this.program.programId.toString() }, 'Program');
+    console.log('🚀 Response Server');
+    console.log(`Wallet: ${this.wallet.publicKey.toString()}`);
+    console.log(`Program: ${this.program.programId.toString()}`);
 
     await this.ensureInitialized();
 
@@ -134,9 +128,8 @@ export class ChainSignatureServer {
       this.pollCounter++;
 
       if (pendingTransactions.size > 0 && this.pollCounter % 12 === 1) {
-        this.logger.info(
-          { count: pendingTransactions.size },
-          '📊 Monitoring pending transactions'
+        console.log(
+          `📊 Monitoring pending transactions (count=${pendingTransactions.size})`
         );
       }
 
@@ -165,8 +158,7 @@ export class ChainSignatureServer {
               ? await BitcoinMonitor.waitForTransactionAndGetOutput(
                   txHash,
                   txInfo.prevouts,
-                  this.config,
-                  this.logger
+                  this.config
                 )
               : await EthereumMonitor.waitForTransactionAndGetOutput(
                   txHash,
@@ -200,9 +192,8 @@ export class ChainSignatureServer {
 
             case 'fatal_error':
               // Just remove from map, don't send signed error
-              this.logger.error(
-                { txHash, reason: result.reason },
-                'Fatal error for transaction'
+              console.error(
+                `Fatal error for transaction ${txHash}: ${result.reason}`
               );
               pendingTransactions.delete(txHash);
               break;
@@ -211,23 +202,18 @@ export class ChainSignatureServer {
           if (
             error instanceof Error &&
             (error.message.includes('Modulus not supported') ||
-              error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
-              error.message.includes('Failed to load keypair'))
+            error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
+            error.message.includes('Failed to load keypair'))
           ) {
-            this.logger.error(
-              { txHash, error: error.message },
-              'Infrastructure error'
+            console.error(
+              `Infrastructure error for ${txHash}: ${error.message}`
             );
             pendingTransactions.delete(txHash);
           } else {
-            this.logger.error(
-              {
-                txHash,
-                error,
-                message: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined,
-              },
-              'Unexpected error polling'
+            console.error(
+              `Unexpected error polling ${txHash}: ${
+                error instanceof Error ? error.message : String(error)
+              }`
             );
             txInfo.checkCount++;
           }
@@ -241,7 +227,7 @@ export class ChainSignatureServer {
     txInfo: PendingTransaction,
     result: TransactionOutput
   ) {
-    this.logger.info({ txHash }, '✅ Transaction completed');
+    console.log(`✅ Transaction completed: ${txHash}`);
 
     const requestId = txInfo.requestId;
     if (!requestId) {
@@ -274,24 +260,15 @@ export class ChainSignatureServer {
 
       pendingTransactions.delete(txHash);
     } catch (error) {
-      this.logger.error(
-        {
-          error,
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-          txHash,
-          serializedOutputHex: Buffer.from(serializedOutput).toString('hex'),
-          callbackSchema: txInfo.callbackSerializationSchema,
-          resultOutput: result.output,
-        },
-        'Error sending response'
+      console.error(
+        `Error sending response for ${txHash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
-      this.logger.error(
-        {
-          callbackSchema: txInfo.callbackSerializationSchema,
-          output: result.output,
-        },
-        '🔍 Borsh serialization context'
+      console.error(
+        '🔍 Borsh serialization context',
+        txInfo.callbackSerializationSchema,
+        result.output
       );
     }
   }
@@ -300,7 +277,7 @@ export class ChainSignatureServer {
     txHash: string,
     txInfo: PendingTransaction
   ) {
-    this.logger.warn({ txHash }, '❌ Transaction failed');
+    console.warn(`❌ Transaction failed: ${txHash}`);
 
     try {
       const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
@@ -333,14 +310,10 @@ export class ChainSignatureServer {
         })
         .rpc();
     } catch (error) {
-      this.logger.error(
-        {
-          error,
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-          txHash,
-        },
-        'Error sending error response'
+      console.error(
+        `Error sending error response for ${txHash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -355,25 +328,19 @@ export class ChainSignatureServer {
       'signBidirectionalEvent',
       async (eventData: CpiEventData, _slot: number) => {
         if (!isSignBidirectionalEvent(eventData)) {
-          this.logger.error('Invalid event type for signBidirectionalEvent');
+          console.error('Invalid event type for signBidirectionalEvent');
           return;
         }
 
-        this.logger.info(
-          { sender: eventData.sender.toString() },
-          '📨 SignBidirectionalEvent'
-        );
+        console.log(`📨 SignBidirectionalEvent from ${eventData.sender.toString()}`);
 
         try {
           await this.handleSignBidirectional(eventData);
         } catch (error) {
-          this.logger.error(
-            {
-              error,
-              message: error instanceof Error ? error.message : String(error),
-              stack: error instanceof Error ? error.stack : undefined,
-            },
-            'Error processing bidirectional'
+          console.error(
+            `Error processing bidirectional: ${
+              error instanceof Error ? error.message : String(error)
+            }`
           );
         }
       }
@@ -383,25 +350,19 @@ export class ChainSignatureServer {
       'signatureRequestedEvent',
       async (eventData: CpiEventData) => {
         if (!isSignatureRequestedEvent(eventData)) {
-          this.logger.error('Invalid event type for signatureRequestedEvent');
+          console.error('Invalid event type for signatureRequestedEvent');
           return;
         }
 
-        this.logger.info(
-          { sender: eventData.sender.toString() },
-          '📝 SignatureRequestedEvent'
-        );
+        console.log(`📝 SignatureRequestedEvent from ${eventData.sender.toString()}`);
 
         try {
           await this.handleSignatureRequest(eventData);
         } catch (error) {
-          this.logger.error(
-            {
-              error,
-              message: error instanceof Error ? error.message : String(error),
-              stack: error instanceof Error ? error.stack : undefined,
-            },
-            'Error sending signature'
+          console.error(
+            `Error sending signature: ${
+              error instanceof Error ? error.message : String(error)
+            }`
           );
         }
       }
@@ -416,18 +377,8 @@ export class ChainSignatureServer {
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
     const namespace = getNamespaceFromCaip2(event.caip2Id);
-    this.logger.info(
-      {
-        namespace,
-        caip2Id: event.caip2Id,
-        keyVersion: event.keyVersion,
-        path: event.path,
-        algo: event.algo,
-        dest: event.dest,
-        params: event.params,
-        sender: event.sender.toString(),
-      },
-      '🧾 SignBidirectional payload'
+    console.log(
+      `🧾 SignBidirectional payload namespace=${namespace} caip2Id=${event.caip2Id} keyVersion=${event.keyVersion} path=${event.path} algo=${event.algo} dest=${event.dest} params=${event.params} sender=${event.sender.toString()}`
     );
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
@@ -468,7 +419,7 @@ export class ChainSignatureServer {
       event.params
     );
 
-    this.logger.info({ requestId }, '🔑 Request ID');
+    console.log(`🔑 Request ID: ${requestId}`);
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
@@ -489,7 +440,7 @@ export class ChainSignatureServer {
       })
       .rpc();
 
-    this.logger.info({ tx }, '✅ Signature sent!');
+    console.log(`✅ Signature sent! tx=${tx}`);
   }
 
   private getBidirectionalContext(): BidirectionalHandlerContext {
@@ -497,7 +448,6 @@ export class ChainSignatureServer {
       program: this.program,
       wallet: this.wallet,
       config: this.config,
-      logger: this.logger,
       pendingTransactions,
     };
   }
@@ -522,7 +472,7 @@ export class ChainSignatureServer {
   }
 
   async shutdown() {
-    this.logger.info('🛑 Shutting down...');
+    console.log('🛑 Shutting down...');
     if (this.monitorIntervalId !== null) {
       clearInterval(this.monitorIntervalId);
       this.monitorIntervalId = null;
