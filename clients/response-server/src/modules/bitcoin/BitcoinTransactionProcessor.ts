@@ -25,6 +25,17 @@ export interface BitcoinSigningPlan {
  * signature per request ID, and never needs to mutate the PSBT afterwards.
  */
 export class BitcoinTransactionProcessor {
+  /**
+   * Parse a PSBT and pre-compute BIP-143 sighashes for each SegWit input.
+   *
+   * - Validates the network (testnet/regtest) from server config.
+   * - Enforces SegWit v0 P2WPKH inputs with `witnessUtxo` metadata.
+   * - Builds an explorer-facing txid (big-endian) plus per-input sighash data.
+   *
+   * @param psbtBytes Raw PSBT bytes from the Solana event.
+   * @param config Server config, specifically `bitcoinNetwork` for network selection.
+   * @returns Explorer txid and per-input signing material (sighash, prevout ref, index).
+   */
   static createSigningPlan(
     psbtBytes: Uint8Array,
     config: ServerConfig

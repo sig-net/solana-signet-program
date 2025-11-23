@@ -26,6 +26,18 @@ import { BitcoinAdapterFactory } from '../../adapters/BitcoinAdapterFactory';
 export class BitcoinMonitor {
   private static adapterCache = new Map<string, IBitcoinAdapter>();
 
+  /**
+   * Poll a Bitcoin transaction until it confirms or a conflict is detected.
+   *
+   * - Selects the correct adapter (regtest via RPC, testnet via mempool.space).
+   * - Returns `pending` while waiting for confirmations.
+   * - Returns `success` once the minimum confirmation threshold is met.
+   * - Returns `error` if any prevout is spent elsewhere (double-spend).
+   *
+   * @param txid Explorer-facing txid (big-endian).
+   * @param prevouts Optional prevouts consumed by this tx, for conflict checks.
+   * @param config Server config (chooses network and adapter).
+   */
   static async waitForTransactionAndGetOutput(
     txid: string,
     prevouts: PrevoutRef[] | undefined,
@@ -112,6 +124,13 @@ export class BitcoinMonitor {
     return adapter;
   }
 
+  /**
+   * Check if any prevout has been spent in another transaction.
+   *
+   * @param prevouts List of txid/vout pairs from the original PSBT inputs.
+   * @param adapter Active Bitcoin adapter (RPC or mempool.space).
+   * @returns First conflicting prevout, or null if none are spent.
+   */
   private static async getConflictedPrevout(
     prevouts: PrevoutRef[] | undefined,
     adapter: IBitcoinAdapter

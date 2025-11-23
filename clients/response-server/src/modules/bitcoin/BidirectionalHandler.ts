@@ -7,6 +7,12 @@ import {
 import type { SignBidirectionalEvent } from '../../types';
 import type { BidirectionalHandlerContext } from '../shared/BidirectionalContext';
 
+/**
+ * Handle a Bitcoin bidirectional signing request emitted from Solana.
+ * - Parses the PSBT, derives per-input signing plan, and triggers signing.
+ * - Uses the MPC-derived private key for all inputs.
+ * - Registers the transaction for later monitoring/response.
+ */
 export async function handleBitcoinBidirectional(
   event: SignBidirectionalEvent,
   context: BidirectionalHandlerContext,
@@ -54,6 +60,11 @@ export async function handleBitcoinBidirectional(
  *  - The external client finalizes/broadcasts the PSBT; the server only signs
  *    and monitors until {@link handleCompletedTransaction} /
  *    {@link handleFailedTransaction} respond bidirectionally.
+ *
+ * @param event Solana-emitted bidirectional event containing PSBT bytes and metadata.
+ * @param plan Parsed Bitcoin signing plan (txid + per-input sighashes).
+ * @param derivedPrivateKey MPC-derived private key for this request.
+ * @param context Shared server context (Anchor program, wallet, config, pending map).
  */
 async function handleBitcoinSigningPlan(
   event: SignBidirectionalEvent,

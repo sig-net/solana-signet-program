@@ -9,6 +9,15 @@ import type { BitcoinNetwork } from '../types/index.js';
  * - testnet → mempool.space API
  */
 export class BitcoinAdapterFactory {
+  /**
+   * Create a Bitcoin adapter for the configured network.
+   *
+   * - `regtest`: returns a Bitcoin Core RPC adapter, fails fast if RPC is down.
+   * - `testnet`: returns a mempool.space adapter and warns if the API is unreachable.
+   *
+   * @param network Bitcoin network identifier (`regtest` | `testnet`).
+   * @returns Adapter implementing `IBitcoinAdapter`.
+   */
   static async create(
     network: BitcoinNetwork
   ): Promise<IBitcoinAdapter> {
