@@ -78,7 +78,9 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
   }
 
   async broadcastTransaction(txHex: string): Promise<string> {
-    return await this.client.command('sendrawtransaction', txHex);
+    const hash = await this.client.command('sendrawtransaction', txHex);
+    await this.mineBlocks(1);
+    return hash;
   }
 
   async mineBlocks(count: number, address?: string): Promise<string[]> {
@@ -89,12 +91,8 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
   }
 
   async fundAddress(address: string, amount: number): Promise<string> {
-    // Send BTC to the address
     const txid = await this.client.command('sendtoaddress', address, amount);
-
-    // Mine 1 block to confirm the transaction
-    this.mineBlocks(1);
-
+    await this.mineBlocks(1);
     return txid;
   }
 

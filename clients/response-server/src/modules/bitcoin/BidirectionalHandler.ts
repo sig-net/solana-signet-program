@@ -14,9 +14,7 @@ export async function handleBitcoinBidirectional(
 ): Promise<void> {
   const { config } = context;
 
-  console.log(
-    `🔍 Bitcoin transaction detected on ${config.bitcoinNetwork}`
-  );
+  console.log(`🔍 Bitcoin transaction detected on ${config.bitcoinNetwork}`);
   console.log(
     `📦 PSBT received (${event.serializedTransaction.length} bytes, ${event.caip2Id})`
   );
@@ -102,7 +100,16 @@ async function handleBitcoinSigningPlan(
     prevouts,
   });
 
-  for (const inputPlan of plan.inputs) {
+  // Simulate MPC nodes returning signatures out of order so clients rely on
+  // requestId when matching signatures. Shuffle deterministically per run using
+  // Math.random for simplicity.
+  const signingQueue = [...plan.inputs];
+  for (let i = signingQueue.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [signingQueue[i], signingQueue[j]] = [signingQueue[j], signingQueue[i]];
+  }
+
+  for (const inputPlan of signingQueue) {
     const inputIndexBytes = Buffer.alloc(4);
     inputIndexBytes.writeUInt32LE(inputPlan.inputIndex, 0);
     const txDataForInput = Buffer.concat([txidBytes, inputIndexBytes]);
@@ -140,7 +147,5 @@ async function handleBitcoinSigningPlan(
     );
   }
 
-  console.log(
-    `🔍 Monitoring ${config.bitcoinNetwork} tx ${plan.explorerTxid}`
-  );
+  console.log(`🔍 Monitoring ${config.bitcoinNetwork} tx ${plan.explorerTxid}`);
 }
