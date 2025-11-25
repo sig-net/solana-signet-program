@@ -8,10 +8,13 @@ export async function handleEthereumBidirectional(
   context: BidirectionalHandlerContext,
   derivedPrivateKey: string
 ): Promise<void> {
-  const { config, program, wallet, pendingTransactions } = context;
+  const { config, pendingTransactions, sendSignatures, source } = context;
+
+  const senderStr =
+    typeof event.sender === 'string' ? event.sender : event.sender.toString();
 
   const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
-    event.sender.toString(),
+    senderStr,
     Array.from(event.serializedTransaction),
     event.caip2Id,
     event.keyVersion,
@@ -31,28 +34,26 @@ export async function handleEthereumBidirectional(
       config
     );
 
-  const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
-  const requestIds = result.signature.map(() => Array.from(requestIdBytes));
+  const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
+  const requestIds = result.signature.map(() => requestIdBytes);
 
-  const tx = await program.methods
-    .respond(requestIds, result.signature)
-    .accounts({
-      responder: wallet.publicKey,
-    })
-    .rpc();
+  await sendSignatures(requestIds, result.signature);
 
-  console.log(`✅ Signatures sent to contract (tx=${tx})`);
+  console.log(`✅ Signatures sent to contract (tx)`);
 
   pendingTransactions.set(result.signedTxHash, {
     txHash: result.signedTxHash,
     requestId,
     caip2Id: event.caip2Id,
-    explorerDeserializationSchema: event.outputDeserializationSchema,
-    callbackSerializationSchema: event.respondSerializationSchema,
+    explorerDeserializationSchema: Buffer.from(
+      event.outputDeserializationSchema
+    ),
+    callbackSerializationSchema: Buffer.from(event.respondSerializationSchema),
     fromAddress: result.fromAddress,
     nonce: result.nonce,
     checkCount: 0,
     namespace: 'eip155',
+    source,
   });
 
   console.log(`🔍 Monitoring transaction ${result.signedTxHash} (eip155)`);

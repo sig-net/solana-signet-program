@@ -44,17 +44,17 @@ export const serverConfigSchema = z.object({
 });
 
 export interface SignBidirectionalEvent {
-  sender: PublicKey;
-  serializedTransaction: Buffer;
+  sender: PublicKey | string;
+  serializedTransaction: Buffer | Uint8Array;
   caip2Id: string;
   keyVersion: number;
-  deposit: bigint;
+  deposit?: bigint | string;
   path: string;
   algo: string;
   dest: string;
   params: string;
-  outputDeserializationSchema: Buffer;
-  respondSerializationSchema: Buffer;
+  outputDeserializationSchema: Buffer | Uint8Array;
+  respondSerializationSchema: Buffer | Uint8Array;
 }
 
 export interface SignatureRequestedEvent {

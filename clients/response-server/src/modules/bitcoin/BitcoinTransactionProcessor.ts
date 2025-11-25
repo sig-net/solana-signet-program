@@ -48,15 +48,25 @@ export class BitcoinTransactionProcessor {
      * `bitcoin.Transaction` via its `toBuffer()` method so we can call
      * `hashForWitnessV0` idiomatically without peeking at private caches.
      */
+
     const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
     const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
+    const txid = unsignedTx.getId(); 
+
+    console.log(`🔍 Server txid from getId(): ${unsignedTx.getId()}`);
+
+    console.log(
+      `🔍 Server prevout from PSBT: ${psbt.txInputs[0].hash.toString('hex')}`
+    );
+
+    console.log(
+      `🔐 Bitcoin PSBT: ${psbt.data.inputs.length} input(s), ${psbt.data.outputs.length} output(s)`
+    );
 
     const inputs: BitcoinInputSigningPlan[] = [];
-
     for (let i = 0; i < psbt.data.inputs.length; i++) {
       const inputData = psbt.data.inputs[i];
       const witnessUtxo = inputData.witnessUtxo;
-
       if (!witnessUtxo) {
         throw new Error(
           `Input ${i} missing witnessUtxo (required for SegWit signing)`
@@ -91,6 +101,14 @@ export class BitcoinTransactionProcessor {
         sighashType
       );
 
+      console.log(
+        `🔍 Input ${i} sighash: ${Buffer.from(sighash).toString('hex')}`
+      );
+      console.log(`🔍 Input ${i} witnessUtxo.value: ${witnessUtxo.value}`);
+      console.log(
+        `🔍 Input ${i} witnessUtxo.script: ${witnessUtxo.script.toString('hex')}`
+      );
+
       const prevTxid = Buffer.from(psbt.txInputs[i].hash)
         .reverse()
         .toString('hex');
@@ -106,7 +124,7 @@ export class BitcoinTransactionProcessor {
     }
 
     return {
-      explorerTxid: unsignedTx.getId(),
+      explorerTxid: txid,
       inputs,
     };
   }

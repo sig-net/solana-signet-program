@@ -103,8 +103,7 @@ export class SubstrateMonitor {
 
   async sendSignatureResponse(
     requestId: Uint8Array,
-    signature: any,
-    signerAddress: string
+    signature: any
   ) {
     if (!this.api) throw new Error('Not connected to Substrate');
     if (!this.keypair) throw new Error('No keypair available for signing');
@@ -133,8 +132,7 @@ export class SubstrateMonitor {
   async sendRespondBidirectional(
     requestId: Uint8Array,
     serializedOutput: Uint8Array,
-    signature: any,
-    signerAddress: string
+    signature: any
   ) {
     if (!this.api) throw new Error('Not connected to Substrate');
     if (!this.keypair) throw new Error('No keypair available for signing');

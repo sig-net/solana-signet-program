@@ -2,6 +2,7 @@ import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
+import * as bitcoin from 'bitcoinjs-lib'; 
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -9,6 +10,7 @@ import type {
   TransactionOutput,
   ServerConfig,
   CpiEventData,
+  SignatureResponse,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
@@ -19,29 +21,27 @@ import { RequestIdGenerator } from '../modules/RequestIdGenerator';
 import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
 import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 import { OutputSerializer } from '../modules/OutputSerializer';
-import { CpiEventParser } from '../events/CpiEventParser';
-import * as borsh from 'borsh';
 import {
-  SerializationFormat,
+  SubstrateBidirectionalRequest,
+  SubstrateMonitor,
+  SubstrateSignatureRequest,
+} from '../modules/SubstrateMonitor';
+import {
   getNamespaceFromCaip2,
+  SerializationFormat,
 } from '../modules/ChainUtils';
+import { CpiEventParser } from '../events/CpiEventParser';
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
-import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
-import { SubstrateMonitor } from '../modules/SubstrateMonitor';
-import type {
-  SubstrateSignatureRequest,
-  SubstrateBidirectionalRequest,
-} from '../modules/SubstrateMonitor';
-import { ECPairFactory } from 'ecpair';
-import * as ecc from 'tiny-secp256k1';
+import { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
+
+import * as borsh from 'borsh';
+
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
 const getNetwork = (config: ServerConfig) => {
   switch (config.bitcoinNetwork) {
-    case 'mainnet':
-      return bitcoin.networks.bitcoin;
     case 'testnet':
       return bitcoin.networks.testnet;
     case 'regtest':
@@ -124,18 +124,18 @@ export class ChainSignatureServer {
 
     try {
       await this.substrateMonitor.connect();
-      this.logger.info('✅ Connected to Substrate node');
+      console.log('✅ Connected to Substrate node');
 
       await this.substrateMonitor.subscribeToEvents({
         onSignatureRequested: async (event: SubstrateSignatureRequest) => {
-          this.logger.info(
+          console.log(
             { sender: event.sender },
             '📝 Substrate SignatureRequested'
           );
           try {
             await this.handleSubstrateSignatureRequest(event);
           } catch (error) {
-            this.logger.error(
+            console.log(
               { error },
               'Error processing Substrate signature request'
             );
@@ -143,14 +143,14 @@ export class ChainSignatureServer {
         },
 
         onSignBidirectional: async (event: SubstrateBidirectionalRequest) => {
-          this.logger.info(
+          console.log(
             { sender: event.sender, caip2Id: event.caip2Id },
             '📨 Substrate SignBidirectionalRequested'
           );
           try {
             await this.handleSubstrateBidirectional(event);
           } catch (error) {
-            this.logger.error(
+            console.log(
               { error },
               'Error processing Substrate bidirectional request'
             );
@@ -158,14 +158,14 @@ export class ChainSignatureServer {
         },
 
         onRespondBidirectional: async (event: any) => {
-          this.logger.info(
+          console.log(
             { requestId: event.requestId, responder: event.responder },
             '📖 Substrate RespondBidirectionalEvent'
           );
         },
       });
     } catch (error) {
-      this.logger.error({ error }, 'Failed to connect to Substrate');
+      console.log({ error }, 'Failed to connect to Substrate');
     }
   }
 
@@ -327,10 +327,9 @@ export class ChainSignatureServer {
         await this.substrateMonitor.sendRespondBidirectional(
           requestIdBytes,
           serializedOutput,
-          signature,
-          txInfo.sender
+          signature
         );
-        this.logger.info('✅ Response sent to Substrate');
+        console.log('✅ Response sent to Substrate');
       } else {
         await this.program.methods
           .respondBidirectional(
@@ -342,7 +341,7 @@ export class ChainSignatureServer {
             responder: this.wallet.publicKey,
           })
           .rpc();
-        this.logger.info('✅ Response sent to Solana');
+        console.log('✅ Response sent to Solana');
       }
 
       pendingTransactions.delete(txHash);
@@ -532,13 +531,43 @@ export class ChainSignatureServer {
 
   private getBidirectionalContext(): BidirectionalHandlerContext {
     return {
-      program: this.program,
-      wallet: this.wallet,
+      sendSignatures: async (
+        requestIds: Uint8Array[],
+        signatures: SignatureResponse[]
+      ) => {
+        const requestIdArrays = requestIds.map((id) => Array.from(id));
+        await this.program.methods
+          .respond(requestIdArrays, signatures)
+          .accounts({
+            responder: this.wallet.publicKey,
+          })
+          .rpc();
+      },
       config: this.config,
       pendingTransactions,
+      source: 'solana',
     };
   }
-  
+
+  private getSubstrateBidirectionalContext(): BidirectionalHandlerContext {
+    return {
+      sendSignatures: async (
+        requestIds: Uint8Array[],
+        signatures: SignatureResponse[]
+      ) => {
+        for (let i = 0; i < requestIds.length; i++) {
+          await this.substrateMonitor!.sendSignatureResponse(
+            requestIds[i],
+            signatures[i]
+          );
+        }
+      },
+      config: this.config,
+      pendingTransactions,
+      source: 'polkadot',
+    };
+  }
+
   private async handleSubstrateSignatureRequest(
     event: SubstrateSignatureRequest
   ) {
@@ -551,7 +580,7 @@ export class ChainSignatureServer {
     const params = Buffer.from(event.params.slice(2), 'hex').toString();
     const chainId = Buffer.from(event.chainId.slice(2), 'hex').toString();
 
-    this.logger.info({ path, algo, chainId, params: params || '(empty)' });
+    console.log({ path, algo, chainId, params: params || '(empty)' });
 
     const requestId = RequestIdGenerator.generateRequestIdStringChainId(
       event.sender,
@@ -564,7 +593,7 @@ export class ChainSignatureServer {
       params
     );
 
-    this.logger.info({ requestId }, '🔑 Request ID');
+    console.log({ requestId }, '🔑 Request ID');
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
       path,
@@ -580,11 +609,10 @@ export class ChainSignatureServer {
 
     await this.substrateMonitor!.sendSignatureResponse(
       Buffer.from(requestId.slice(2), 'hex'),
-      signature,
-      event.sender
+      signature
     );
 
-    this.logger.info('✅ Signature sent to Substrate');
+    console.log('✅ Signature sent to Substrate');
   }
 
   private async handleSubstrateBidirectional(
@@ -603,103 +631,52 @@ export class ChainSignatureServer {
 
     const namespace = getNamespaceFromCaip2(event.caip2Id);
 
-    // Extract txid from PSBT for Bitcoin transactions
-    let transactionData: number[];
-
-    if (namespace === 'bip122') {
-      const psbt = bitcoin.Psbt.fromBuffer(
-        Buffer.from(event.serializedTransaction)
-      );
-      const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
-      const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
-      const txidInternal = unsignedTx.getHash(); // Little-endian!
-      transactionData = Array.from(txidInternal);
-    } else if (namespace === 'eip155') {
-      transactionData = Array.from(event.serializedTransaction);
-    } else {
-      throw new Error(`Unsupported namespace: ${namespace}`);
-    }
-
-    // Calculate request ID with txid bytes (not full PSBT)
-    const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
-      event.sender,
-      transactionData,
-      event.caip2Id,
-      event.keyVersion,
-      path,
-      algo,
-      dest,
-      params
-    );
-
-    this.logger.info({ requestId }, '🔑 Request ID');
-
     const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
       path,
       event.sender,
       this.config.mpcRootKey,
       'polkadot:2034'
     );
-    const ECPair = ECPairFactory(ecc);
 
-    const keyPair = ECPair.fromPrivateKey(
-      Buffer.from(derivedPrivateKey.slice(2), 'hex')
+    console.log(`🔍 Path for key derivation: ${path}`);
+    console.log(`🔍 Sender for key derivation: ${event.sender}`);
+    console.log(
+      `🔍 Private key (first 10 chars): ${derivedPrivateKey.slice(0, 12)}...`
     );
-    const { address } = bitcoin.payments.p2wpkh({
-      pubkey: keyPair.publicKey,
-      network: getNetwork(this.config),
-    });
-    console.log(`🔍 Server derived BTC address: ${address}`);
 
-    let result;
+    // Convert to SignBidirectionalEvent format
+    const normalizedEvent: SignBidirectionalEvent = {
+      sender: event.sender,
+      serializedTransaction: event.serializedTransaction,
+      caip2Id: event.caip2Id,
+      keyVersion: event.keyVersion,
+      path,
+      algo,
+      dest,
+      params,
+      outputDeserializationSchema: event.outputDeserializationSchema,
+      respondSerializationSchema: event.respondSerializationSchema,
+    };
+
     if (namespace === 'bip122') {
-      result = await BitcoinTransactionProcessor.processTransactionForSigning(
-        new Uint8Array(event.serializedTransaction),
-        derivedPrivateKey,
-        this.config
+      await handleBitcoinBidirectional(
+        normalizedEvent,
+        this.getSubstrateBidirectionalContext(),
+        derivedPrivateKey
       );
+      return;
     }
 
     if (namespace === 'eip155') {
-      result = await EthereumTransactionProcessor.processTransactionForSigning(
-        new Uint8Array(event.serializedTransaction),
-        derivedPrivateKey,
-        event.caip2Id,
-        this.config
+      await handleEthereumBidirectional(
+        normalizedEvent,
+        this.getSubstrateBidirectionalContext(),
+        derivedPrivateKey
       );
+      return;
     }
 
-    for (let sig in result!.signature) {
-      await this.substrateMonitor!.sendSignatureResponse(
-        Buffer.from(requestId.slice(2), 'hex'),
-        result!.signature[sig],
-        event.sender
-      );
-    }
-
-    pendingTransactions.set(result!.signedTxHash, {
-      txHash: result!.signedTxHash,
-      requestId,
-      caip2Id: event.caip2Id,
-      explorerDeserializationSchema: Buffer.from(
-        event.outputDeserializationSchema
-      ),
-      callbackSerializationSchema: Buffer.from(
-        event.respondSerializationSchema
-      ),
-      sender: event.sender,
-      path: event.path,
-      fromAddress: result!.fromAddress,
-      nonce: result!.nonce,
-      checkCount: 0,
-      source: 'polkadot',
-      namespace,
-    });
-
-    this.logger.info(
-      { txHash: result!.signedTxHash },
-      '🔍 Monitoring transaction'
-    );
+    throw new Error(`Unsupported namespace: ${namespace}`);
   }
 
   /**

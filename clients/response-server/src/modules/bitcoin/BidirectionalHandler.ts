@@ -22,8 +22,7 @@ export async function handleBitcoinBidirectional(
 
   console.log(`🔍 Bitcoin transaction detected on ${config.bitcoinNetwork}`);
   console.log(
-    `📦 PSBT received (${event.serializedTransaction.length} bytes, ${event.caip2Id})`
-  );
+    `📦 PSBT received (${event.serializedTransaction.length} bytes, ${event.caip2Id})`)
 
   const bitcoinPlan = BitcoinTransactionProcessor.createSigningPlan(
     new Uint8Array(event.serializedTransaction),
@@ -55,8 +54,8 @@ export async function handleBitcoinBidirectional(
  *  - For each PSBT input, derives a deterministic request ID by hashing the
  *    explorer-facing txid bytes concatenated with the input index (u32 LE) and
  *    signs the corresponding sighash with the single MPC-derived private key.
- *  - Streams every signature back to the Solana program individually via
- *    `respond`, logging `{ txid, inputIndex, requestId }` for traceability.
+ *  - Streams every signature back via the signature sender (Solana or Substrate),
+ *    logging `{ txid, inputIndex, requestId }` for traceability.
  *  - The external client finalizes/broadcasts the PSBT; the server only signs
  *    and monitors until {@link handleCompletedTransaction} /
  *    {@link handleFailedTransaction} respond bidirectionally.
@@ -76,11 +75,14 @@ async function handleBitcoinSigningPlan(
     throw new Error('Bitcoin PSBT must contain at least one input');
   }
 
-  const { program, wallet, config, pendingTransactions } = context;
+  const { config, pendingTransactions, sendSignatures, source} = context;
+
+  const senderStr =
+    typeof event.sender === 'string' ? event.sender : event.sender.toString();
 
   // Use the explorer-facing txid (big-endian) for all aggregated request IDs;
   // never flip the byte order here.
-  const txidBytes = Buffer.from(plan.explorerTxid, 'hex');
+  const txidBytes = Buffer.from(plan.explorerTxid, 'hex')
   const prevouts = plan.inputs.map(({ prevTxid, vout }) => ({
     txid: prevTxid,
     vout,
@@ -88,7 +90,7 @@ async function handleBitcoinSigningPlan(
 
   const aggregateRequestId =
     RequestIdGenerator.generateSignBidirectionalRequestId(
-      event.sender.toString(),
+      senderStr,
       Array.from(txidBytes),
       event.caip2Id,
       event.keyVersion,
@@ -102,13 +104,16 @@ async function handleBitcoinSigningPlan(
     txHash: plan.explorerTxid,
     requestId: aggregateRequestId,
     caip2Id: event.caip2Id,
-    explorerDeserializationSchema: event.outputDeserializationSchema,
-    callbackSerializationSchema: event.respondSerializationSchema,
+    explorerDeserializationSchema: Buffer.from(
+      event.outputDeserializationSchema
+    ),
+    callbackSerializationSchema: Buffer.from(event.respondSerializationSchema),
     fromAddress: 'bitcoin',
     nonce: 0,
     checkCount: 0,
     namespace: 'bip122',
     prevouts,
+    source,
   });
 
   // Simulate MPC nodes returning signatures out of order so clients rely on
@@ -127,7 +132,7 @@ async function handleBitcoinSigningPlan(
 
     const perInputRequestId =
       RequestIdGenerator.generateSignBidirectionalRequestId(
-        event.sender.toString(),
+        senderStr,
         Array.from(txDataForInput),
         event.caip2Id,
         event.keyVersion,
@@ -137,24 +142,20 @@ async function handleBitcoinSigningPlan(
         event.params
       );
 
-    const perInputRequestIdBytes = Array.from(
-      Buffer.from(perInputRequestId.slice(2), 'hex')
+    const perInputRequestIdBytes = Buffer.from(
+      perInputRequestId.slice(2),
+      'hex'
     );
 
-    const signature = await CryptoUtils.signMessage(
-      Array.from(inputPlan.sighash),
+    const signature = await CryptoUtils.signDigestDirectly(
+      inputPlan.sighash,
       derivedPrivateKey
     );
 
-    const tx = await program.methods
-      .respond([perInputRequestIdBytes], [signature])
-      .accounts({
-        responder: wallet.publicKey,
-      })
-      .rpc();
+    await sendSignatures([perInputRequestIdBytes], [signature]);
 
     console.log(
-      `✅ Signed input ${inputPlan.inputIndex} for ${plan.explorerTxid} (tx: ${tx})`
+      `✅ Signed input ${inputPlan.inputIndex} for ${plan.explorerTxid} (tx: )`
     );
   }
 
