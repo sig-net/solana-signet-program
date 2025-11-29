@@ -53,6 +53,7 @@ export async function handleEthereumBidirectional(
     nonce: result.nonce,
     checkCount: 0,
     namespace: 'eip155',
+    prevouts: [],
   });
 
   console.log(`🔍 Monitoring transaction ${result.signedTxHash} (eip155)`);

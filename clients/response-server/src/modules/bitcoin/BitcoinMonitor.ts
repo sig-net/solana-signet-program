@@ -35,12 +35,12 @@ export class BitcoinMonitor {
    * - Returns `error` if any prevout is spent elsewhere (double-spend).
    *
    * @param txid Explorer-facing txid (big-endian).
-   * @param prevouts Optional prevouts consumed by this tx, for conflict checks.
+   * @param prevouts Prevouts consumed by this tx, for conflict checks.
    * @param config Server config (chooses network and adapter).
    */
   static async waitForTransactionAndGetOutput(
     txid: string,
-    prevouts: PrevoutRef[] | undefined,
+    prevouts: PrevoutRef[],
     config: ServerConfig
   ): Promise<TransactionStatus> {
     const adapter = await this.getAdapter(config);
@@ -132,10 +132,10 @@ export class BitcoinMonitor {
    * @returns First conflicting prevout, or null if none are spent.
    */
   private static async getConflictedPrevout(
-    prevouts: PrevoutRef[] | undefined,
+    prevouts: PrevoutRef[],
     adapter: IBitcoinAdapter
   ): Promise<PrevoutRef | null> {
-    if (!prevouts || prevouts.length === 0) {
+    if (prevouts.length === 0) {
       return null;
     }
 

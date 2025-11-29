@@ -110,10 +110,11 @@ export interface PendingTransaction {
   namespace: string;
 
   /**
-   * Previous outputs consumed by the transaction. Only populated for Bitcoin so
-   * the monitor can detect if any input was double-spent elsewhere.
+   * Previous outputs consumed by the transaction. Required field; use an empty
+   * array for non-UTXO chains. Bitcoin relies on these to detect double-spends
+   * before confirmation.
    */
-  prevouts?: PrevoutRef[];
+  prevouts: PrevoutRef[];
 }
 
 // Borsh schema types
