@@ -3,6 +3,7 @@ import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
 import pino from 'pino';
+import * as bitcoin from 'bitcoinjs-lib';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -10,6 +11,7 @@ import type {
   TransactionOutput,
   ServerConfig,
   CpiEventData,
+  ProcessedTransaction,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
@@ -17,12 +19,17 @@ import ChainSignaturesIDL from '../../idl/chain_signatures.json';
 import { CryptoUtils } from '../modules/CryptoUtils';
 import { CONFIG } from '../config/Config';
 import { RequestIdGenerator } from '../modules/RequestIdGenerator';
-import { TransactionProcessor } from '../modules/TransactionProcessor';
+import { EthereumTransactionProcessor } from '../modules/EthereumTransactionProcessor';
 import { EthereumMonitor } from '../modules/EthereumMonitor';
+import { BitcoinTransactionProcessor } from '../modules/BitcoinTransactionProcessor';
+import { BitcoinMonitor } from '../modules/BitcoinMonitor';
 import { OutputSerializer } from '../modules/OutputSerializer';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
-import { SerializationFormat } from '../modules/ChainUtils';
+import {
+  SerializationFormat,
+  getNamespaceFromCaip2,
+} from '../modules/ChainUtils';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -56,6 +63,9 @@ export class ChainSignatureServer {
     this.logger = pino({
       enabled: this.config.verbose === true,
       level: 'info',
+      serializers: {
+        error: pino.stdSerializers.err,
+      },
     });
 
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
@@ -134,34 +144,40 @@ export class ChainSignatureServer {
       }
 
       for (const [txHash, txInfo] of pendingTransactions.entries()) {
-        // CHANGE 4: Exponential backoff - check less frequently as time passes
         if (txInfo.checkCount > 0) {
-          // Skip checks based on how many times we've already checked
-          // 0-5 checks: every 5s
-          // 6-10 checks: every 10s
-          // 11-20 checks: every 30s
-          // 20+ checks: every 60s
           let skipFactor = 1;
-          if (txInfo.checkCount > 20) skipFactor = 12;
-          else if (txInfo.checkCount > 10) skipFactor = 6;
-          else if (txInfo.checkCount > 5) skipFactor = 2;
+
+          if (txInfo.namespace === 'bip122') {
+            if (txInfo.checkCount > 10) skipFactor = 12;
+            else if (txInfo.checkCount > 5) skipFactor = 6;
+            else skipFactor = 2;
+          } else {
+            if (txInfo.checkCount > 20) skipFactor = 12;
+            else if (txInfo.checkCount > 10) skipFactor = 6;
+            else if (txInfo.checkCount > 5) skipFactor = 2;
+          }
 
           if (this.pollCounter % skipFactor !== 0) {
-            continue; // Skip this check
+            continue;
           }
         }
 
         try {
-          const result = await EthereumMonitor.waitForTransactionAndGetOutput(
-            txHash,
-            txInfo.caip2Id,
-            txInfo.explorerDeserializationSchema,
-            txInfo.fromAddress,
-            txInfo.nonce,
-            this.config
-          );
+          const result =
+            txInfo.namespace === 'bip122'
+              ? await BitcoinMonitor.waitForTransactionAndGetOutput(
+                  txHash,
+                  this.config
+                )
+              : await EthereumMonitor.waitForTransactionAndGetOutput(
+                  txHash,
+                  txInfo.caip2Id,
+                  txInfo.explorerDeserializationSchema,
+                  txInfo.fromAddress,
+                  txInfo.nonce,
+                  this.config
+                );
 
-          // Increment check count
           txInfo.checkCount++;
 
           switch (result.status) {
@@ -205,7 +221,15 @@ export class ChainSignatureServer {
             );
             pendingTransactions.delete(txHash);
           } else {
-            this.logger.error({ txHash, error }, 'Unexpected error polling');
+            this.logger.error(
+              {
+                txHash,
+                error,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+              },
+              'Unexpected error polling'
+            );
             txInfo.checkCount++;
           }
         }
@@ -247,7 +271,15 @@ export class ChainSignatureServer {
 
       pendingTransactions.delete(txHash);
     } catch (error) {
-      this.logger.error({ error }, 'Error sending response');
+      this.logger.error(
+        {
+          error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          txHash,
+        },
+        'Error sending response'
+      );
     }
   }
 
@@ -284,7 +316,15 @@ export class ChainSignatureServer {
         })
         .rpc();
     } catch (error) {
-      this.logger.error({ error }, 'Error sending error response');
+      this.logger.error(
+        {
+          error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          txHash,
+        },
+        'Error sending error response'
+      );
     }
   }
 
@@ -310,7 +350,14 @@ export class ChainSignatureServer {
         try {
           await this.handleSignBidirectional(eventData);
         } catch (error) {
-          this.logger.error({ error }, 'Error processing bidirectional');
+          this.logger.error(
+            {
+              error,
+              message: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            },
+            'Error processing bidirectional'
+          );
         }
       }
     );
@@ -331,7 +378,14 @@ export class ChainSignatureServer {
         try {
           await this.handleSignatureRequest(eventData);
         } catch (error) {
-          this.logger.error({ error }, 'Error sending signature');
+          this.logger.error(
+            {
+              error,
+              message: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined,
+            },
+            'Error sending signature'
+          );
         }
       }
     );
@@ -344,9 +398,52 @@ export class ChainSignatureServer {
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
+    const namespace = getNamespaceFromCaip2(event.caip2Id);
+
+    // For Bitcoin, extract canonical txid (without witness) from PSBT
+    // For EVM, use full transaction data
+    let transactionData: number[] | undefined;
+
+    if (namespace === 'bip122') {
+      this.logger.info('🔍 Bitcoin transaction detected');
+      this.logger.info(
+        {
+          psbtBytesLength: event.serializedTransaction.length,
+          caip2Id: event.caip2Id,
+        },
+        '📦 PSBT received'
+      );
+
+      // Bitcoin: Extract txid from PSBT (canonical, excludes witness)
+      const psbt = bitcoin.Psbt.fromBuffer(
+        Buffer.from(event.serializedTransaction)
+      );
+      this.logger.info(
+        {
+          inputCount: psbt.data.inputs.length,
+          outputCount: psbt.data.outputs.length,
+        },
+        '✅ PSBT parsed successfully'
+      );
+
+      const unsignedTxBuffer = psbt.data.globalMap.unsignedTx.toBuffer();
+      const unsignedTx = bitcoin.Transaction.fromBuffer(unsignedTxBuffer);
+      // Use little-endian hash bytes for requestId (matches Rust implementation)
+      const txidInternal = unsignedTx.getHash();
+      transactionData = Array.from(txidInternal);
+    }
+
+    if (namespace === 'eip155') {
+      transactionData = Array.from(event.serializedTransaction);
+    }
+
+    if (!transactionData) {
+      throw new Error(`Unsupported chain namespace: ${namespace}`);
+    }
+
     const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
       event.sender.toString(),
-      Array.from(event.serializedTransaction),
+      transactionData,
       event.caip2Id,
       event.keyVersion,
       event.path,
@@ -355,7 +452,7 @@ export class ChainSignatureServer {
       event.params
     );
 
-    this.logger.info({ requestId }, '🔑 Request ID');
+    this.logger.info({ requestId, namespace }, '🔑 Request ID');
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
@@ -363,20 +460,47 @@ export class ChainSignatureServer {
       this.config.mpcRootKey
     );
 
-    const result = await TransactionProcessor.processTransactionForSigning(
-      new Uint8Array(event.serializedTransaction),
-      derivedPrivateKey,
-      event.caip2Id,
-      this.config
-    );
+    let result: ProcessedTransaction | undefined;
+
+    if (namespace === 'bip122') {
+      result = await BitcoinTransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        this.config
+      );
+    }
+
+    if (namespace === 'eip155') {
+      result = await EthereumTransactionProcessor.processTransactionForSigning(
+        new Uint8Array(event.serializedTransaction),
+        derivedPrivateKey,
+        event.caip2Id,
+        this.config
+      );
+    }
+
+    if (!result) {
+      throw new Error(`Unsupported chain namespace: ${namespace}`);
+    }
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
-    await this.program.methods
-      .respond([requestIdBytes], [result.signature])
+    const requestIds = result.signature.map(() => Array.from(requestIdBytes));
+    // TODO: explore upstream contract change so a single request id can carry many
+    // signatures without duplication. Today each entry packs the 32-byte request id
+    // plus a 97-byte signature (affine R = 2×32 bytes, s = 32 bytes, recovery id = 1 byte),
+    // so we spend ~129 bytes per signer. With the double vec<u32> prefixes and instruction
+    // discriminator that pushes us to ~1,200 bytes at 9 signatures, just shy of Solana’s
+    // ~1,232-byte transaction payload cap. Options: (1) special-case 1→N in the program while
+    // still emitting per-signature events; or (2) introduce a batch event. Both would be a
+    // breaking change and diverge from the existing Ethereum contract, so we keep duplication for now.
+    const tx = await this.program.methods
+      .respond(requestIds, result.signature)
       .accounts({
         responder: this.wallet.publicKey,
       })
       .rpc();
+
+    this.logger.info({ tx, namespace }, '✅ Signatures sent to contract');
 
     pendingTransactions.set(result.signedTxHash, {
       txHash: result.signedTxHash,
@@ -389,10 +513,16 @@ export class ChainSignatureServer {
       fromAddress: result.fromAddress,
       nonce: result.nonce,
       checkCount: 0,
+      namespace,
     });
 
     this.logger.info(
-      { txHash: result.signedTxHash },
+      {
+        txHash: result.signedTxHash,
+        namespace,
+        network:
+          namespace === 'bip122' ? this.config.bitcoinNetwork : undefined,
+      },
       '🔍 Monitoring transaction'
     );
   }

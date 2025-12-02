@@ -46,6 +46,7 @@ export function testSetup() {
     signatureDeposit: '100000',
     chainId: 'solana:localnet',
     verbose: false,
+    bitcoinNetwork: 'regtest',
   };
 
   const server = new ChainSignatureServer(config);

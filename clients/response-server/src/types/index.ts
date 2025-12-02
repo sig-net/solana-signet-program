@@ -1,6 +1,8 @@
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 
+export type BitcoinNetwork = 'regtest' | 'testnet';
+
 export interface ServerConfig {
   solanaRpcUrl: string;
   solanaPrivateKey: string;
@@ -11,6 +13,7 @@ export interface ServerConfig {
   signatureDeposit?: string;
   chainId?: string;
   verbose?: boolean;
+  bitcoinNetwork: BitcoinNetwork;
 }
 
 export const serverConfigSchema = z.object({
@@ -35,6 +38,7 @@ export const serverConfigSchema = z.object({
   signatureDeposit: z.string().optional(),
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
+  bitcoinNetwork: z.enum(['regtest', 'testnet']),
 });
 
 export interface SignBidirectionalEvent {
@@ -75,6 +79,7 @@ export interface PendingTransaction {
   fromAddress: string;
   nonce: number;
   checkCount: number;
+  namespace: string;
 }
 
 // Borsh schema types
@@ -103,9 +108,11 @@ export type SerializableValue =
   | SerializableValue[]
   | { [key: string]: SerializableValue };
 
-export interface TransactionOutputData {
-  [key: string]: SerializableValue;
-}
+// Bitcoin outputs are just boolean success values
+// EVM outputs are objects with decoded data
+export type TransactionOutputData =
+  | boolean
+  | { [key: string]: SerializableValue };
 
 export interface TransactionOutput {
   success: boolean;
@@ -125,9 +132,8 @@ export interface SignatureResponse {
 }
 
 export interface ProcessedTransaction {
-  unsignedTxHash: string;
   signedTxHash: string;
-  signature: SignatureResponse;
+  signature: SignatureResponse[]; // Array to support multiple inputs (e.g., Bitcoin PSBTs)
   signedTransaction: string;
   fromAddress: string;
   nonce: number;
