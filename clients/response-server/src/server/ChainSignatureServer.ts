@@ -2,7 +2,6 @@ import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
-import pino from 'pino';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -17,12 +16,18 @@ import ChainSignaturesIDL from '../../idl/chain_signatures.json';
 import { CryptoUtils } from '../modules/CryptoUtils';
 import { CONFIG } from '../config/Config';
 import { RequestIdGenerator } from '../modules/RequestIdGenerator';
-import { TransactionProcessor } from '../modules/TransactionProcessor';
-import { EthereumMonitor } from '../modules/EthereumMonitor';
+import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
+import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 import { OutputSerializer } from '../modules/OutputSerializer';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
-import { SerializationFormat } from '../modules/ChainUtils';
+import {
+  SerializationFormat,
+  getNamespaceFromCaip2,
+} from '../modules/ChainUtils';
+import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
+import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
+import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -34,8 +39,9 @@ export class ChainSignatureServer {
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
-  private logger: pino.Logger;
   private monitorIntervalId: NodeJS.Timeout | null = null;
+  private readyPromise: Promise<void>;
+  private resolveReady: (() => void) | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -53,9 +59,8 @@ export class ChainSignatureServer {
       throw new Error('Invalid server configuration');
     }
 
-    this.logger = pino({
-      enabled: this.config.verbose === true,
-      level: 'info',
+    this.readyPromise = new Promise((resolve) => {
+      this.resolveReady = resolve;
     });
 
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
@@ -75,14 +80,17 @@ export class ChainSignatureServer {
   }
 
   async start() {
-    this.logger.info('🚀 Response Server');
-    this.logger.info({ wallet: this.wallet.publicKey.toString() }, 'Wallet');
-    this.logger.info({ program: this.program.programId.toString() }, 'Program');
+    console.log('🚀 Response Server');
+    console.log(`Wallet: ${this.wallet.publicKey.toString()}`);
+    console.log(`Program: ${this.program.programId.toString()}`);
 
     await this.ensureInitialized();
 
     this.startTransactionMonitor();
     this.setupEventListeners();
+
+    // Resolve readiness so callers can await server.waitUntilReady()
+    this.resolveReady?.();
   }
 
   private async ensureInitialized() {
@@ -127,41 +135,47 @@ export class ChainSignatureServer {
       this.pollCounter++;
 
       if (pendingTransactions.size > 0 && this.pollCounter % 12 === 1) {
-        this.logger.info(
-          { count: pendingTransactions.size },
-          '📊 Monitoring pending transactions'
+        console.log(
+          `📊 Monitoring pending transactions (count=${pendingTransactions.size})`
         );
       }
 
       for (const [txHash, txInfo] of pendingTransactions.entries()) {
-        // CHANGE 4: Exponential backoff - check less frequently as time passes
         if (txInfo.checkCount > 0) {
-          // Skip checks based on how many times we've already checked
-          // 0-5 checks: every 5s
-          // 6-10 checks: every 10s
-          // 11-20 checks: every 30s
-          // 20+ checks: every 60s
           let skipFactor = 1;
-          if (txInfo.checkCount > 20) skipFactor = 12;
-          else if (txInfo.checkCount > 10) skipFactor = 6;
-          else if (txInfo.checkCount > 5) skipFactor = 2;
+
+          if (txInfo.namespace === 'bip122') {
+            if (txInfo.checkCount > 10) skipFactor = 12;
+            else if (txInfo.checkCount > 5) skipFactor = 6;
+            else skipFactor = 2;
+          } else {
+            if (txInfo.checkCount > 20) skipFactor = 12;
+            else if (txInfo.checkCount > 10) skipFactor = 6;
+            else if (txInfo.checkCount > 5) skipFactor = 2;
+          }
 
           if (this.pollCounter % skipFactor !== 0) {
-            continue; // Skip this check
+            continue;
           }
         }
 
         try {
-          const result = await EthereumMonitor.waitForTransactionAndGetOutput(
-            txHash,
-            txInfo.caip2Id,
-            txInfo.explorerDeserializationSchema,
-            txInfo.fromAddress,
-            txInfo.nonce,
-            this.config
-          );
+          const result =
+            txInfo.namespace === 'bip122'
+              ? await BitcoinMonitor.waitForTransactionAndGetOutput(
+                  txHash,
+                  txInfo.prevouts,
+                  this.config
+                )
+              : await EthereumMonitor.waitForTransactionAndGetOutput(
+                  txHash,
+                  txInfo.caip2Id,
+                  txInfo.explorerDeserializationSchema,
+                  txInfo.fromAddress,
+                  txInfo.nonce,
+                  this.config
+                );
 
-          // Increment check count
           txInfo.checkCount++;
 
           switch (result.status) {
@@ -185,9 +199,8 @@ export class ChainSignatureServer {
 
             case 'fatal_error':
               // Just remove from map, don't send signed error
-              this.logger.error(
-                { txHash, reason: result.reason },
-                'Fatal error for transaction'
+              console.error(
+                `Fatal error for transaction ${txHash}: ${result.reason}`
               );
               pendingTransactions.delete(txHash);
               break;
@@ -196,16 +209,19 @@ export class ChainSignatureServer {
           if (
             error instanceof Error &&
             (error.message.includes('Modulus not supported') ||
-              error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
-              error.message.includes('Failed to load keypair'))
+            error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
+            error.message.includes('Failed to load keypair'))
           ) {
-            this.logger.error(
-              { txHash, error: error.message },
-              'Infrastructure error'
+            console.error(
+              `Infrastructure error for ${txHash}: ${error.message}`
             );
             pendingTransactions.delete(txHash);
           } else {
-            this.logger.error({ txHash, error }, 'Unexpected error polling');
+            console.error(
+              `Unexpected error polling ${txHash}: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
             txInfo.checkCount++;
           }
         }
@@ -218,15 +234,19 @@ export class ChainSignatureServer {
     txInfo: PendingTransaction,
     result: TransactionOutput
   ) {
-    this.logger.info({ txHash }, '✅ Transaction completed');
+    console.log(`✅ Transaction completed: ${txHash}`);
 
+    const requestId = txInfo.requestId;
+    if (!requestId) {
+      throw new Error(`Missing request ID for tx ${txHash}`);
+    }
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
       SerializationFormat.Borsh, // Server only respond to Solana for now
       txInfo.callbackSerializationSchema
     );
 
-    const requestIdBytes = Buffer.from(txInfo.requestId.slice(2), 'hex');
+    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
       serializedOutput,
@@ -247,7 +267,16 @@ export class ChainSignatureServer {
 
       pendingTransactions.delete(txHash);
     } catch (error) {
-      this.logger.error({ error }, 'Error sending response');
+      console.error(
+        `Error sending response for ${txHash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      console.error(
+        '🔍 Borsh serialization context',
+        txInfo.callbackSerializationSchema,
+        result.output
+      );
     }
   }
 
@@ -255,7 +284,7 @@ export class ChainSignatureServer {
     txHash: string,
     txInfo: PendingTransaction
   ) {
-    this.logger.warn({ txHash }, '❌ Transaction failed');
+    console.warn(`❌ Transaction failed: ${txHash}`);
 
     try {
       const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
@@ -266,7 +295,11 @@ export class ChainSignatureServer {
 
       const serializedOutput = new Uint8Array(errorData);
 
-      const requestIdBytes = Buffer.from(txInfo.requestId.slice(2), 'hex');
+      const requestId = txInfo.requestId;
+      if (!requestId) {
+        throw new Error(`Missing request ID for tx ${txHash}`);
+      }
+      const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
       const signature = await CryptoUtils.signBidirectionalResponse(
         requestIdBytes,
         serializedOutput,
@@ -284,7 +317,11 @@ export class ChainSignatureServer {
         })
         .rpc();
     } catch (error) {
-      this.logger.error({ error }, 'Error sending error response');
+      console.error(
+        `Error sending error response for ${txHash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }
 
@@ -298,19 +335,20 @@ export class ChainSignatureServer {
       'signBidirectionalEvent',
       async (eventData: CpiEventData, _slot: number) => {
         if (!isSignBidirectionalEvent(eventData)) {
-          this.logger.error('Invalid event type for signBidirectionalEvent');
+          console.error('Invalid event type for signBidirectionalEvent');
           return;
         }
 
-        this.logger.info(
-          { sender: eventData.sender.toString() },
-          '📨 SignBidirectionalEvent'
-        );
+        console.log(`📨 SignBidirectionalEvent from ${eventData.sender.toString()}`);
 
         try {
           await this.handleSignBidirectional(eventData);
         } catch (error) {
-          this.logger.error({ error }, 'Error processing bidirectional');
+          console.error(
+            `Error processing bidirectional: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
         }
       }
     );
@@ -319,19 +357,20 @@ export class ChainSignatureServer {
       'signatureRequestedEvent',
       async (eventData: CpiEventData) => {
         if (!isSignatureRequestedEvent(eventData)) {
-          this.logger.error('Invalid event type for signatureRequestedEvent');
+          console.error('Invalid event type for signatureRequestedEvent');
           return;
         }
 
-        this.logger.info(
-          { sender: eventData.sender.toString() },
-          '📝 SignatureRequestedEvent'
-        );
+        console.log(`📝 SignatureRequestedEvent from ${eventData.sender.toString()}`);
 
         try {
           await this.handleSignatureRequest(eventData);
         } catch (error) {
-          this.logger.error({ error }, 'Error sending signature');
+          console.error(
+            `Error sending signature: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
         }
       }
     );
@@ -344,57 +383,35 @@ export class ChainSignatureServer {
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
-    const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
-      event.sender.toString(),
-      Array.from(event.serializedTransaction),
-      event.caip2Id,
-      event.keyVersion,
-      event.path,
-      event.algo,
-      event.dest,
-      event.params
+    const namespace = getNamespaceFromCaip2(event.caip2Id);
+    console.log(
+      `🧾 SignBidirectional payload namespace=${namespace} caip2Id=${event.caip2Id} keyVersion=${event.keyVersion} path=${event.path} algo=${event.algo} dest=${event.dest} params=${event.params} sender=${event.sender.toString()}`
     );
-
-    this.logger.info({ requestId }, '🔑 Request ID');
-
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
       this.config.mpcRootKey
     );
 
-    const result = await TransactionProcessor.processTransactionForSigning(
-      new Uint8Array(event.serializedTransaction),
-      derivedPrivateKey,
-      event.caip2Id,
-      this.config
-    );
+    if (namespace === 'bip122') {
+      await handleBitcoinBidirectional(
+        event,
+        this.getBidirectionalContext(),
+        derivedPrivateKey
+      );
+      return;
+    }
 
-    const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
-    await this.program.methods
-      .respond([requestIdBytes], [result.signature])
-      .accounts({
-        responder: this.wallet.publicKey,
-      })
-      .rpc();
+    if (namespace === 'eip155') {
+      await handleEthereumBidirectional(
+        event,
+        this.getBidirectionalContext(),
+        derivedPrivateKey
+      );
+      return;
+    }
 
-    pendingTransactions.set(result.signedTxHash, {
-      txHash: result.signedTxHash,
-      requestId,
-      caip2Id: event.caip2Id,
-      explorerDeserializationSchema: event.outputDeserializationSchema,
-      callbackSerializationSchema: event.respondSerializationSchema,
-      sender: event.sender.toString(),
-      path: event.path,
-      fromAddress: result.fromAddress,
-      nonce: result.nonce,
-      checkCount: 0,
-    });
-
-    this.logger.info(
-      { txHash: result.signedTxHash },
-      '🔍 Monitoring transaction'
-    );
+    throw new Error(`Unsupported chain namespace: ${namespace}`);
   }
 
   private async handleSignatureRequest(event: SignatureRequestedEvent) {
@@ -409,7 +426,7 @@ export class ChainSignatureServer {
       event.params
     );
 
-    this.logger.info({ requestId }, '🔑 Request ID');
+    console.log(`🔑 Request ID: ${requestId}`);
 
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
@@ -430,11 +447,39 @@ export class ChainSignatureServer {
       })
       .rpc();
 
-    this.logger.info({ tx }, '✅ Signature sent!');
+    console.log(`✅ Signature sent! tx=${tx}`);
+  }
+
+  private getBidirectionalContext(): BidirectionalHandlerContext {
+    return {
+      program: this.program,
+      wallet: this.wallet,
+      config: this.config,
+      pendingTransactions,
+    };
+  }
+
+  /**
+   * Await until the server has finished its startup sequence and listeners are registered.
+   * Useful in tests to avoid racing the first request against the log subscription.
+   */
+  async waitUntilReady(timeoutMs = 2_000): Promise<void> {
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      const id = setTimeout(() => {
+        clearTimeout(id);
+        reject(
+          new Error(
+            `ChainSignatureServer readiness timed out after ${timeoutMs}ms`
+          )
+        );
+      }, timeoutMs);
+    });
+
+    await Promise.race([this.readyPromise, timeoutPromise]);
   }
 
   async shutdown() {
-    this.logger.info('🛑 Shutting down...');
+    console.log('🛑 Shutting down...');
     if (this.monitorIntervalId !== null) {
       clearInterval(this.monitorIntervalId);
       this.monitorIntervalId = null;

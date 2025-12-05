@@ -28,11 +28,36 @@ export class OutputSerializer {
     schema: Buffer | number[]
   ): Promise<Uint8Array> {
     const schemaStr = this.getSchemaString(schema);
-    const borshSchema = JSON.parse(schemaStr) as BorshSchema;
+    const parsedSchema = JSON.parse(schemaStr);
+
+    // Handle scalar bool schema (schema is literally "bool")
+    if (typeof parsedSchema === 'string' && parsedSchema === 'bool') {
+      const boolValue =
+        typeof output === 'boolean'
+          ? output
+          : 'error' in (output as Record<string, unknown>)
+            ? Boolean((output as any).error)
+            : 'success' in (output as Record<string, unknown>)
+              ? Boolean((output as any).success)
+              : true;
+
+      try {
+        return borsh.serialize('bool' as unknown as Schema, boolValue);
+      } catch (error) {
+        console.error(
+          '[OutputSerializer] Borsh serialization failed (scalar bool)',
+          { schema: parsedSchema, payload: boolValue },
+          error
+        );
+        throw error;
+      }
+    }
+
+    const borshSchema = parsedSchema as BorshSchema;
 
     let dataToSerialize: SerializableValue = output;
     if (output.isFunctionCall === false) {
-      dataToSerialize = this.createBorshData(borshSchema);
+      dataToSerialize = this.createBorshData(borshSchema, output);
     }
 
     // Handle single-field objects with empty key
@@ -43,8 +68,32 @@ export class OutputSerializer {
       }
     }
 
-    const serialized = borsh.serialize(borshSchema as Schema, dataToSerialize);
-    return serialized;
+    // Wrap common boolean error struct when payload is an object with `error`
+    if (
+      borshSchema.struct &&
+      Object.keys(borshSchema.struct).length === 1 &&
+      borshSchema.struct.error === 'bool' &&
+      typeof dataToSerialize === 'object' &&
+      dataToSerialize !== null &&
+      'error' in (dataToSerialize as Record<string, unknown>)
+    ) {
+      dataToSerialize = { error: Boolean((dataToSerialize as any).error) };
+    }
+
+    try {
+      return borsh.serialize(borshSchema as Schema, dataToSerialize);
+    } catch (error) {
+      // Emit schema/payload for debugging serialization issues
+      console.error(
+        '[OutputSerializer] Borsh serialization failed',
+        {
+          schema: borshSchema,
+          payload: dataToSerialize,
+        },
+        error
+      );
+      throw error;
+    }
   }
 
   private static async serializeAbi(
@@ -81,15 +130,46 @@ export class OutputSerializer {
   }
 
   private static createBorshData(
-    borshSchema: BorshSchema
+    borshSchema: BorshSchema,
+    fallback?: TransactionOutputData
   ): TransactionOutputData {
     const struct = borshSchema.struct;
-    if (struct && struct.message === 'string') {
-      return { message: 'non_function_call_success' };
-    } else if (struct && struct.success === 'bool') {
+    if (!struct) {
       return { success: true };
     }
-    return { success: true };
+
+    const obj: TransactionOutputData = {};
+    for (const [key, type] of Object.entries(struct)) {
+      if (fallback && key in fallback) {
+        obj[key] = fallback[key];
+        continue;
+      }
+
+      switch (type) {
+        case 'bool':
+          obj[key] = true;
+          break;
+        case 'string':
+          obj[key] = 'non_function_call_success';
+          break;
+        case 'u8':
+        case 'u16':
+        case 'u32':
+        case 'u64':
+        case 'u128':
+        case 'i8':
+        case 'i16':
+        case 'i32':
+        case 'i64':
+        case 'i128':
+          obj[key] = 0;
+          break;
+        default:
+          // Default seed with null for unrecognized types; caller should override.
+          obj[key] = null;
+      }
+    }
+    return obj;
   }
 
   private static createAbiData(

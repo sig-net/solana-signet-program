@@ -20,6 +20,7 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((val) => val === 'true'),
+  BITCOIN_NETWORK: z.enum(['regtest', 'testnet']).optional().default('testnet'),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -33,6 +34,7 @@ function validateEnv(): EnvConfig {
       INFURA_API_KEY: process.env.INFURA_API_KEY,
       PROGRAM_ID: process.env.PROGRAM_ID,
       VERBOSE: process.env.VERBOSE,
+      BITCOIN_NETWORK: process.env.BITCOIN_NETWORK,
     });
 
     return env;
