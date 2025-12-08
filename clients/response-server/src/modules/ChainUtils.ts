@@ -5,17 +5,19 @@
 export enum SerializationFormat {
   Borsh = 0,
   ABI = 1,
+  BitcoinSimple = 2,
 }
 
 /**
  * Extract namespace from CAIP-2 chain ID
  *
- * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1", "solana:mainnet")
- * @returns namespace - The chain namespace (e.g., "eip155", "solana")
+ * @param caip2Id - CAIP-2 chain identifier
+ * @returns namespace - The chain namespace
  *
  * @example
- * getNamespaceFromCaip2("eip155:1") // "eip155"
+ * getNamespaceFromCaip2("eip155:1") // "eip155" (Ethereum)
  * getNamespaceFromCaip2("solana:mainnet") // "solana"
+ * getNamespaceFromCaip2("bip122:000000000000000000064...") // "bip122" (Bitcoin)
  */
 export function getNamespaceFromCaip2(caip2Id: string): string {
   const [namespace] = caip2Id.split(':');
@@ -27,15 +29,19 @@ export function getNamespaceFromCaip2(caip2Id: string): string {
 
 /**
  * Get serialization format from CAIP-2 chain ID
- * Multiple chains can share the same serialization format
  *
- * @param caip2Id - CAIP-2 chain identifier (e.g., "eip155:1", "solana:mainnet")
- * @returns SerializationFormat - Borsh for Solana, ABI for EVM chains
+ * @param caip2Id - CAIP-2 chain identifier
+ * @returns SerializationFormat enum value
+ *
+ * Formats:
+ * - Borsh (0): Solana chains
+ * - ABI (1): EVM chains (Ethereum, Polygon, BSC, etc.)
+ * - BitcoinSimple (2): Bitcoin (testnet4/regtest) - returns { success: bool } only
  *
  * @example
  * getSerializationFormat("eip155:1") // SerializationFormat.ABI
- * getSerializationFormat("eip155:11155111") // SerializationFormat.ABI
  * getSerializationFormat("solana:mainnet") // SerializationFormat.Borsh
+ * getSerializationFormat("bip122:000000000000000000064...") // SerializationFormat.BitcoinSimple
  */
 export function getSerializationFormat(caip2Id: string): SerializationFormat {
   const namespace = getNamespaceFromCaip2(caip2Id);
@@ -45,6 +51,8 @@ export function getSerializationFormat(caip2Id: string): SerializationFormat {
       return SerializationFormat.ABI;
     case 'solana':
       return SerializationFormat.Borsh;
+    case 'bip122':
+      return SerializationFormat.BitcoinSimple;
     default:
       throw new Error(`Unsupported chain namespace: ${namespace}`);
   }

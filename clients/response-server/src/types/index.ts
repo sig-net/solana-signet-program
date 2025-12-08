@@ -1,6 +1,8 @@
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 
+export type BitcoinNetwork = 'regtest' | 'testnet';
+
 export interface ServerConfig {
   solanaRpcUrl: string;
   solanaPrivateKey: string;
@@ -11,6 +13,8 @@ export interface ServerConfig {
   signatureDeposit?: string;
   chainId?: string;
   verbose?: boolean;
+  bitcoinNetwork: BitcoinNetwork;
+  substrateWsUrl?: string;
 }
 
 export const serverConfigSchema = z.object({
@@ -35,20 +39,22 @@ export const serverConfigSchema = z.object({
   signatureDeposit: z.string().optional(),
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
+  bitcoinNetwork: z.enum(['regtest', 'testnet']),
+  substrateWsUrl: z.string().optional(),
 });
 
 export interface SignBidirectionalEvent {
-  sender: PublicKey;
-  serializedTransaction: Buffer;
+  sender: PublicKey | string;
+  serializedTransaction: Buffer | Uint8Array;
   caip2Id: string;
   keyVersion: number;
-  deposit: bigint;
+  deposit?: bigint | string;
   path: string;
   algo: string;
   dest: string;
   params: string;
-  outputDeserializationSchema: Buffer;
-  respondSerializationSchema: Buffer;
+  outputDeserializationSchema: Buffer | Uint8Array;
+  respondSerializationSchema: Buffer | Uint8Array;
 }
 
 export interface SignatureRequestedEvent {
@@ -64,17 +70,53 @@ export interface SignatureRequestedEvent {
   feePayer: PublicKey | null;
 }
 
+export interface PrevoutRef {
+  txid: string;
+  vout: number;
+}
+
+/**
+ * Bookkeeping for any cross-chain transaction we are still monitoring.
+ *
+ * Each entry is added immediately after the server hands signatures back to the
+ * requester, and removed once the monitor emits either a success/failure
+ * response. Fields mirror the data needed by `BitcoinMonitor`/`EthereumMonitor`
+ * plus the serialization schemas required to format the final callback payload.
+ */
 export interface PendingTransaction {
+  /** Canonical transaction hash on the destination chain (txid for Bitcoin). */
   txHash: string;
+
+  /** Deterministic request identifier that the Solana contract expects. */
   requestId: string;
+
+  /** CAIP-2 chain identifier (e.g. `eip155:1`, `bip122:000000...`). */
   caip2Id: string;
+
+  /** Schema emitted on-chain describing how to decode explorer outputs. */
   explorerDeserializationSchema: Buffer | number[];
+
+  /** Schema to re-encode the callback payload for `respondBidirectional`. */
   callbackSerializationSchema: Buffer | number[];
-  sender: string;
-  path: string;
+
+  /** Address that broadcast the transaction (EVM sender or `bitcoin`). */
   fromAddress: string;
+
+  /** Nonce used for the EVM transaction (0 for Bitcoin). */
   nonce: number;
+
+  /** Number of poll attempts already performed; drives backoff. */
   checkCount: number;
+
+  /** Chain namespace derived from CAIP-2 (e.g. `eip155`, `bip122`). */
+  namespace: string;
+
+  /**
+   * Previous outputs consumed by the transaction. Only populated for Bitcoin so
+   * the monitor can detect if any input was double-spent elsewhere.
+   */
+  prevouts?: PrevoutRef[];
+  source?: 'solana' | 'polkadot';
 }
 
 // Borsh schema types
@@ -103,9 +145,9 @@ export type SerializableValue =
   | SerializableValue[]
   | { [key: string]: SerializableValue };
 
-export interface TransactionOutputData {
-  [key: string]: SerializableValue;
-}
+// Monitor outputs always return structured objects so serializers can apply
+// either Borsh or ABI schemas consistently across chains.
+export type TransactionOutputData = { [key: string]: SerializableValue };
 
 export interface TransactionOutput {
   success: boolean;
@@ -125,9 +167,8 @@ export interface SignatureResponse {
 }
 
 export interface ProcessedTransaction {
-  unsignedTxHash: string;
   signedTxHash: string;
-  signature: SignatureResponse;
+  signature: SignatureResponse[]; // Array to support multiple inputs (e.g., Bitcoin PSBTs)
   signedTransaction: string;
   fromAddress: string;
   nonce: number;

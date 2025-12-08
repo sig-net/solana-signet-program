@@ -5,12 +5,12 @@ import {
   ServerConfig,
   TransactionOutputData,
   AbiSchemaField,
-} from '../types';
+} from '../../types';
 import {
   getNamespaceFromCaip2,
   getSerializationFormat,
   SerializationFormat,
-} from './ChainUtils';
+} from '../ChainUtils';
 
 export class EthereumMonitor {
   private static providerCache = new Map<string, ethers.JsonRpcProvider>();

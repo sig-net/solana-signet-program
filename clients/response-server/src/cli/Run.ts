@@ -11,12 +11,15 @@ async function main() {
     programId: envConfig.PROGRAM_ID,
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
     verbose: envConfig.VERBOSE,
+    bitcoinNetwork: envConfig.BITCOIN_NETWORK,
+    substrateWsUrl: envConfig.SUBSTRATE_WS_URL
   };
 
   const server = new ChainSignatureServer(config);
   await server.start();
 
   process.on('SIGINT', async () => {
+    console.log('\n🛑 Shutting down...');
     await server.shutdown();
     process.exit(0);
   });
