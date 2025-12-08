@@ -9,5 +9,9 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true
+  },
+  "ts-node": {
+    "esm": true,
+    "experimentalEsm": true
   }
 }

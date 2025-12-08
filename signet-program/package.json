@@ -8,7 +8,8 @@
     "format": "prettier --write '**/*.{ts,tsx,js,jsx,json,md}'",
     "format:check": "prettier --check '**/*.{ts,tsx,js,jsx,json,md}'",
     "typecheck": "tsc --noEmit --skipLibCheck",
-    "check": "npm run typecheck && npm run lint && npm run format:check"
+    "check": "npm run typecheck && npm run lint && npm run format:check",
+    "sign": "node --loader ts-node/esm call-sign.ts"
   },
   "type": "module",
   "dependencies": {
