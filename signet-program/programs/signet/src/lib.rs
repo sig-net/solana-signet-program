@@ -7,12 +7,38 @@
 //! This program enables users to request ECDSA signatures from the Signet MPC network,
 //! supporting both simple signing and bidirectional cross-chain transactions.
 //!
-//! ## Supported Flows
+//! ## Instructions Reference
 //!
-//! | Flow | Description |
-//! |------|-------------|
+//! ### Developer Instructions
+//!
+//! These are the primary instructions for building applications:
+//!
+//! | Instruction | Description |
+//! |-------------|-------------|
 //! | [`chain_signatures::sign`] | Request signature on a 32-byte payload |
 //! | [`chain_signatures::sign_bidirectional`] | Cross-chain tx with execution result callback |
+//! | [`chain_signatures::get_signature_deposit`] | Query the current deposit amount (view function) |
+//!
+//! ### MPC Network Instructions
+//!
+//! These instructions are called by MPC responders, not by application developers:
+//!
+//! | Instruction | Description |
+//! |-------------|-------------|
+//! | [`chain_signatures::respond`] | Deliver signatures to requesters |
+//! | [`chain_signatures::respond_bidirectional`] | Return cross-chain execution results |
+//! | [`chain_signatures::respond_error`] | Report errors (debugging only) |
+//!
+//! ### Admin Instructions (Not for Developers)
+//!
+//! These instructions are restricted to the program administrator and are **not intended
+//! for application developers**. They are used for program deployment and maintenance:
+//!
+//! | Instruction | Description |
+//! |-------------|-------------|
+//! | [`chain_signatures::initialize`] | One-time program initialization (deployment only) |
+//! | [`chain_signatures::update_deposit`] | Modify the signature deposit requirement |
+//! | [`chain_signatures::withdraw_funds`] | Withdraw accumulated deposits |
 //!
 //! ## Sign Bidirectional Flow
 //!
@@ -166,6 +192,11 @@ pub mod chain_signatures {
 
     /// Initialize the program state.
     ///
+    /// # Admin Only
+    ///
+    /// This instruction is restricted to program deployment and is **not intended
+    /// for application developers**. It can only be called once to set up the program.
+    ///
     /// # Arguments
     ///
     /// * `signature_deposit` - Required deposit in lamports for signature requests
@@ -188,7 +219,12 @@ pub mod chain_signatures {
         Ok(())
     }
 
-    /// Update the required signature deposit amount. Admin only.
+    /// Update the required signature deposit amount.
+    ///
+    /// # Admin Only
+    ///
+    /// This instruction is restricted to the program administrator and is **not intended
+    /// for application developers**. It is used for program maintenance.
     ///
     /// # Arguments
     ///
@@ -210,7 +246,12 @@ pub mod chain_signatures {
         Ok(())
     }
 
-    /// Withdraw accumulated funds from the program. Admin only.
+    /// Withdraw accumulated funds from the program.
+    ///
+    /// # Admin Only
+    ///
+    /// This instruction is restricted to the program administrator and is **not intended
+    /// for application developers**. It is used for program maintenance.
     ///
     /// # Arguments
     ///
@@ -346,7 +387,7 @@ pub mod chain_signatures {
     ///
     /// # Arguments
     ///
-    /// * `serialized_transaction` - RLP-encoded unsigned transaction for destination chain
+    /// * `serialized_transaction` - serialized unsigned transaction for destination chain
     /// * `caip2_id` - CAIP-2 chain identifier (e.g., `"eip155:1"` for Ethereum mainnet)
     /// * `key_version` - MPC key version to use
     /// * `path` - Derivation path for signing key
@@ -354,20 +395,8 @@ pub mod chain_signatures {
     /// * `dest` - Reserved for future use (pass empty string `""`)
     /// * `params` - Reserved for future use (pass empty string `""`)
     /// * `program_id` - Callback program ID (reserved for future use)
-    /// * `output_deserialization_schema` - ABI schema for parsing destination chain output
-    /// * `respond_serialization_schema` - Borsh schema for serializing response to source chain
-    ///
-    /// # Schemas Format
-    ///
-    /// **output_deserialization_schema** (ABI):
-    /// ```json,ignore
-    /// [{"name": "result", "type": "uint256"}, {"name": "success", "type": "bool"}]
-    /// ```
-    ///
-    /// **respond_serialization_schema** (Borsh):
-    /// ```json,ignore
-    /// [{"name": "output", "type": "bytes"}]
-    /// ```
+    /// * `output_deserialization_schema` - serialization schema for parsing destination chain output
+    /// * `respond_serialization_schema` - serialization schema for serializing response to source chain
     ///
     /// # Emits
     ///
@@ -439,8 +468,8 @@ pub mod chain_signatures {
 
     /// Respond to signature requests with generated signatures.
     ///
-    /// Called by MPC responders after signature generation. Emits events
-    /// in canonical order for batched requests (PSBT-style).
+    /// Called by MPC responders after signature generation. Supports batched
+    /// requests where each signature is linked to its request via `request_id`.
     ///
     /// # Security Note
     ///
@@ -477,6 +506,12 @@ pub mod chain_signatures {
     }
 
     /// Report signature generation errors from the MPC network.
+    ///
+    /// # Warning: Debugging Only
+    ///
+    /// This function is **solely for debugging purposes** and should not be used
+    /// in production or relied upon for any business logic. Error events are
+    /// informational only and are not cryptographically verified.
     ///
     /// # Security Note
     ///
@@ -520,7 +555,7 @@ pub mod chain_signatures {
     /// # Arguments
     ///
     /// * `request_id` - Original 32-byte request identifier
-    /// * `serialized_output` - Borsh-serialized execution output per `respond_serialization_schema`
+    /// * `serialized_output` - Serialized execution output per `respond_serialization_schema`
     /// * `signature` - ECDSA signature over `keccak256(request_id || serialized_output)`
     ///
     /// # Output Format
@@ -530,7 +565,7 @@ pub mod chain_signatures {
     /// - Simple transfer: Empty success indicator
     ///
     /// For **failed transactions**:
-    /// - Magic prefix `0xdeadbeef` followed by `true` (Borsh-encoded)
+    /// - Magic prefix `0xdeadbeef` followed by failure indicator
     ///
     /// # Emits
     ///
@@ -777,9 +812,9 @@ pub struct SignBidirectionalEvent {
     pub params: String,
     /// Callback program ID (reserved for future use).
     pub program_id: Pubkey,
-    /// ABI schema for parsing destination chain call output (JSON-encoded).
+    /// Schema for parsing destination chain call output (JSON-encoded).
     pub output_deserialization_schema: Vec<u8>,
-    /// Borsh schema for serializing response to Solana (JSON-encoded).
+    /// Schema for serializing response to source chain (JSON-encoded).
     pub respond_serialization_schema: Vec<u8>,
 }
 
@@ -806,14 +841,19 @@ pub struct SignatureRespondedEvent {
 
 /// Emitted when signature generation fails via [`chain_signatures::respond_error`].
 ///
+/// # Warning: Debugging Only
+///
+/// This event is **solely for debugging purposes**. Do not use in production
+/// or rely upon for any business logic.
+///
 /// # Event Type
 ///
 /// Regular event (emitted via `emit!`)
 ///
 /// # Security Warning
 ///
-/// **Any address can emit this event.** Do not rely on error events for
-/// business logic decisions.
+/// **Any address can emit this event.** Error events are not cryptographically
+/// verified and should never be trusted for business logic decisions.
 #[event]
 pub struct SignatureErrorEvent {
     /// Request identifier of the failed request.
@@ -838,7 +878,7 @@ pub struct SignatureErrorEvent {
 /// - Simple transfer: Empty success indicator
 ///
 /// **Failed transactions:**
-/// - Magic prefix `0xdeadbeef` followed by `true` (Borsh-encoded as single byte `0x01`)
+/// - Magic prefix `0xdeadbeef` followed by failure indicator
 ///
 /// # Signature Verification
 ///
@@ -856,7 +896,7 @@ pub struct RespondBidirectionalEvent {
     pub request_id: [u8; 32],
     /// Address of the MPC responder (not cryptographically verified).
     pub responder: Pubkey,
-    /// Borsh-serialized execution output per `respond_serialization_schema`.
+    /// Serialized execution output per `respond_serialization_schema`.
     /// Check for `0xdeadbeef` prefix to detect failures.
     pub serialized_output: Vec<u8>,
     /// ECDSA signature over `keccak256(request_id || serialized_output)`.
