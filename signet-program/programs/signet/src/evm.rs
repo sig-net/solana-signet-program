@@ -58,27 +58,6 @@
 //! let rlp_encoded = evm_tx.build_for_signing();
 //! ```
 //!
-//! ### Using viem (TypeScript Client)
-//!
-//! ```typescript,ignore
-//! import { serializeTransaction, parseGwei } from 'viem'
-//!
-//! const unsignedTx = {
-//!   type: 'eip1559',
-//!   chainId: 1,
-//!   nonce: 0,
-//!   maxPriorityFeePerGas: parseGwei('1'),
-//!   maxFeePerGas: parseGwei('20'),
-//!   gas: 100000n,
-//!   to: '0x...',
-//!   value: 0n,
-//!   data: encodeFunctionData({ abi, functionName: 'transfer', args: [...] })
-//! }
-//!
-//! const serializedTx = serializeTransaction(unsignedTx)
-//! // Pass Buffer.from(serializedTx.slice(2), 'hex') to sign_bidirectional
-//! ```
-//!
 //! # Serialization Schemas
 //!
 //! The bidirectional flow uses two schemas to handle cross-chain data encoding.
