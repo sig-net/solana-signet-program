@@ -19,27 +19,6 @@
 //! | [`chain_signatures::sign_bidirectional`] | Cross-chain tx with execution result callback |
 //! | [`chain_signatures::get_signature_deposit`] | Query the current deposit amount (view function) |
 //!
-//! ### MPC Network Instructions
-//!
-//! These instructions are called by MPC responders, not by application developers:
-//!
-//! | Instruction | Description |
-//! |-------------|-------------|
-//! | [`chain_signatures::respond`] | Deliver signatures to requesters |
-//! | [`chain_signatures::respond_bidirectional`] | Return cross-chain execution results |
-//! | [`chain_signatures::respond_error`] | Report errors (debugging only) |
-//!
-//! ### Admin Instructions (Not for Developers)
-//!
-//! These instructions are restricted to the program administrator and are **not intended
-//! for application developers**. They are used for program deployment and maintenance:
-//!
-//! | Instruction | Description |
-//! |-------------|-------------|
-//! | [`chain_signatures::initialize`] | One-time program initialization (deployment only) |
-//! | [`chain_signatures::update_deposit`] | Modify the signature deposit requirement |
-//! | [`chain_signatures::withdraw_funds`] | Withdraw accumulated deposits |
-//!
 //! ## Sign Bidirectional Flow
 //!
 //! The bidirectional flow enables cross-chain transaction execution with verified
