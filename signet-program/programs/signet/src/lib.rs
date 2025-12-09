@@ -20,7 +20,7 @@
 //! response callbacks:
 //!
 //! ```text
-//! User                    Solana                  MPC Network           Ethereum
+//! User                    Solana (Source)         MPC Network        Destination Chain
 //!   │                        │                         │                    │
 //!   │ sign_bidirectional()   │                         │                    │
 //!   ├───────────────────────►│                         │                    │
@@ -39,22 +39,42 @@
 //!   │◄───────────────────────┤                         │                    │
 //! ```
 //!
-//! ### Phase 1-2: Sign Request
+//! ### Phase 1: Sign Request
 //!
-//! 1. User calls [`chain_signatures::sign_bidirectional`] with unsigned transaction (RLP-encoded)
+//! 1. User calls [`chain_signatures::sign_bidirectional`] with serialized unsigned transaction
 //! 2. Program emits [`SignBidirectionalEvent`]
-//! 3. MPC network signs and calls [`chain_signatures::respond`], emitting [`SignatureRespondedEvent`]
+//! 3. MPC parses event and generates unique request ID
+//!
+//! ### Phase 2: Signature Delivery
+//!
+//! 1. MPC signs the transaction hash
+//! 2. Stores transaction in backlog for observation
+//! 3. Calls [`chain_signatures::respond`], emitting [`SignatureRespondedEvent`]
+//! 4. User polls for [`SignatureRespondedEvent`] to get signature
 //!
 //! ### Phase 3: User Broadcast
 //!
-//! User polls for signature, assembles signed tx, broadcasts to destination chain.
-//! **The MPC network does NOT broadcast** - this is the user's responsibility.
+//! 1. User assembles signed transaction (serialized data + signature)
+//! 2. User broadcasts to destination chain
+//! 3. **The MPC does NOT broadcast** - this is the user's responsibility
 //!
-//! ### Phase 4-6: Observation & Response
+//! ### Phase 4: Light Client Observation
 //!
-//! 1. MPC light client observes destination chain for tx confirmation
-//! 2. Extracts execution output (for contract calls, simulates via `eth_call`)
-//! 3. Calls [`chain_signatures::respond_bidirectional`] with serialized output and signature
+//! 1. MPC light client monitors destination chain blocks
+//! 2. Detects transaction confirmation by hash
+//! 3. Extracts execution status (success/failure)
+//!
+//! ### Phase 5: Output Extraction
+//!
+//! 1. For contract calls: MPC extracts return value
+//! 2. For simple transfers: empty success indicator
+//! 3. Output deserialized using `output_deserialization_schema`
+//!
+//! ### Phase 6: Respond Bidirectional
+//!
+//! 1. MPC serializes output using `respond_serialization_schema`
+//! 2. Signs `keccak256(request_id || serialized_output)`
+//! 3. Calls [`chain_signatures::respond_bidirectional`]
 //! 4. Program emits [`RespondBidirectionalEvent`] for user to poll
 //!
 //! ## Request ID Generation
@@ -73,10 +93,12 @@
 //!
 //! Cross-chain data encoding uses two schemas:
 //!
-//! | Schema | Format | Direction | Example |
-//! |--------|--------|-----------|---------|
-//! | `output_deserialization_schema` | ABI | Ethereum → MPC | `[{"name":"result","type":"uint256"}]` |
-//! | `respond_serialization_schema` | Borsh | MPC → Solana | `[{"name":"output","type":"bytes"}]` |
+//! | Schema | Direction | Purpose |
+//! |--------|-----------|---------|
+//! | `output_deserialization_schema` | Destination → MPC | Parse execution result from destination chain |
+//! | `respond_serialization_schema` | MPC → Source | Serialize response for source chain consumption |
+//!
+//! See destination chain guides (e.g., [`evm`]) for format details and examples.
 //!
 //! ## Error Handling
 //!
@@ -98,7 +120,7 @@
 //! ```text
 //! epsilon = derive_epsilon(sender_pubkey, derivation_path)
 //! user_pubkey = derive_key(mpc_root_pubkey, epsilon)
-//! eth_address = keccak256(user_pubkey)[12..32]
+//! // Address format is chain-specific (see destination chain guides)
 //! ```
 //!
 //! ## Response Signature Verification
@@ -124,153 +146,16 @@
 //! 2. Derive the expected response public key using the `"solana response key"` path
 //! 3. Compare the recovered public key with the expected response public key
 //!
-//! ## Security Notes
 //!
-//! - [`chain_signatures::respond`] and [`chain_signatures::respond_bidirectional`] can be called by any address
-//! - Clients **must verify signature validity** off-chain
-//! - Events are the source of truth, not on-chain state
-//! - Response signatures use a different derivation path than transaction signatures
+//! # Destination Chain Guides
 //!
-//! # Solana → EVM Cross-Chain Guide
+//! For detailed integration guides with real code examples, see:
 //!
-//! This section documents how to use `sign_bidirectional` to execute transactions
-//! on EVM chains (Ethereum, Arbitrum, etc.) from Solana and receive execution results.
-//!
-//! ## Flow Overview
-//!
-//! 1. Build an unsigned EVM transaction (RLP-encoded)
-//! 2. Call `sign_bidirectional` on Solana with the serialized transaction
-//! 3. Poll for [`SignatureRespondedEvent`] to get the signature
-//! 4. Assemble and broadcast the signed transaction to the EVM chain
-//! 5. Poll for [`RespondBidirectionalEvent`] to get the execution result
-//!
-//! ## Transaction Encoding
-//!
-//! EVM transactions must be RLP-encoded before passing to `sign_bidirectional`.
-//! The MPC signs `keccak256(unsigned_rlp)`.
-//!
-//! ### EIP-1559 Transactions (Recommended)
-//!
-//! ```typescript,ignore
-//! import { serializeTransaction, parseGwei } from 'viem'
-//!
-//! const unsignedTx = {
-//!   type: 'eip1559',
-//!   chainId: 1,
-//!   nonce: 0,
-//!   maxPriorityFeePerGas: parseGwei('1'),
-//!   maxFeePerGas: parseGwei('20'),
-//!   gas: 21000n,
-//!   to: '0x...',
-//!   value: 0n,
-//!   data: '0x'
-//! }
-//!
-//! const serializedTx = serializeTransaction(unsignedTx)
-//! // Result: 0x02... (EIP-1559 prefix + RLP body)
-//! ```
-//!
-//! **What Gets Signed**:
-//!
-//! ```text
-//! Hash = keccak256(0x02 || RLP([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas,
-//!                               gasLimit, to, value, data, accessList]))
-//! ```
-//!
-//! ### Legacy Transactions
-//!
-//! ```text
-//! Hash = keccak256(RLP([nonce, gasPrice, gasLimit, to, value, data, chainId, 0, 0]))
-//! ```
-//!
-//! ## Parameters for EVM Destination
-//!
-//! | Parameter | Value |
-//! |-----------|-------|
-//! | `serialized_transaction` | RLP-encoded unsigned transaction bytes |
-//! | `caip2_id` | `"eip155:1"` (mainnet), `"eip155:11155111"` (Sepolia) |
-//! | `key_version` | MPC key version (typically `0`) |
-//! | `path` | User derivation path (e.g., `""` or `"my_vault"`) |
-//! | `algo` | `""` (default secp256k1) |
-//! | `dest` | `"ethereum"` |
-//! | `params` | `""` |
-//!
-//! ## Schemas
-//!
-//! ### Output Deserialization Schema (ABI Format)
-//!
-//! Defines how to parse the EVM contract's return value:
-//!
-//! ```json,ignore
-//! [{"name": "result", "type": "uint256"}, {"name": "success", "type": "bool"}]
-//! ```
-//!
-//! **Supported ABI Types**: `uint256`, `int256`, `bool`, `address`, `bytes32`, `bytes`, `string`
-//!
-//! ### Respond Serialization Schema (Borsh Format)
-//!
-//! Defines how to serialize the response for Solana:
-//!
-//! ```json,ignore
-//! [{"name": "output", "type": "bytes"}]
-//! ```
-//!
-//! For simple boolean results (e.g., ERC20 transfer):
-//!
-//! ```json,ignore
-//! "bool"
-//! ```
-//!
-//! ## Handling the Signature
-//!
-//! After `sign_bidirectional`, poll for [`SignatureRespondedEvent`]:
-//!
-//! ```typescript,ignore
-//! const signature = event.signature
-//! const r = '0x' + Buffer.from(signature.bigR.x).toString('hex')
-//! const s = '0x' + Buffer.from(signature.s).toString('hex')
-//! const v = 27n + BigInt(signature.recoveryId)
-//!
-//! // Assemble signed transaction
-//! const signedTx = serializeTransaction(unsignedTx, { r, s, v })
-//! ```
-//!
-//! ## Handling the Response
-//!
-//! Poll for [`RespondBidirectionalEvent`] after the EVM transaction confirms:
-//!
-//! ```typescript,ignore
-//! const MAGIC_ERROR_PREFIX = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
-//!
-//! function parseResponse(serializedOutput: Uint8Array) {
-//!   if (serializedOutput.slice(0, 4).every((b, i) => b === MAGIC_ERROR_PREFIX[i])) {
-//!     return { success: false, error: 'Transaction reverted' }
-//!   }
-//!   return { success: true, data: deserializeBorsh(serializedOutput) }
-//! }
-//! ```
-//!
-//! ## CAIP-2 Chain Identifiers
-//!
-//! | Chain | CAIP-2 ID |
-//! |-------|-----------|
-//! | Ethereum Mainnet | `eip155:1` |
-//! | Sepolia | `eip155:11155111` |
-//! | Arbitrum One | `eip155:42161` |
-//! | Optimism | `eip155:10` |
-//! | Base | `eip155:8453` |
-//! | Polygon | `eip155:137` |
-//!
-//! ## Light Client Observation
-//!
-//! The MPC uses [Helios](https://github.com/a16z/helios) to observe EVM chains:
-//!
-//! - Validates beacon chain headers (consensus sync)
-//! - Verifies state without full node (execution proofs)
-//! - Uses `eth_getBlockReceipts` for transaction status
-//! - Uses `eth_call` to simulate and extract return data
+//! - [`evm`] - Solana → EVM (Ethereum, Arbitrum, Optimism, Base, Polygon)
 
 #![allow(unexpected_cfgs)]
+
+pub mod evm;
 use anchor_lang::prelude::*;
 
 declare_id!("H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS");
@@ -375,10 +260,10 @@ pub mod chain_signatures {
     ///
     /// * `payload` - 32-byte data to sign (typically a transaction hash)
     /// * `key_version` - MPC key version to use
-    /// * `path` - Derivation path for the user's key (e.g., `"eth"`, `"btc"`)
-    /// * `algo` - Signing algorithm (e.g., `"secp256k1"`)
-    /// * `dest` - Response destination chain
-    /// * `params` - Additional parameters as JSON
+    /// * `path` - Derivation path for the user's key (e.g., `"my_wallet"`)
+    /// * `algo` - Reserved for future use (pass empty string `""`)
+    /// * `dest` - Reserved for future use (pass empty string `""`)
+    /// * `params` - Reserved for future use (pass empty string `""`)
     ///
     /// # Emits
     ///
@@ -389,12 +274,12 @@ pub mod chain_signatures {
     /// ```typescript,ignore
     /// await program.methods
     ///   .sign(
-    ///     Array.from(txHash),  // [u8; 32]
+    ///     Array.from(txHash),  // [u8; 32] payload to sign
     ///     0,                    // key_version
-    ///     "eth",                // path
-    ///     "",                   // algo
-    ///     "",                   // dest
-    ///     ""                    // params
+    ///     "my_wallet",          // path (derivation path)
+    ///     "",                   // algo (reserved, pass empty string)
+    ///     "",                   // dest (reserved, pass empty string)
+    ///     ""                    // params (reserved, pass empty string)
     ///   )
     ///   .accounts({ ... })
     ///   .rpc();
@@ -465,12 +350,12 @@ pub mod chain_signatures {
     /// * `caip2_id` - CAIP-2 chain identifier (e.g., `"eip155:1"` for Ethereum mainnet)
     /// * `key_version` - MPC key version to use
     /// * `path` - Derivation path for signing key
-    /// * `algo` - Signing algorithm
-    /// * `dest` - Response destination
-    /// * `params` - Additional parameters as JSON
+    /// * `algo` - Reserved for future use (pass empty string `""`)
+    /// * `dest` - Reserved for future use (pass empty string `""`)
+    /// * `params` - Reserved for future use (pass empty string `""`)
     /// * `program_id` - Callback program ID (reserved for future use)
     /// * `output_deserialization_schema` - ABI schema for parsing destination chain output
-    /// * `respond_serialization_schema` - Borsh schema for serializing response to Solana
+    /// * `respond_serialization_schema` - Borsh schema for serializing response to source chain
     ///
     /// # Schemas Format
     ///
