@@ -151,6 +151,24 @@
 //! 2. Derive the expected response public key using the `"solana response key"` path
 //! 3. Compare the recovered public key with the expected response public key
 //!
+//! # Security Considerations
+//!
+//! ## Security Properties
+//!
+//! 1. **Request ID Uniqueness**: Each request has a unique ID computed from
+//!    `keccak256(sender || tx || chain_id || ...)` preventing replay attacks
+//!
+//! 2. **Response Authenticity**: Responses are signed over
+//!    `keccak256(request_id || serialized_output)` using MPC threshold signatures
+//!
+//! 3. **Output Verification**: The `output_deserialization_schema` and
+//!    `respond_serialization_schema` ensure consistent data encoding across chains
+//!
+//! 4. **Key Isolation**: Each user has isolated keys through unique derivation paths
+//!    (`epsilon = derive_epsilon(predecessor, path)`)
+//!
+//! 5. **Light Client Security**: The MPC light client validates destination chain
+//!    consensus without trusting an RPC provider
 //!
 //! # Destination Chain Guides
 //!
