@@ -830,7 +830,7 @@ pub struct SignatureRespondedEvent {
     /// Request identifier linking this response to the original request.
     /// Computed as `keccak256(sender || payload || ...)` - see module docs.
     pub request_id: [u8; 32],
-    /// Address of the MPC responder (not cryptographically verified).
+    /// Address of the responder. Clients must verify the signature was produced by the MPC.
     pub responder: Pubkey,
     /// ECDSA signature in affine point format.
     pub signature: Signature,
@@ -855,7 +855,7 @@ pub struct SignatureRespondedEvent {
 pub struct SignatureErrorEvent {
     /// Request identifier of the failed request.
     pub request_id: [u8; 32],
-    /// Address of the MPC responder (not cryptographically verified).
+    /// Address of the MPC responder. Error events are not cryptographically verified.
     pub responder: Pubkey,
     /// Human-readable error description.
     pub error: String,
@@ -891,7 +891,7 @@ pub struct SignatureErrorEvent {
 pub struct RespondBidirectionalEvent {
     /// Original request identifier.
     pub request_id: [u8; 32],
-    /// Address of the MPC responder (not cryptographically verified).
+    /// Address of the MPC responder. Clients must verify the signature was produced by the MPC.
     pub responder: Pubkey,
     /// Serialized execution output per `respond_serialization_schema`.
     /// Check for `0xdeadbeef` prefix to detect failures.
