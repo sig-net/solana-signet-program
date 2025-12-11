@@ -433,7 +433,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
-name = "chain-signatures"
+name = "chain-signatures-solana-program"
 version = "0.4.1"
 dependencies = [
  "anchor-lang",
@@ -877,7 +877,7 @@ name = "proxy_test_cpi"
 version = "0.2.0"
 dependencies = [
  "anchor-lang",
- "chain-signatures",
+ "chain-signatures-solana-program",
 ]
 
 [[package]]
