@@ -181,7 +181,7 @@
 pub mod evm;
 use anchor_lang::prelude::*;
 
-declare_id!("H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS");
+declare_id!("SigMcRMjKfnC7RDG5q4yUMZM1s5KJ9oYTPP4NmJRDRw");
 
 #[program]
 pub mod chain_signatures {
