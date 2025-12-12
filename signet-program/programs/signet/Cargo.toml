@@ -1,5 +1,5 @@
 [package]
-name = "chain-signatures"
+name = "chain-signatures-solana-program"
 version = "0.4.1"
 description = "Chain signatures program for cross-chain signing on Solana"
 authors = ["Sig Network"]
