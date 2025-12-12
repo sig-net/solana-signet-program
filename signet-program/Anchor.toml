@@ -2,7 +2,7 @@
 seeds = false
 
 [programs.localnet]
-chain_signatures = "SigLqW12jGkFFc6Sc6s2QtJTxVGGScr8VH5MViktgdy"
+chain_signatures = "SigMcRMjKfnC7RDG5q4yUMZM1s5KJ9oYTPP4NmJRDRw"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.devnet]
