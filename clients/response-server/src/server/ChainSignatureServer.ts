@@ -104,12 +104,18 @@ export class ChainSignatureServer {
     try {
       const accountInfo = await this.connection.getAccountInfo(programStatePda);
       if (accountInfo) {
+        this.logger.info(
+          `Program initialized, PDA State ${programStatePda.toString()}`
+        );
         return;
       }
     } catch {}
 
-    const signatureDeposit = this.config.signatureDeposit || '10000000';
-    const chainId = this.config.chainId || 'solana:localnet';
+    this.logger.info('⚙️ Initializing program state...');
+
+    const signatureDeposit = this.config.signatureDeposit || '1';
+    const chainId =
+      this.config.chainId || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
     try {
       await this.program.methods
@@ -118,6 +124,7 @@ export class ChainSignatureServer {
           admin: this.wallet.publicKey,
         })
         .rpc();
+      this.logger.info('✅ Program initialized successfully');
     } catch (error) {
       throw new Error(
         `Failed to initialize program: ${error instanceof Error ? error.message : error}`
