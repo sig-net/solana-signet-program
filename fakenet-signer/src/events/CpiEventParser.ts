@@ -134,7 +134,7 @@ export class CpiEventParser {
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Not our event, continue
     }
 

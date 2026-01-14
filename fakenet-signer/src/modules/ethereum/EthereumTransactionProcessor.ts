@@ -36,9 +36,11 @@ export class EthereumTransactionProcessor {
 
     // Decode and prepare signed transaction
     const decoded = ethers.decodeRlp(rlpData) as string[];
-    const nonce = isEIP1559
-      ? parseInt(decoded[1], 16) // Second field for EIP-1559
-      : parseInt(decoded[0], 16); // First field for legacy
+    const nonceField = isEIP1559 ? decoded[1] : decoded[0];
+    if (nonceField === undefined) {
+      throw new Error('Missing nonce field in RLP-decoded transaction');
+    }
+    const nonce = parseInt(nonceField, 16);
     console.log(' 📝 Transaction nonce:', nonce);
     const vValue = isEIP1559 ? signature.v - 27 : signature.v;
 
@@ -58,7 +60,7 @@ export class EthereumTransactionProcessor {
     let signedTxHash: string;
     try {
       const parsedTx = ethers.Transaction.from(signedTransaction);
-      signedTxHash = parsedTx.hash!;
+      signedTxHash = parsedTx.hash ?? ethers.keccak256(signedTransaction);
     } catch {
       signedTxHash = ethers.keccak256(signedTransaction);
     }
@@ -70,8 +72,8 @@ export class EthereumTransactionProcessor {
     if (namespace === 'eip155') {
       /// FUNDING DERIVED ADDRESS WITH ETH CODE
       const tx = ethers.Transaction.from(ethers.hexlify(rlpEncodedTx));
-      const gasNeeded =
-        tx.gasLimit * (tx.maxFeePerGas || tx.gasPrice!) + tx.value;
+      const gasPrice = tx.maxFeePerGas ?? tx.gasPrice ?? 0n;
+      const gasNeeded = tx.gasLimit * gasPrice + tx.value;
 
       // Don't retry if we already know it's broken
       if (this.fundingProviderError) {

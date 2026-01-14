@@ -117,7 +117,12 @@ async function handleBitcoinSigningPlan(
   const signingQueue = [...plan.inputs];
   for (let i = signingQueue.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [signingQueue[i], signingQueue[j]] = [signingQueue[j], signingQueue[i]];
+    const a = signingQueue[i];
+    const b = signingQueue[j];
+    if (a !== undefined && b !== undefined) {
+      signingQueue[i] = b;
+      signingQueue[j] = a;
+    }
   }
 
   for (const inputPlan of signingQueue) {

@@ -5,6 +5,12 @@ import {
 } from './IBitcoinAdapter';
 import Client from 'bitcoin-core';
 
+interface RpcUnspent {
+  txid: string;
+  vout: number;
+  amount: number;
+}
+
 /**
  * Bitcoin Core RPC adapter for regtest (localhost:18443)
  *
@@ -24,7 +30,7 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
     try {
       await this.client.command('getblockchaininfo');
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -63,7 +69,7 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
       `addr(${address})`,
     ]);
 
-    return result.unspents.map((utxo: any) => ({
+    return (result.unspents as RpcUnspent[]).map((utxo) => ({
       txid: utxo.txid,
       vout: utxo.vout,
       value: Math.round(utxo.amount * 100000000),

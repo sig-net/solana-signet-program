@@ -114,8 +114,9 @@ export class BitcoinMonitor {
   ): Promise<IBitcoinAdapter> {
     const network = config.bitcoinNetwork;
 
-    if (this.adapterCache.has(network)) {
-      return this.adapterCache.get(network)!;
+    const cachedAdapter = this.adapterCache.get(network);
+    if (cachedAdapter) {
+      return cachedAdapter;
     }
 
     const adapter = await BitcoinAdapterFactory.create(network);

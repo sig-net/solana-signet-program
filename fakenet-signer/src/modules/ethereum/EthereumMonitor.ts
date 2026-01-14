@@ -26,7 +26,7 @@ export class EthereumMonitor {
 
     try {
       provider = this.getProvider(caip2Id, config);
-    } catch (e) {
+    } catch {
       return { status: 'fatal_error', reason: 'unsupported_chain' };
     }
 
@@ -67,7 +67,7 @@ export class EthereumMonitor {
             success: output.success,
             output: output.output,
           };
-        } catch (e) {
+        } catch {
           return { status: 'fatal_error', reason: 'extraction_failed' };
         }
       } else {
@@ -92,7 +92,7 @@ export class EthereumMonitor {
         // Already checked receipt above and it was null, so return pending
         return { status: 'pending' };
       }
-    } catch (e) {
+    } catch {
       return { status: 'pending' };
     }
   }
@@ -104,8 +104,9 @@ export class EthereumMonitor {
     const namespace = getNamespaceFromCaip2(caip2Id);
     const cacheKey = `${caip2Id}-${config.isDevnet}`;
 
-    if (this.providerCache.has(cacheKey)) {
-      return this.providerCache.get(cacheKey)!;
+    const cachedProvider = this.providerCache.get(cacheKey);
+    if (cachedProvider) {
+      return cachedProvider;
     }
 
     let url: string;

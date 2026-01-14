@@ -55,8 +55,11 @@ export class BitcoinTransactionProcessor {
 
     for (let i = 0; i < psbt.data.inputs.length; i++) {
       const inputData = psbt.data.inputs[i];
-      const witnessUtxo = inputData.witnessUtxo;
+      if (!inputData) {
+        throw new Error(`Input ${i} not found in PSBT data`);
+      }
 
+      const witnessUtxo = inputData.witnessUtxo;
       if (!witnessUtxo) {
         throw new Error(
           `Input ${i} missing witnessUtxo (required for SegWit signing)`
@@ -76,26 +79,30 @@ export class BitcoinTransactionProcessor {
         );
       }
 
-      const scriptCode = bitcoin.payments.p2pkh({
+      const p2pkhOutput = bitcoin.payments.p2pkh({
         hash: script.slice(2),
         network,
-      }).output!;
+      }).output;
+      if (!p2pkhOutput) {
+        throw new Error(`Input ${i} failed to derive P2PKH scriptCode`);
+      }
 
       const sighashType =
         inputData.sighashType ?? bitcoin.Transaction.SIGHASH_ALL;
 
       const sighash = unsignedTx.hashForWitnessV0(
         i,
-        scriptCode,
+        p2pkhOutput,
         witnessUtxo.value,
         sighashType
       );
 
-      const prevTxid = Buffer.from(psbt.txInputs[i].hash)
-        .reverse()
-        .toString('hex');
-
-      const vout = psbt.txInputs[i].index;
+      const txInput = psbt.txInputs[i];
+      if (!txInput) {
+        throw new Error(`Input ${i} not found in PSBT txInputs`);
+      }
+      const prevTxid = Buffer.from(txInput.hash).reverse().toString('hex');
+      const vout = txInput.index;
 
       inputs.push({
         inputIndex: i,

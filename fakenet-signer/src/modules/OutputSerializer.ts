@@ -32,13 +32,14 @@ export class OutputSerializer {
 
     // Handle scalar bool schema (schema is literally "bool")
     if (typeof parsedSchema === 'string' && parsedSchema === 'bool') {
+      const outputRecord = output as Record<string, unknown>;
       const boolValue =
         typeof output === 'boolean'
           ? output
-          : 'error' in (output as Record<string, unknown>)
-            ? Boolean((output as any).error)
-            : 'success' in (output as Record<string, unknown>)
-              ? Boolean((output as any).success)
+          : 'error' in outputRecord
+            ? Boolean(outputRecord.error)
+            : 'success' in outputRecord
+              ? Boolean(outputRecord.success)
               : true;
 
       try {
@@ -64,7 +65,8 @@ export class OutputSerializer {
     if (typeof dataToSerialize === 'object' && dataToSerialize !== null) {
       const keys = Object.keys(dataToSerialize as TransactionOutputData);
       if (keys.length === 1 && keys[0] === '') {
-        dataToSerialize = (dataToSerialize as TransactionOutputData)[''];
+        dataToSerialize =
+          (dataToSerialize as TransactionOutputData)[''] ?? dataToSerialize;
       }
     }
 
@@ -77,7 +79,8 @@ export class OutputSerializer {
       dataToSerialize !== null &&
       'error' in (dataToSerialize as Record<string, unknown>)
     ) {
-      dataToSerialize = { error: Boolean((dataToSerialize as any).error) };
+      const data = dataToSerialize as Record<string, unknown>;
+      dataToSerialize = { error: Boolean(data.error) };
     }
 
     try {
@@ -140,7 +143,7 @@ export class OutputSerializer {
 
     const obj: TransactionOutputData = {};
     for (const [key, type] of Object.entries(struct)) {
-      if (fallback && key in fallback) {
+      if (fallback && key in fallback && fallback[key] !== undefined) {
         obj[key] = fallback[key];
         continue;
       }

@@ -12,6 +12,10 @@ import type {
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
+import {
+  type ChainSignaturesProgram,
+  asChainSignaturesProgram,
+} from '../types/program';
 import ChainSignaturesIDL from '../../idl/chain_signatures.json';
 import { CryptoUtils } from '../modules/CryptoUtils';
 import { CONFIG } from '../config/Config';
@@ -35,7 +39,7 @@ export class ChainSignatureServer {
   private connection: Connection;
   private wallet: anchor.Wallet;
   private provider: anchor.AnchorProvider;
-  private program: Program;
+  private program: ChainSignaturesProgram;
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
@@ -76,7 +80,7 @@ export class ChainSignatureServer {
 
     const idl = ChainSignaturesIDL as anchor.Idl;
     idl.address = this.config.programId;
-    this.program = new Program(idl, this.provider);
+    this.program = asChainSignaturesProgram(new Program(idl, this.provider));
   }
 
   async start() {
@@ -104,7 +108,9 @@ export class ChainSignatureServer {
       if (accountInfo) {
         return;
       }
-    } catch {}
+    } catch {
+      // Account doesn't exist, proceed with initialization
+    }
 
     const signatureDeposit = this.config.signatureDeposit || '10000000';
     const chainId = this.config.chainId || 'solana:localnet';
@@ -178,7 +184,7 @@ export class ChainSignatureServer {
 
             case 'success':
               await this.handleCompletedTransaction(txHash, txInfo, {
-                success: result.success!,
+                success: result.success,
                 output: result.output,
               });
               pendingTransactions.delete(txHash);
