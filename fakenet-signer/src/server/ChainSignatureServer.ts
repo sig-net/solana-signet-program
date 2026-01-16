@@ -119,8 +119,9 @@ export class ChainSignatureServer {
       throw error;
     }
 
-    const signatureDeposit = this.config.signatureDeposit || '10000000';
-    const chainId = this.config.chainId || 'solana:localnet';
+    const signatureDeposit = this.config.signatureDeposit || '1';
+    const chainId =
+      this.config.chainId || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
     try {
       await this.program.methods
@@ -225,8 +226,8 @@ export class ChainSignatureServer {
           if (
             error instanceof Error &&
             (error.message.includes('Modulus not supported') ||
-            error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
-            error.message.includes('Failed to load keypair'))
+              error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
+              error.message.includes('Failed to load keypair'))
           ) {
             console.error(
               `Infrastructure error for ${txHash}: ${error.message}`
@@ -357,7 +358,9 @@ export class ChainSignatureServer {
           return;
         }
 
-        console.log(`📨 SignBidirectionalEvent from ${eventData.sender.toString()}`);
+        console.log(
+          `📨 SignBidirectionalEvent from ${eventData.sender.toString()}`
+        );
 
         try {
           await this.handleSignBidirectional(eventData);
@@ -379,7 +382,9 @@ export class ChainSignatureServer {
           return;
         }
 
-        console.log(`📝 SignatureRequestedEvent from ${eventData.sender.toString()}`);
+        console.log(
+          `📝 SignatureRequestedEvent from ${eventData.sender.toString()}`
+        );
 
         try {
           await this.handleSignatureRequest(eventData);

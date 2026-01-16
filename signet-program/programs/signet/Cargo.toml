@@ -1,10 +1,12 @@
 [package]
-name = "chain-signatures"
-version = "0.4.0"
+name = "chain-signatures-solana-program"
+version = "0.4.2"
 description = "Chain signatures program for cross-chain signing on Solana"
 authors = ["Sig Network"]
 license = "MIT"
 repository = "https://github.com/sig-net/signet-solana-program"
+documentation = "https://docs.rs/chain-signatures-solana-program"
+readme = "README.md"
 edition = "2021"
 
 [lib]
