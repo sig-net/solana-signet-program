@@ -13,10 +13,10 @@ supporting both simple signing and bidirectional cross-chain transactions.
 
 These are the primary instructions for building applications:
 
-| Instruction | Description |
-|-------------|-------------|
-| [`sign`](https://docs.rs/chain-signatures-solana-program/latest/chain_signatures/chain_signatures/fn.sign.html) | Request signature on a 32-byte payload |
-| [`sign_bidirectional`](https://docs.rs/chain-signatures-solana-program/latest/chain_signatures/chain_signatures/fn.sign_bidirectional.html) | Cross-chain tx with execution result callback |
+| Instruction                                                                                                                                       | Description                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| [`sign`](https://docs.rs/chain-signatures-solana-program/latest/chain_signatures/chain_signatures/fn.sign.html)                                   | Request signature on a 32-byte payload           |
+| [`sign_bidirectional`](https://docs.rs/chain-signatures-solana-program/latest/chain_signatures/chain_signatures/fn.sign_bidirectional.html)       | Cross-chain tx with execution result callback    |
 | [`get_signature_deposit`](https://docs.rs/chain-signatures-solana-program/latest/chain_signatures/chain_signatures/fn.get_signature_deposit.html) | Query the current deposit amount (view function) |
 
 ## Sign Bidirectional Flow
@@ -98,10 +98,10 @@ request_id = keccak256(
 
 Cross-chain data encoding uses two schemas:
 
-| Schema | Direction | Purpose |
-|--------|-----------|---------|
-| `output_deserialization_schema` | Destination → MPC | Parse execution result from destination chain |
-| `respond_serialization_schema` | MPC → Source | Serialize response for source chain consumption |
+| Schema                          | Direction         | Purpose                                         |
+| ------------------------------- | ----------------- | ----------------------------------------------- |
+| `output_deserialization_schema` | Destination → MPC | Parse execution result from destination chain   |
+| `respond_serialization_schema`  | MPC → Source      | Serialize response for source chain consumption |
 
 See destination chain guides (e.g., [EVM](https://docs.rs/chain-signatures-solana-program/latest/chain_signatures/evm/index.html)) for format details and examples.
 
@@ -147,6 +147,7 @@ message_hash = keccak256(request_id || serialized_output)
 ```
 
 To verify the response signature, clients must:
+
 1. Recover the public key from the signature using `secp256k1_recover`
 2. Derive the expected response public key using the `"solana response key"` path
 3. Compare the recovered public key with the expected response public key
