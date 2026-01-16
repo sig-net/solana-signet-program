@@ -115,6 +115,8 @@ export interface PendingTransaction {
    * before confirmation.
    */
   prevouts: PrevoutRef[];
+
+  sender: string;
 }
 
 // Borsh schema types

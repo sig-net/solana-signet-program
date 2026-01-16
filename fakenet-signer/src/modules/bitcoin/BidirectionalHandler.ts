@@ -109,6 +109,7 @@ async function handleBitcoinSigningPlan(
     checkCount: 0,
     namespace: 'bip122',
     prevouts,
+    sender: event.sender.toString(),
   });
 
   // Simulate MPC nodes returning signatures out of order so clients rely on

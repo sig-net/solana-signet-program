@@ -4,7 +4,7 @@ import { SignatureResponse } from '../types';
 
 export class CryptoUtils {
   static deriveEpsilon(requester: string, path: string): bigint {
-    const derivationPath = `${CONFIG.EPSILON_DERIVATION_PREFIX},${CONFIG.SOLANA_CHAIN_ID},${requester},${path}`;
+    const derivationPath = `${CONFIG.EPSILON_DERIVATION_PREFIX}:${CONFIG.SOLANA_CAIP2_ID}:${requester}:${path}`;
     const hash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
     return BigInt(hash);
   }
@@ -38,7 +38,6 @@ export class CryptoUtils {
       signature
     );
     const publicKeyPoint = ethers.getBytes(recoveredPublicKey);
-
     const y = publicKeyPoint.slice(33, 65);
 
     return {
@@ -54,12 +53,19 @@ export class CryptoUtils {
   static async signBidirectionalResponse(
     requestId: Uint8Array,
     serializedOutput: Uint8Array,
-    privateKeyHex: string
+    basePrivateKey: string,
+    sender: string
   ): Promise<SignatureResponse> {
+    const derivedPrivateKey = await this.deriveSigningKey(
+      CONFIG.SOLANA_RESPOND_BIDIRECTIONAL_PATH,
+      sender,
+      basePrivateKey
+    );
+
     const combined = new Uint8Array(requestId.length + serializedOutput.length);
     combined.set(requestId);
     combined.set(serializedOutput, requestId.length);
     const messageHash = ethers.keccak256(combined);
-    return this.signMessage(messageHash, privateKeyHex);
+    return this.signMessage(messageHash, derivedPrivateKey);
   }
 }

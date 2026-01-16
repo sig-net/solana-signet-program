@@ -40,7 +40,11 @@ export class EthereumTransactionProcessor {
     if (nonceField === undefined) {
       throw new Error('Missing nonce field in RLP-decoded transaction');
     }
-    const nonce = parseInt(nonceField, 16);
+    const nonce =
+      nonceField === '' || nonceField === '0x' ? 0 : parseInt(nonceField, 16);
+    if (Number.isNaN(nonce)) {
+      throw new Error('Invalid nonce field in RLP-decoded transaction');
+    }
     console.log(' 📝 Transaction nonce:', nonce);
     const vValue = isEIP1559 ? signature.v - 27 : signature.v;
 

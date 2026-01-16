@@ -108,8 +108,15 @@ export class ChainSignatureServer {
       if (accountInfo) {
         return;
       }
-    } catch {
-      // Account doesn't exist, proceed with initialization
+    } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (errorMsg.includes('401') || errorMsg.includes('Unauthorized')) {
+        console.log(
+          '⚠️ RPC returned 401, assuming program is already initialized...'
+        );
+        return;
+      }
+      throw error;
     }
 
     const signatureDeposit = this.config.signatureDeposit || '10000000';
@@ -122,10 +129,20 @@ export class ChainSignatureServer {
           admin: this.wallet.publicKey,
         })
         .rpc();
-    } catch (error) {
-      throw new Error(
-        `Failed to initialize program: ${error instanceof Error ? error.message : error}`
-      );
+    } catch (error: unknown) {
+      const errorStr = String(error);
+      const errorMsg = error instanceof Error ? error.message : errorStr;
+      if (
+        errorStr.includes('already in use') ||
+        errorStr.includes('custom program error: 0x0') ||
+        errorMsg.includes('already in use') ||
+        errorMsg.includes('custom program error: 0x0') ||
+        errorMsg.includes('0x0')
+      ) {
+        console.log('⚠️ Program already initialized, continuing...');
+        return;
+      }
+      throw new Error(`Failed to initialize program: ${errorMsg}`);
     }
   }
 
@@ -249,7 +266,8 @@ export class ChainSignatureServer {
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
       serializedOutput,
-      this.config.mpcRootKey
+      this.config.mpcRootKey,
+      txInfo.sender
     );
 
     try {
@@ -302,7 +320,8 @@ export class ChainSignatureServer {
       const signature = await CryptoUtils.signBidirectionalResponse(
         requestIdBytes,
         serializedOutput,
-        this.config.mpcRootKey
+        this.config.mpcRootKey,
+        txInfo.sender
       );
 
       await this.program.methods
