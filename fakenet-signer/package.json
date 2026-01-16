@@ -1,6 +1,6 @@
 {
   "name": "fakenet-signer",
-  "version": "1.3.4",
+  "version": "1.5.0",
   "description": "Multi-chain signature orchestrator for Solana - listens for signature requests, executes transactions on target chains (Ethereum, Bitcoin, etc.), and returns results. Includes Bitcoin adapters for mempool.space API and Bitcoin Core RPC.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -28,12 +28,10 @@
     "start": "tsx src/cli/Run.ts",
     "prepublishOnly": "yarn build",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "version:patch": "yarn version --patch --no-git-tag-version",
-    "version:minor": "yarn version --minor --no-git-tag-version",
-    "version:major": "yarn version --major --no-git-tag-version",
-    "version:beta": "yarn version --prerelease --preid=beta --no-git-tag-version",
-    "publish:beta": "yarn version:beta && yarn build && yarn publish --tag beta",
-    "publish:official": "yarn build && yarn publish"
+    "release:patch": "yarn version --patch --no-git-tag-version && yarn build && yarn publish",
+    "release:minor": "yarn version --minor --no-git-tag-version && yarn build && yarn publish",
+    "release:major": "yarn version --major --no-git-tag-version && yarn build && yarn publish",
+    "release:beta": "yarn version --prerelease --preid=beta --no-git-tag-version && yarn build && yarn publish --tag beta"
   },
   "keywords": [
     "solana",
