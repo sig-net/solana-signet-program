@@ -26,7 +26,6 @@ export interface SubstrateBidirectionalRequest {
   algo: string;
   dest: string;
   params: string;
-  programId: string;
   outputDeserializationSchema: Uint8Array;
   respondSerializationSchema: Uint8Array;
 }
@@ -34,10 +33,43 @@ export interface SubstrateBidirectionalRequest {
 export class SubstrateMonitor {
   private api: ApiPromise | null = null;
   private wsProvider: WsProvider;
-  private keypair: any = null; // Add this
+  private keypair: any = null;
+  private txQueue: Promise<any> = Promise.resolve(); // Transaction queue to prevent nonce conflicts
 
   constructor(private wsEndpoint: string = 'ws://localhost:9944') {
     this.wsProvider = new WsProvider(wsEndpoint);
+  }
+
+  /**
+   * Queue a transaction to ensure sequential execution and prevent nonce conflicts.
+   * Each transaction waits for the previous one to complete before starting.
+   */
+  private async queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const previousTx = this.txQueue;
+    let resolve: (value: T) => void;
+    let reject: (error: any) => void;
+
+    const thisResult = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+
+    this.txQueue = thisResult.catch(() => {}); // Don't let failures block the queue
+
+    try {
+      await previousTx; // Wait for previous transaction to complete
+    } catch {
+      // Previous transaction failed, but we can still proceed
+    }
+
+    try {
+      const result = await fn();
+      resolve!(result);
+      return result;
+    } catch (error) {
+      reject!(error);
+      throw error;
+    }
   }
 
   private stripScalePrefix(data: Uint8Array): Uint8Array {
@@ -108,53 +140,121 @@ export class SubstrateMonitor {
     if (!this.api) throw new Error('Not connected to Substrate');
     if (!this.keypair) throw new Error('No keypair available for signing');
 
-    try {
-      // Create the transaction
-      const tx = this.api.tx.signet.respond(
-        [Array.from(requestId)],
-        [signature]
-      );
+    // Queue this transaction to prevent nonce conflicts
+    return this.queueTransaction(async () => {
+      try {
+        // Create the transaction
+        const tx = this.api!.tx.signet.respond(
+          [Array.from(requestId)],
+          [signature]
+        );
 
-      // Sign and send the transaction
-      const hash = await tx.signAndSend(this.keypair);
+        // Wait for the transaction to be included in a block
+        return new Promise((resolve, reject) => {
+          tx.signAndSend(this.keypair!, (result: any) => {
+            const { status, dispatchError } = result;
+            if (status.isInBlock) {
+              console.log('✅ Signature response sent to Substrate!');
+              console.log('  Transaction hash:', status.asInBlock.toHex());
+              console.log('  Request ID:', u8aToHex(requestId));
 
-      console.log('✅ Signature response sent to Substrate!');
-      console.log('  Transaction hash:', hash.toHex());
-      console.log('  Request ID:', u8aToHex(requestId));
+              if (dispatchError) {
+                if (dispatchError.isModule && this.api) {
+                  const decoded = this.api.registry.findMetaError(dispatchError.asModule);
+                  console.error(`❌ Dispatch error: ${decoded.section}.${decoded.name}`);
+                  reject(new Error(`${decoded.section}.${decoded.name}`));
+                } else {
+                  console.error('❌ Dispatch error:', dispatchError.toString());
+                  reject(new Error(dispatchError.toString()));
+                }
+                return;
+              }
 
-      return hash;
-    } catch (error) {
-      console.error('❌ Failed to send signature response:', error);
-      throw error;
-    }
+              resolve(status.asInBlock);
+            } else if (status.isDropped || status.isInvalid || status.isUsurped) {
+              console.error(`❌ Signature response failed with status: ${status.type}`);
+              reject(new Error(`Transaction ${status.type}`));
+            }
+          }).catch(reject);
+        });
+      } catch (error) {
+        console.error('❌ Failed to send signature response:', error);
+        throw error;
+      }
+    });
   }
 
   async sendRespondBidirectional(
     requestId: Uint8Array,
     serializedOutput: Uint8Array,
-    signature: any
+    signature: any,
+    maxRetries: number = 3
   ) {
     if (!this.api) throw new Error('Not connected to Substrate');
     if (!this.keypair) throw new Error('No keypair available for signing');
 
-    try {
-      const tx = this.api.tx.signet.respondBidirectional(
-        Array.from(requestId),
-        Array.from(serializedOutput),
-        signature
-      );
+    // Queue this transaction to prevent nonce conflicts
+    return this.queueTransaction(async () => {
+      let attempt = 0;
 
-      const hash = await tx.signAndSend(this.keypair);
+      while (attempt <= maxRetries) {
+        try {
+          const tx = this.api!.tx.signet.respondBidirectional(
+            Array.from(requestId),
+            Array.from(serializedOutput),
+            signature
+          );
 
-      console.log('✅ Bidirectional response sent to Substrate!');
-      console.log('  Transaction hash:', hash.toHex());
-      console.log('  Request ID:', u8aToHex(requestId));
+          // Wait for the transaction to be included in a block (not just submitted)
+          return await new Promise((resolve, reject) => {
+            tx.signAndSend(this.keypair!, (result: any) => {
+              const { status, dispatchError, events } = result;
+              if (status.isInBlock) {
+                console.log('✅ Bidirectional response sent to Substrate!');
+                console.log('  Transaction hash:', status.asInBlock.toHex());
+                console.log('  Request ID:', u8aToHex(requestId));
 
-      return hash;
-    } catch (error) {
-      console.error('❌ Failed to send bidirectional response:', error);
-      throw error;
-    }
+                if (dispatchError) {
+                  if (dispatchError.isModule && this.api) {
+                    const decoded = this.api.registry.findMetaError(dispatchError.asModule);
+                    console.error(`❌ Dispatch error: ${decoded.section}.${decoded.name}: ${decoded.docs.join(' ')}`);
+                    reject(new Error(`${decoded.section}.${decoded.name}`));
+                  } else {
+                    console.error('❌ Dispatch error:', dispatchError.toString());
+                    reject(new Error(dispatchError.toString()));
+                  }
+                  return;
+                }
+
+                // Log emitted events
+                events.forEach(({ event }: any) => {
+                  if (event.section === 'signet') {
+                    console.log(`  📨 Event: signet.${event.method}`);
+                  }
+                });
+
+                resolve(status.asInBlock);
+              } else if (status.isDropped || status.isInvalid || status.isUsurped) {
+                console.error(`❌ Transaction failed with status: ${status.type}`);
+                reject(new Error(`Transaction ${status.type}`));
+              }
+            }).catch(reject);
+          });
+        } catch (error: any) {
+          const errorStr = error?.message || String(error);
+          // Retry on stale nonce errors
+          if (errorStr.includes('stale') && attempt < maxRetries) {
+            attempt++;
+            console.log(`⚠️ Stale nonce detected, retrying (attempt ${attempt}/${maxRetries})...`);
+            await new Promise(r => setTimeout(r, 2000)); // Wait 2 seconds before retry
+            continue;
+          }
+          console.error('❌ Failed to send bidirectional response:', error);
+          throw error;
+        }
+      }
+      throw new Error('Max retries exceeded for sendRespondBidirectional');
+    });
   }
 
   async subscribeToEvents(handlers: {
@@ -217,7 +317,6 @@ export class SubstrateMonitor {
                   algo,
                   dest,
                   params,
-                  programId,
                   outputSchema,
                   respondSchema,
                 ] = event.data;
@@ -238,7 +337,6 @@ export class SubstrateMonitor {
                   algo: algo.toString(),
                   dest: dest.toString(),
                   params: params.toString(),
-                  programId: programId.toString(),
                   outputDeserializationSchema: this.stripScalePrefix(
                     new Uint8Array((outputSchema as any).toU8a())
                   ),

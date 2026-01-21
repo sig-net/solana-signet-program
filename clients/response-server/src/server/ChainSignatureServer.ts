@@ -61,6 +61,7 @@ export class ChainSignatureServer {
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
   private substrateMonitor: SubstrateMonitor | null = null;
+  private inProgressTransactions = new Set<string>(); // Track transactions being processed
 
   constructor(config: ServerConfig) {
     try {
@@ -253,17 +254,35 @@ export class ChainSignatureServer {
               break;
 
             case 'success':
-              await this.handleCompletedTransaction(txHash, txInfo, {
-                success: result.success!,
-                output: result.output,
-              });
-              pendingTransactions.delete(txHash);
+              // Skip if already being processed to prevent duplicate handling
+              if (this.inProgressTransactions.has(txHash)) {
+                break;
+              }
+              this.inProgressTransactions.add(txHash);
+              try {
+                await this.handleCompletedTransaction(txHash, txInfo, {
+                  success: result.success!,
+                  output: result.output,
+                });
+                pendingTransactions.delete(txHash);
+              } finally {
+                this.inProgressTransactions.delete(txHash);
+              }
               break;
 
             case 'error':
               // Only for reverted/replaced - send signed error
-              await this.handleFailedTransaction(txHash, txInfo);
-              pendingTransactions.delete(txHash);
+              // Skip if already being processed to prevent duplicate handling
+              if (this.inProgressTransactions.has(txHash)) {
+                break;
+              }
+              this.inProgressTransactions.add(txHash);
+              try {
+                await this.handleFailedTransaction(txHash, txInfo);
+                pendingTransactions.delete(txHash);
+              } finally {
+                this.inProgressTransactions.delete(txHash);
+              }
               break;
 
             case 'fatal_error':
@@ -385,16 +404,27 @@ export class ChainSignatureServer {
         this.config.mpcRootKey
       );
 
-      await this.program.methods
-        .respondBidirectional(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
+      // Check source and send to appropriate chain (same logic as handleCompletedTransaction)
+      if (txInfo.source === 'polkadot' && this.substrateMonitor) {
+        await this.substrateMonitor.sendRespondBidirectional(
+          requestIdBytes,
+          serializedOutput,
           signature
-        )
-        .accounts({
-          responder: this.wallet.publicKey,
-        })
-        .rpc();
+        );
+        console.log('✅ Error response sent to Substrate');
+      } else {
+        await this.program.methods
+          .respondBidirectional(
+            Array.from(requestIdBytes),
+            Buffer.from(serializedOutput),
+            signature
+          )
+          .accounts({
+            responder: this.wallet.publicKey,
+          })
+          .rpc();
+        console.log('✅ Error response sent to Solana');
+      }
     } catch (error) {
       console.error(
         `Error sending error response for ${txHash}: ${
