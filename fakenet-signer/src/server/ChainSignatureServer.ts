@@ -35,6 +35,10 @@ import type { BidirectionalHandlerContext } from '../modules/shared/Bidirectiona
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
+const BACKFILL_INTERVAL_MS = 5_000;
+const BACKFILL_BATCH_SIZE = 5;
+const MAX_PROCESSED_SIGNATURES = 1_000;
+
 export class ChainSignatureServer {
   private connection: Connection;
   private wallet: anchor.Wallet;
@@ -44,6 +48,12 @@ export class ChainSignatureServer {
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
   private monitorIntervalId: NodeJS.Timeout | null = null;
+  private backfillIntervalId: NodeJS.Timeout | null = null;
+  private processedSignatures = new Set<string>();
+  private cpiEventHandlers = new Map<
+    string,
+    (event: CpiEventData, slot: number) => Promise<void>
+  >();
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
 
@@ -92,6 +102,7 @@ export class ChainSignatureServer {
 
     this.startTransactionMonitor();
     this.setupEventListeners();
+    this.startBackfillMonitor();
 
     // Resolve readiness so callers can await server.waitUntilReady()
     this.resolveReady?.();
@@ -345,12 +356,7 @@ export class ChainSignatureServer {
   }
 
   private setupEventListeners() {
-    const cpiEventHandlers = new Map<
-      string,
-      (event: CpiEventData, slot: number) => Promise<void>
-    >();
-
-    cpiEventHandlers.set(
+    this.cpiEventHandlers.set(
       'signBidirectionalEvent',
       async (eventData: CpiEventData, _slot: number) => {
         if (!isSignBidirectionalEvent(eventData)) {
@@ -374,7 +380,7 @@ export class ChainSignatureServer {
       }
     );
 
-    cpiEventHandlers.set(
+    this.cpiEventHandlers.set(
       'signatureRequestedEvent',
       async (eventData: CpiEventData) => {
         if (!isSignatureRequestedEvent(eventData)) {
@@ -398,11 +404,79 @@ export class ChainSignatureServer {
       }
     );
 
-    this.cpiSubscriptionId = CpiEventParser.subscribeToCpiEvents(
-      this.connection,
-      this.program,
-      cpiEventHandlers
+    this.cpiSubscriptionId = this.connection.onLogs(
+      this.program.programId,
+      async (logs, context) => {
+        if (logs.err) return;
+        if (this.processedSignatures.has(logs.signature)) return;
+
+        this.processedSignatures.add(logs.signature);
+        await this.processTransaction(logs.signature, context.slot);
+      },
+      'confirmed'
     );
+  }
+
+  private async processTransaction(
+    signature: string,
+    slot: number
+  ): Promise<void> {
+    const events = await CpiEventParser.parseCpiEvents(
+      this.connection,
+      signature,
+      this.program.programId.toString(),
+      this.program
+    );
+
+    for (const event of events) {
+      const handler = this.cpiEventHandlers.get(event.name);
+      if (handler) {
+        await handler(event.data, slot);
+      }
+    }
+  }
+
+  private startBackfillMonitor() {
+    const backfill = async () => {
+      try {
+        const signatures = await this.connection.getSignaturesForAddress(
+          this.program.programId,
+          { limit: BACKFILL_BATCH_SIZE },
+          'confirmed'
+        );
+
+        for (const sigInfo of signatures) {
+          if (this.processedSignatures.has(sigInfo.signature)) continue;
+          if (sigInfo.err) continue;
+
+          this.processedSignatures.add(sigInfo.signature);
+          await this.processTransaction(sigInfo.signature, sigInfo.slot);
+        }
+
+        this.trimProcessedSignatures();
+      } catch (error) {
+        console.error(
+          `Backfill error: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    };
+
+    void backfill();
+    this.backfillIntervalId = setInterval(backfill, BACKFILL_INTERVAL_MS);
+  }
+
+  private trimProcessedSignatures() {
+    if (this.processedSignatures.size <= MAX_PROCESSED_SIGNATURES) return;
+
+    const excess = this.processedSignatures.size - MAX_PROCESSED_SIGNATURES;
+    let removed = 0;
+    for (const sig of this.processedSignatures) {
+      if (removed >= excess) break;
+      this.processedSignatures.delete(sig);
+      removed++;
+    }
   }
 
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
@@ -443,7 +517,7 @@ export class ChainSignatureServer {
       Array.from(event.payload),
       event.path,
       event.keyVersion,
-      0,
+      event.chainId,
       event.algo,
       event.dest,
       event.params
@@ -506,6 +580,10 @@ export class ChainSignatureServer {
     if (this.monitorIntervalId !== null) {
       clearInterval(this.monitorIntervalId);
       this.monitorIntervalId = null;
+    }
+    if (this.backfillIntervalId !== null) {
+      clearInterval(this.backfillIntervalId);
+      this.backfillIntervalId = null;
     }
     if (this.cpiSubscriptionId !== null) {
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);

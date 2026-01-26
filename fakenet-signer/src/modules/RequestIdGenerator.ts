@@ -60,7 +60,7 @@ export class RequestIdGenerator {
    * @param payload - Message hash or payload to sign
    * @param path - Derivation path
    * @param keyVersion - MPC key version
-   * @param chainId - Chain identifier (number or string)
+   * @param chainId - CAIP-2 chain identifier (e.g., "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
    * @param algo - Signature algorithm
    * @param dest - Destination identifier
    * @param params - Additional parameters
@@ -71,7 +71,7 @@ export class RequestIdGenerator {
     payload: number[],
     path: string,
     keyVersion: number,
-    chainId: number | string,
+    chainId: string,
     algo: string,
     dest: string,
     params: string
@@ -83,7 +83,7 @@ export class RequestIdGenerator {
         'bytes',
         'string',
         'uint32',
-        'uint256',
+        'string',
         'string',
         'string',
         'string',
