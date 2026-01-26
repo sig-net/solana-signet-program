@@ -46,7 +46,26 @@ export class EthereumTransactionProcessor {
       throw new Error('Invalid nonce field in RLP-decoded transaction');
     }
     console.log(' 📝 Transaction nonce:', nonce);
-    const vValue = isEIP1559 ? signature.v - 27 : signature.v;
+    const yParity = signature.yParity ?? signature.v - 27;
+    let vValue: number | bigint;
+    if (isEIP1559) {
+      vValue = yParity;
+    } else {
+      if (decoded.length >= 7) {
+        const chainIdField = decoded[6];
+        let chainId = 0n;
+        if (chainIdField && chainIdField !== '0x') {
+          try {
+            chainId = BigInt(chainIdField);
+          } catch {
+            chainId = 0n;
+          }
+        }
+        vValue = 35n + 2n * chainId + BigInt(yParity);
+      } else {
+        vValue = signature.v;
+      }
+    }
 
     const signedFields = [
       ...decoded,
