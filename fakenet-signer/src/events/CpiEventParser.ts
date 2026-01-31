@@ -42,7 +42,9 @@ export class CpiEventParser {
       });
       console.log(`  ✓ CpiEventParser: transaction fetched (has meta: ${!!tx?.meta})`);
 
-      if (!tx || !tx.meta) return events;
+      if (!tx || !tx.meta) {
+        throw new Error(`Transaction ${signature} has no metadata - will retry`);
+      }
 
       const innerInstructions = tx.meta.innerInstructions || [];
 
@@ -64,12 +66,11 @@ export class CpiEventParser {
         }
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      if (errorMsg.includes('429') || errorMsg.includes('rate limit')) {
-        console.warn(`⚠️ CpiEventParser: 429 rate limited for ${signature}, will retry via backfill`);
-      } else {
-        console.error('Error parsing transaction for CPI events:', error);
-      }
+      // Always re-throw so caller can retry. Duplicates are harmless, missing txs are not.
+      console.warn(`⚠️ CpiEventParser: ${signature} needs retry: ${
+        error instanceof Error ? error.message : String(error)
+      }`);
+      throw error;
     }
 
     return events;

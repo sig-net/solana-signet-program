@@ -227,17 +227,31 @@ export class ChainSignatureServer {
               break;
 
             case 'success':
-              await this.handleCompletedTransaction(txHash, txInfo, {
-                success: result.success,
-                output: result.output,
-              });
-              pendingTransactions.delete(txHash);
+              try {
+                await this.handleCompletedTransaction(txHash, txInfo, {
+                  success: result.success,
+                  output: result.output,
+                });
+                pendingTransactions.delete(txHash);
+              } catch (handlerError) {
+                // Never delete on error - always retry. Duplicates are harmless, missing txs are not.
+                console.warn(`⚠️ Error in handleCompletedTransaction for ${txHash}, will retry: ${
+                  handlerError instanceof Error ? handlerError.message : String(handlerError)
+                }`);
+              }
               break;
 
             case 'error':
               // Only for reverted/replaced - send signed error
-              await this.handleFailedTransaction(txHash, txInfo);
-              pendingTransactions.delete(txHash);
+              try {
+                await this.handleFailedTransaction(txHash, txInfo);
+                pendingTransactions.delete(txHash);
+              } catch (handlerError) {
+                // Never delete on error - always retry. Duplicates are harmless, missing txs are not.
+                console.warn(`⚠️ Error in handleFailedTransaction for ${txHash}, will retry: ${
+                  handlerError instanceof Error ? handlerError.message : String(handlerError)
+                }`);
+              }
               break;
 
             case 'fatal_error':
@@ -249,24 +263,12 @@ export class ChainSignatureServer {
               break;
           }
         } catch (error) {
-          if (
-            error instanceof Error &&
-            (error.message.includes('Modulus not supported') ||
-              error.message.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
-              error.message.includes('Failed to load keypair'))
-          ) {
-            console.error(
-              `Infrastructure error for ${txHash}: ${error.message}`
-            );
-            pendingTransactions.delete(txHash);
-          } else {
-            console.error(
-              `Unexpected error polling ${txHash}: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-            txInfo.checkCount++;
-          }
+          // Never delete on error - always retry. Duplicates are harmless, missing txs are not.
+          console.warn(
+            `⚠️ Error polling ${txHash}, will retry: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
         }
       }
     }, CONFIG.POLL_INTERVAL_MS);
@@ -301,33 +303,18 @@ export class ChainSignatureServer {
     );
     console.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
-    try {
-      console.log(`🔗 Solana RPC: respondBidirectional() for ${txHash} (THIS CAN HANG)...`);
-      await this.program.methods
-        .respondBidirectional(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
-          signature
-        )
-        .accounts({
-          responder: this.wallet.publicKey,
-        })
-        .rpc();
-      console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
-
-      pendingTransactions.delete(txHash);
-    } catch (error) {
-      console.error(
-        `Error sending response for ${txHash}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-      console.error(
-        '🔍 Borsh serialization context',
-        txInfo.callbackSerializationSchema,
-        result.output
-      );
-    }
+    console.log(`🔗 Solana RPC: respondBidirectional() for ${txHash} (THIS CAN HANG)...`);
+    await this.program.methods
+      .respondBidirectional(
+        Array.from(requestIdBytes),
+        Buffer.from(serializedOutput),
+        signature
+      )
+      .accounts({
+        responder: this.wallet.publicKey,
+      })
+      .rpc();
+    console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
   }
 
   private async handleFailedTransaction(
@@ -336,48 +323,40 @@ export class ChainSignatureServer {
   ) {
     console.warn(`❌ Transaction failed: ${txHash}`);
 
-    try {
-      const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
-      const errorSchema = { struct: { error: 'bool' } };
-      const borshData = borsh.serialize(errorSchema, { error: true });
-      const errorData = Buffer.concat([MAGIC_ERROR_PREFIX, borshData]);
+    const errorSchema = { struct: { error: 'bool' } };
+    const borshData = borsh.serialize(errorSchema, { error: true });
+    const errorData = Buffer.concat([MAGIC_ERROR_PREFIX, borshData]);
 
-      const serializedOutput = new Uint8Array(errorData);
+    const serializedOutput = new Uint8Array(errorData);
 
-      const requestId = txInfo.requestId;
-      if (!requestId) {
-        throw new Error(`Missing request ID for tx ${txHash}`);
-      }
-      const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-      console.log(`🔗 CryptoUtils: signBidirectionalResponse (error response)...`);
-      const signature = await CryptoUtils.signBidirectionalResponse(
-        requestIdBytes,
-        serializedOutput,
-        this.config.mpcRootKey,
-        txInfo.sender
-      );
-      console.log(`✓ CryptoUtils: signBidirectionalResponse done`);
-
-      console.log(`🔗 Solana RPC: respondBidirectional() error for ${txHash} (THIS CAN HANG)...`);
-      await this.program.methods
-        .respondBidirectional(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
-          signature
-        )
-        .accounts({
-          responder: this.wallet.publicKey,
-        })
-        .rpc();
-      console.log(`✓ Solana RPC: respondBidirectional() error done for ${txHash}`);
-    } catch (error) {
-      console.error(
-        `Error sending error response for ${txHash}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+    const requestId = txInfo.requestId;
+    if (!requestId) {
+      throw new Error(`Missing request ID for tx ${txHash}`);
     }
+    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
+    console.log(`🔗 CryptoUtils: signBidirectionalResponse (error response)...`);
+    const signature = await CryptoUtils.signBidirectionalResponse(
+      requestIdBytes,
+      serializedOutput,
+      this.config.mpcRootKey,
+      txInfo.sender
+    );
+    console.log(`✓ CryptoUtils: signBidirectionalResponse done`);
+
+    console.log(`🔗 Solana RPC: respondBidirectional() error for ${txHash} (THIS CAN HANG)...`);
+    await this.program.methods
+      .respondBidirectional(
+        Array.from(requestIdBytes),
+        Buffer.from(serializedOutput),
+        signature
+      )
+      .accounts({
+        responder: this.wallet.publicKey,
+      })
+      .rpc();
+    console.log(`✓ Solana RPC: respondBidirectional() error done for ${txHash}`);
   }
 
   private setupEventListeners() {
@@ -401,6 +380,8 @@ export class ChainSignatureServer {
               error instanceof Error ? error.message : String(error)
             }`
           );
+          // Always re-throw so caller can retry. Duplicates are harmless, missing txs are not.
+          throw error;
         }
       }
     );
@@ -425,6 +406,8 @@ export class ChainSignatureServer {
               error instanceof Error ? error.message : String(error)
             }`
           );
+          // Always re-throw so caller can retry. Duplicates are harmless, missing txs are not.
+          throw error;
         }
       }
     );
@@ -449,14 +432,11 @@ export class ChainSignatureServer {
         try {
           await this.processTransaction(logs.signature, context.slot);
         } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          if (errorMsg.includes('429') || errorMsg.includes('rate limit')) {
-            console.warn(`⚠️ WebSocket: 429 rate limited processing ${logs.signature}, will retry via backfill`);
-            // Remove from processed so backfill can retry
-            this.processedSignatures.delete(logs.signature);
-          } else {
-            console.error(`❌ WebSocket: error processing ${logs.signature}: ${errorMsg}`);
-          }
+          // Always remove on error so backfill can retry. Duplicates are harmless, missing txs are not.
+          console.warn(`⚠️ WebSocket: ${logs.signature} needs retry: ${
+            error instanceof Error ? error.message : String(error)
+          }`);
+          this.processedSignatures.delete(logs.signature);
         }
       },
       'confirmed'
@@ -503,7 +483,11 @@ export class ChainSignatureServer {
         );
         console.log(`  ✓ Solana RPC: getSignaturesForAddress done`);
 
-        console.log(`  📋 Backfill: found ${signatures.length} signature(s)`);
+        console.log(`  📋 Backfill: found ${signatures.length} signature(s)`, signatures.map(s => ({
+          sig: s.signature,
+          slot: s.slot,
+          status: this.processedSignatures.has(s.signature) ? 'processed' : 'pending'
+        })));
 
         let newCount = 0;
         for (const sigInfo of signatures) {
@@ -518,14 +502,11 @@ export class ChainSignatureServer {
           try {
             await this.processTransaction(sigInfo.signature, sigInfo.slot);
           } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            if (errorMsg.includes('429') || errorMsg.includes('rate limit')) {
-              console.warn(`⚠️ Backfill: 429 rate limited processing ${sigInfo.signature}, will retry next cycle`);
-              // Remove from processed so next backfill can retry
-              this.processedSignatures.delete(sigInfo.signature);
-            } else {
-              console.error(`❌ Backfill: error processing ${sigInfo.signature}: ${errorMsg}`);
-            }
+            // Always remove on error so next backfill can retry. Duplicates are harmless, missing txs are not.
+            console.warn(`⚠️ Backfill: ${sigInfo.signature} needs retry: ${
+              error instanceof Error ? error.message : String(error)
+            }`);
+            this.processedSignatures.delete(sigInfo.signature);
           }
         }
 
