@@ -1,4 +1,5 @@
-import { RequestIdGenerator } from '../RequestIdGenerator';
+import { contracts } from 'signet.js';
+const { getRequestIdBidirectional } = contracts.solana;
 import { EthereumTransactionProcessor } from './EthereumTransactionProcessor';
 import type { SignBidirectionalEvent } from '../../types';
 import type { BidirectionalHandlerContext } from '../shared/BidirectionalContext';
@@ -10,19 +11,20 @@ export async function handleEthereumBidirectional(
 ): Promise<void> {
   const { config, program, wallet, pendingTransactions } = context;
 
-  const requestId = RequestIdGenerator.generateSignBidirectionalRequestId(
-    event.sender.toString(),
-    Array.from(event.serializedTransaction),
-    event.caip2Id,
-    event.keyVersion,
-    event.path,
-    event.algo,
-    event.dest,
-    event.params
-  );
+  const requestId = getRequestIdBidirectional({
+    sender: event.sender.toString(),
+    payload: Array.from(event.serializedTransaction),
+    caip2Id: event.caip2Id,
+    keyVersion: event.keyVersion,
+    path: event.path,
+    algo: event.algo,
+    dest: event.dest,
+    params: event.params,
+  });
 
   console.log(`🔑 Request ID (eip155): ${requestId}`);
 
+  console.log(`🔗 EthereumTxProcessor: processTransactionForSigning (THIS CAN HANG)...`);
   const result =
     await EthereumTransactionProcessor.processTransactionForSigning(
       new Uint8Array(event.serializedTransaction),
@@ -30,16 +32,19 @@ export async function handleEthereumBidirectional(
       event.caip2Id,
       config
     );
+  console.log(`✓ EthereumTxProcessor: processTransactionForSigning done`);
 
   const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
   const requestIds = result.signature.map(() => Array.from(requestIdBytes));
 
+  console.log(`🔗 Solana RPC: respond() for eip155 (THIS CAN HANG)...`);
   const tx = await program.methods
     .respond(requestIds, result.signature)
     .accounts({
       responder: wallet.publicKey,
     })
     .rpc();
+  console.log(`✓ Solana RPC: respond() done`);
 
   console.log(`✅ Signatures sent to contract (tx=${tx})`);
 

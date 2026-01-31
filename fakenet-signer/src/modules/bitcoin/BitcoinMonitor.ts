@@ -43,17 +43,22 @@ export class BitcoinMonitor {
     prevouts: PrevoutRef[],
     config: ServerConfig
   ): Promise<TransactionStatus> {
+    console.log(`⏳ BitcoinMonitor: checking tx ${txid} (${config.bitcoinNetwork})...`);
     const adapter = await this.getAdapter(config);
     const requiredConfs = 1;
 
     try {
+      console.log(`  🔗 BitcoinMonitor: calling adapter.getTransaction...`);
       const tx = await adapter.getTransaction(txid);
+      console.log(`  ✓ BitcoinMonitor: tx fetched (confirmations=${tx.confirmations})`);
 
       if (tx.confirmations < requiredConfs) {
+        console.log(`  🔗 BitcoinMonitor: checking for conflicted prevouts...`);
         const conflicted = await this.getConflictedPrevout(
           prevouts,
           adapter
         );
+        console.log(`  ✓ BitcoinMonitor: conflict check done (conflicted=${!!conflicted})`);
         if (conflicted) {
           console.error(
             `❌ ${config.bitcoinNetwork} tx ${txid}: input ${conflicted.txid}:${conflicted.vout} was spent elsewhere`
@@ -85,10 +90,12 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
+        console.log(`  🔗 BitcoinMonitor: tx not found, checking for conflicts...`);
         const conflicted = await this.getConflictedPrevout(
           prevouts,
           adapter
         );
+        console.log(`  ✓ BitcoinMonitor: conflict check done (conflicted=${!!conflicted})`);
         if (conflicted) {
           console.error(
             `❌ ${config.bitcoinNetwork} tx ${txid}: input ${conflicted.txid}:${conflicted.vout} was spent elsewhere`

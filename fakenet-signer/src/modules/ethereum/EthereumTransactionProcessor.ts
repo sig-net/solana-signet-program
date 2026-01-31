@@ -114,23 +114,34 @@ export class EthereumTransactionProcessor {
 
       try {
         if (!this.fundingProvider) {
+          console.log(`  🔗 EthereumTxProcessor: initializing funding provider...`);
           const url = `https://sepolia.infura.io/v3/${config.infuraApiKey}`;
           this.fundingProvider = new ethers.JsonRpcProvider(url);
           await this.fundingProvider.getNetwork();
+          console.log(`  ✓ EthereumTxProcessor: funding provider ready`);
         }
 
+        console.log(`  🔗 EthereumTxProcessor: checking balance for ${wallet.address}...`);
         const balance = await this.fundingProvider.getBalance(wallet.address);
+        console.log(`  ✓ EthereumTxProcessor: balance=${ethers.formatEther(balance)} ETH, needed=${ethers.formatEther(gasNeeded)} ETH`);
         if (balance < gasNeeded) {
           const fundingWallet = new ethers.Wallet(
             config.mpcRootKey,
             this.fundingProvider
           );
+          const fundingAmount = gasNeeded - balance;
+          console.log(`  💸 EthereumTxProcessor: funding ${ethers.formatEther(fundingAmount)} ETH...`);
+          console.log(`  ⏳ EthereumTxProcessor: sending funding tx and waiting for confirmation (THIS CAN HANG)...`);
           await fundingWallet
             .sendTransaction({
               to: wallet.address,
-              value: gasNeeded - balance,
+              value: fundingAmount,
             })
-            .then((tx) => tx.wait());
+            .then((tx) => {
+              console.log(`  📤 EthereumTxProcessor: funding tx sent: ${tx.hash}`);
+              return tx.wait();
+            });
+          console.log(`  ✅ EthereumTxProcessor: funding confirmed`);
         }
       } catch (error) {
         console.error('Funding provider error:', error);

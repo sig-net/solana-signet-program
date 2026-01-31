@@ -30,10 +30,12 @@ export class EthereumMonitor {
       return { status: 'fatal_error', reason: 'unsupported_chain' };
     }
 
-    console.log(`⏳ Checking transaction ${txHash}...`);
+    console.log(`⏳ EthereumMonitor: checking tx ${txHash}...`);
 
     try {
+      console.log(`  🔗 EthereumMonitor: calling getTransactionReceipt...`);
       const receipt = await provider.getTransactionReceipt(txHash);
+      console.log(`  ✓ EthereumMonitor: getTransactionReceipt returned (found: ${!!receipt})`);
 
       if (receipt) {
         console.log(`✅ Transaction found! Confirmation complete.`);
@@ -48,12 +50,15 @@ export class EthereumMonitor {
           return { status: 'error', reason: 'reverted' };
         }
 
+        console.log(`  🔗 EthereumMonitor: fetching full tx details...`);
         const tx = await provider.getTransaction(txHash);
+        console.log(`  ✓ EthereumMonitor: tx details fetched`);
         if (!tx) {
           return { status: 'pending' };
         }
 
         try {
+          console.log(`  🔗 EthereumMonitor: extracting transaction output...`);
           const output = await this.extractTransactionOutput(
             tx,
             receipt,
@@ -72,9 +77,12 @@ export class EthereumMonitor {
         }
       } else {
         // No receipt - check if replaced
+        console.log(`  🔗 EthereumMonitor: no receipt, checking nonce for ${fromAddress}...`);
         const currentNonce = await provider.getTransactionCount(fromAddress);
+        console.log(`  ✓ EthereumMonitor: currentNonce=${currentNonce}, expectedNonce=${nonce}`);
         if (currentNonce > nonce) {
           // Check if it was our transaction
+          console.log(`  🔗 EthereumMonitor: nonce advanced, re-checking receipt...`);
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
             return { status: 'error', reason: 'replaced' };
@@ -82,12 +90,14 @@ export class EthereumMonitor {
         }
 
         // Check if transaction exists
+        console.log(`  🔗 EthereumMonitor: checking if tx exists in mempool...`);
         const tx = await provider.getTransaction(txHash);
+        console.log(`  ✓ EthereumMonitor: tx in mempool: ${!!tx}`);
         if (!tx) {
           return { status: 'pending' };
         }
 
-        console.log(`✅ Transaction found! Waiting for confirmation...`);
+        console.log(`✅ EthereumMonitor: tx found, waiting for confirmation...`);
 
         // Already checked receipt above and it was null, so return pending
         return { status: 'pending' };

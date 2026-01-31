@@ -1,4 +1,5 @@
-import { RequestIdGenerator } from '../RequestIdGenerator';
+import { contracts } from 'signet.js';
+const { getRequestIdBidirectional } = contracts.solana;
 import { CryptoUtils } from '../CryptoUtils';
 import {
   BitcoinTransactionProcessor,
@@ -86,17 +87,16 @@ async function handleBitcoinSigningPlan(
     vout,
   }));
 
-  const aggregateRequestId =
-    RequestIdGenerator.generateSignBidirectionalRequestId(
-      event.sender.toString(),
-      Array.from(txidBytes),
-      event.caip2Id,
-      event.keyVersion,
-      event.path,
-      event.algo,
-      event.dest,
-      event.params
-    );
+  const aggregateRequestId = getRequestIdBidirectional({
+    sender: event.sender.toString(),
+    payload: Array.from(txidBytes),
+    caip2Id: event.caip2Id,
+    keyVersion: event.keyVersion,
+    path: event.path,
+    algo: event.algo,
+    dest: event.dest,
+    params: event.params,
+  });
 
   pendingTransactions.set(plan.explorerTxid, {
     txHash: plan.explorerTxid,
@@ -131,33 +131,36 @@ async function handleBitcoinSigningPlan(
     inputIndexBytes.writeUInt32LE(inputPlan.inputIndex, 0);
     const txDataForInput = Buffer.concat([txidBytes, inputIndexBytes]);
 
-    const perInputRequestId =
-      RequestIdGenerator.generateSignBidirectionalRequestId(
-        event.sender.toString(),
-        Array.from(txDataForInput),
-        event.caip2Id,
-        event.keyVersion,
-        event.path,
-        event.algo,
-        event.dest,
-        event.params
-      );
+    const perInputRequestId = getRequestIdBidirectional({
+      sender: event.sender.toString(),
+      payload: Array.from(txDataForInput),
+      caip2Id: event.caip2Id,
+      keyVersion: event.keyVersion,
+      path: event.path,
+      algo: event.algo,
+      dest: event.dest,
+      params: event.params,
+    });
 
     const perInputRequestIdBytes = Array.from(
       Buffer.from(perInputRequestId.slice(2), 'hex')
     );
 
+    console.log(`  🔗 CryptoUtils: signMessage for input ${inputPlan.inputIndex}...`);
     const signature = await CryptoUtils.signMessage(
       Array.from(inputPlan.sighash),
       derivedPrivateKey
     );
+    console.log(`  ✓ CryptoUtils: signMessage done for input ${inputPlan.inputIndex}`);
 
+    console.log(`  🔗 Solana RPC: respond() for input ${inputPlan.inputIndex} (THIS CAN HANG)...`);
     const tx = await program.methods
       .respond([perInputRequestIdBytes], [signature])
       .accounts({
         responder: wallet.publicKey,
       })
       .rpc();
+    console.log(`  ✓ Solana RPC: respond() done for input ${inputPlan.inputIndex}`);
 
     console.log(
       `✅ Signed input ${inputPlan.inputIndex} for ${plan.explorerTxid} (tx: ${tx})`

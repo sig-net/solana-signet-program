@@ -49,14 +49,19 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
   }
 
   async getTransaction(txid: string): Promise<BitcoinTransactionInfo> {
+    console.log(`    🔗 Mempool.space: fetching tx ${txid}...`);
     const response = await fetch(`${this.baseUrl}/tx/${txid}`);
 
     if (!response.ok) {
+      console.log(`    ❌ Mempool.space: tx not found (${response.status})`);
       throw new Error(`Transaction ${txid} not found`);
     }
 
     const tx = (await response.json()) as MempoolTransaction;
+    console.log(`    ✓ Mempool.space: tx fetched (confirmed=${tx.status.confirmed})`);
+    console.log(`    🔗 Mempool.space: fetching current block height...`);
     const currentHeight = await this.getCurrentBlockHeight();
+    console.log(`    ✓ Mempool.space: block height=${currentHeight}`);
 
     const confirmations =
       tx.status.confirmed && tx.status.block_height
@@ -122,11 +127,13 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
   }
 
   async isPrevoutSpent(txid: string, vout: number): Promise<boolean> {
+    console.log(`    🔗 Mempool.space: checking outspends for ${txid}:${vout}...`);
     const response = await fetch(`${this.baseUrl}/tx/${txid}/outspends`);
 
     if (!response.ok) {
       if (response.status === 404) {
         // If the parent tx is unknown, treat as not spent yet
+        console.log(`    ✓ Mempool.space: tx not found, treating as unspent`);
         return false;
       }
       throw new Error(
@@ -144,6 +151,8 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
     >;
 
     const info = outspends[vout];
-    return info !== null && info !== undefined && info.spent === true;
+    const spent = info !== null && info !== undefined && info.spent === true;
+    console.log(`    ✓ Mempool.space: outspends checked (spent=${spent})`);
+    return spent;
   }
 }

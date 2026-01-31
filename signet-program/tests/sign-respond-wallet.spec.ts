@@ -16,6 +16,7 @@ describe('Sign/Respond wallet tests', () => {
     const response = await waitForSignatureResponse(
       signArgs,
       signetSolContract,
+      program.programId,
       txSignature
     );
 

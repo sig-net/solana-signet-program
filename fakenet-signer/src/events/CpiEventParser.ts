@@ -35,10 +35,12 @@ export class CpiEventParser {
     try {
       // Get the transaction with JsonParsed encoding to access inner instructions
       // CPI events appear as inner instructions when emit_cpi! is used
+      console.log(`  🔗 CpiEventParser: fetching parsed transaction ${signature}...`);
       const tx = await connection.getParsedTransaction(signature, {
         commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
       });
+      console.log(`  ✓ CpiEventParser: transaction fetched (has meta: ${!!tx?.meta})`);
 
       if (!tx || !tx.meta) return events;
 
@@ -62,7 +64,12 @@ export class CpiEventParser {
         }
       }
     } catch (error) {
-      console.error('Error parsing transaction for CPI events:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (errorMsg.includes('429') || errorMsg.includes('rate limit')) {
+        console.warn(`⚠️ CpiEventParser: 429 rate limited for ${signature}, will retry via backfill`);
+      } else {
+        console.error('Error parsing transaction for CPI events:', error);
+      }
     }
 
     return events;
