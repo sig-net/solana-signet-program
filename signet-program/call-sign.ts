@@ -59,7 +59,7 @@ async function main() {
   console.log('   Lamports:', programAccount.lamports);
 
   // Hardcoded sign arguments
-  const payload = Array.from({ length: 32 }, (_, i) => (i + 1) % 256);
+  const payload = Array.from({ length: 32 }, () => Math.floor(Math.random() * 256));
   const keyVersion = 0;
   const signPath = 'test-path';
   const algo = 'secp256k1';
