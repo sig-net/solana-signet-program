@@ -9,7 +9,7 @@ export async function handleEthereumBidirectional(
   context: BidirectionalHandlerContext,
   derivedPrivateKey: string
 ): Promise<void> {
-  const { config, program, wallet, pendingTransactions } = context;
+  const { program, wallet, pendingTransactions } = context;
 
   const requestId = getRequestIdBidirectional({
     sender: event.sender.toString(),
@@ -22,31 +22,23 @@ export async function handleEthereumBidirectional(
     params: event.params,
   });
 
-  console.log(`🔑 Request ID (eip155): ${requestId}`);
-
-  console.log(`🔗 EthereumTxProcessor: processTransactionForSigning (THIS CAN HANG)...`);
   const result =
     await EthereumTransactionProcessor.processTransactionForSigning(
       new Uint8Array(event.serializedTransaction),
-      derivedPrivateKey,
-      event.caip2Id,
-      config
+      derivedPrivateKey
     );
-  console.log(`✓ EthereumTxProcessor: processTransactionForSigning done`);
 
   const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
   const requestIds = result.signature.map(() => Array.from(requestIdBytes));
 
-  console.log(`🔗 Solana RPC: respond() for eip155 (THIS CAN HANG)...`);
   const tx = await program.methods
     .respond(requestIds, result.signature)
     .accounts({
       responder: wallet.publicKey,
     })
     .rpc();
-  console.log(`✓ Solana RPC: respond() done`);
 
-  console.log(`✅ Signatures sent to contract (tx=${tx})`);
+  console.log(`✅ eip155: signed tx=${result.signedTxHash} from=${result.fromAddress} (solana tx=${tx})`);
 
   pendingTransactions.set(result.signedTxHash, {
     txHash: result.signedTxHash,
@@ -62,5 +54,5 @@ export async function handleEthereumBidirectional(
     sender: event.sender.toString(),
   });
 
-  console.log(`🔍 Monitoring transaction ${result.signedTxHash} (eip155)`);
+  console.log(`🔍 Monitoring eip155 tx ${result.signedTxHash}`);
 }

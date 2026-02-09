@@ -21,9 +21,8 @@ export async function handleBitcoinBidirectional(
 ): Promise<void> {
   const { config } = context;
 
-  console.log(`🔍 Bitcoin transaction detected on ${config.bitcoinNetwork}`);
   console.log(
-    `📦 PSBT received (${event.serializedTransaction.length} bytes, ${event.caip2Id})`
+    `📦 bip122: PSBT received (${event.serializedTransaction.length} bytes, ${config.bitcoinNetwork})`
   );
 
   const bitcoinPlan = BitcoinTransactionProcessor.createSigningPlan(
@@ -32,7 +31,7 @@ export async function handleBitcoinBidirectional(
   );
 
   console.log(
-    `✅ PSBT parsed successfully → tx ${bitcoinPlan.explorerTxid} (${bitcoinPlan.inputs.length} input(s))`
+    `✅ bip122: PSBT parsed → txid=${bitcoinPlan.explorerTxid} (${bitcoinPlan.inputs.length} input(s))`
   );
 
   await handleBitcoinSigningPlan(
@@ -98,19 +97,26 @@ async function handleBitcoinSigningPlan(
     params: event.params,
   });
 
-  pendingTransactions.set(plan.explorerTxid, {
-    txHash: plan.explorerTxid,
-    requestId: aggregateRequestId,
-    caip2Id: event.caip2Id,
-    explorerDeserializationSchema: event.outputDeserializationSchema,
-    callbackSerializationSchema: event.respondSerializationSchema,
-    fromAddress: 'bitcoin',
-    nonce: 0,
-    checkCount: 0,
-    namespace: 'bip122',
-    prevouts,
-    sender: event.sender.toString(),
-  });
+  // On retry, preserve the existing entry (keeps submittedInputs state)
+  const existing = pendingTransactions.get(plan.explorerTxid);
+  const submittedInputs = existing?.submittedInputs ?? new Set<number>();
+
+  if (!existing) {
+    pendingTransactions.set(plan.explorerTxid, {
+      txHash: plan.explorerTxid,
+      requestId: aggregateRequestId,
+      caip2Id: event.caip2Id,
+      explorerDeserializationSchema: event.outputDeserializationSchema,
+      callbackSerializationSchema: event.respondSerializationSchema,
+      fromAddress: 'bitcoin',
+      nonce: 0,
+      checkCount: 0,
+      namespace: 'bip122',
+      prevouts,
+      sender: event.sender.toString(),
+      submittedInputs,
+    });
+  }
 
   // Simulate MPC nodes returning signatures out of order so clients rely on
   // requestId when matching signatures. Shuffle deterministically per run using
@@ -127,6 +133,13 @@ async function handleBitcoinSigningPlan(
   }
 
   for (const inputPlan of signingQueue) {
+    if (submittedInputs.has(inputPlan.inputIndex)) {
+      console.log(
+        `⏭️ bip122: skipping input ${inputPlan.inputIndex}/${plan.inputs.length} for ${plan.explorerTxid} (already submitted)`
+      );
+      continue;
+    }
+
     const inputIndexBytes = Buffer.alloc(4);
     inputIndexBytes.writeUInt32LE(inputPlan.inputIndex, 0);
     const txDataForInput = Buffer.concat([txidBytes, inputIndexBytes]);
@@ -146,26 +159,24 @@ async function handleBitcoinSigningPlan(
       Buffer.from(perInputRequestId.slice(2), 'hex')
     );
 
-    console.log(`  🔗 CryptoUtils: signMessage for input ${inputPlan.inputIndex}...`);
     const signature = await CryptoUtils.signMessage(
       Array.from(inputPlan.sighash),
       derivedPrivateKey
     );
-    console.log(`  ✓ CryptoUtils: signMessage done for input ${inputPlan.inputIndex}`);
 
-    console.log(`  🔗 Solana RPC: respond() for input ${inputPlan.inputIndex} (THIS CAN HANG)...`);
     const tx = await program.methods
       .respond([perInputRequestIdBytes], [signature])
       .accounts({
         responder: wallet.publicKey,
       })
       .rpc();
-    console.log(`  ✓ Solana RPC: respond() done for input ${inputPlan.inputIndex}`);
+
+    submittedInputs.add(inputPlan.inputIndex);
 
     console.log(
-      `✅ Signed input ${inputPlan.inputIndex} for ${plan.explorerTxid} (tx: ${tx})`
+      `✅ bip122: signed input ${inputPlan.inputIndex}/${plan.inputs.length} for ${plan.explorerTxid} (solana tx=${tx})`
     );
   }
 
-  console.log(`🔍 Monitoring ${config.bitcoinNetwork} tx ${plan.explorerTxid}`);
+  console.log(`🔍 Monitoring bip122 tx ${plan.explorerTxid} (${config.bitcoinNetwork})`);
 }

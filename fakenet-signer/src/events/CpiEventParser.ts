@@ -35,12 +35,10 @@ export class CpiEventParser {
     try {
       // Get the transaction with JsonParsed encoding to access inner instructions
       // CPI events appear as inner instructions when emit_cpi! is used
-      console.log(`  🔗 CpiEventParser: fetching parsed transaction ${signature}...`);
       const tx = await connection.getParsedTransaction(signature, {
         commitment: 'confirmed',
         maxSupportedTransactionVersion: 0,
       });
-      console.log(`  ✓ CpiEventParser: transaction fetched (has meta: ${!!tx?.meta})`);
 
       if (!tx || !tx.meta) {
         throw new Error(`Transaction ${signature} has no metadata - will retry`);

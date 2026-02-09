@@ -43,39 +43,25 @@ export class BitcoinMonitor {
     prevouts: PrevoutRef[],
     config: ServerConfig
   ): Promise<TransactionStatus> {
-    console.log(`⏳ BitcoinMonitor: checking tx ${txid} (${config.bitcoinNetwork})...`);
     const adapter = await this.getAdapter(config);
     const requiredConfs = 1;
 
     try {
-      console.log(`  🔗 BitcoinMonitor: calling adapter.getTransaction...`);
       const tx = await adapter.getTransaction(txid);
-      console.log(`  ✓ BitcoinMonitor: tx fetched (confirmations=${tx.confirmations})`);
 
       if (tx.confirmations < requiredConfs) {
-        console.log(`  🔗 BitcoinMonitor: checking for conflicted prevouts...`);
-        const conflicted = await this.getConflictedPrevout(
-          prevouts,
-          adapter
-        );
-        console.log(`  ✓ BitcoinMonitor: conflict check done (conflicted=${!!conflicted})`);
+        const conflicted = await this.getConflictedPrevout(prevouts, adapter);
         if (conflicted) {
-          console.error(
-            `❌ ${config.bitcoinNetwork} tx ${txid}: input ${conflicted.txid}:${conflicted.vout} was spent elsewhere`
+          console.log(
+            `❌ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} input ${conflicted.txid}:${conflicted.vout} spent elsewhere`
           );
           return { status: 'error', reason: 'inputs_spent' };
         }
-
-        const hint = `${tx.confirmations}/${requiredConfs} confirmations`;
-
-        console.log(
-          `⏳ ${config.bitcoinNetwork} tx ${txid}: ${hint}`
-        );
         return { status: 'pending' };
       }
 
       console.log(
-        `✅ ${config.bitcoinNetwork} tx ${txid}: ${tx.confirmations} confirmation(s)`
+        `✅ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} confirmed (${tx.confirmations} conf)`
       );
 
       const output: TransactionOutputData = {
@@ -90,25 +76,18 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
-        console.log(`  🔗 BitcoinMonitor: tx not found, checking for conflicts...`);
-        const conflicted = await this.getConflictedPrevout(
-          prevouts,
-          adapter
-        );
-        console.log(`  ✓ BitcoinMonitor: conflict check done (conflicted=${!!conflicted})`);
+        const conflicted = await this.getConflictedPrevout(prevouts, adapter);
         if (conflicted) {
-          console.error(
-            `❌ ${config.bitcoinNetwork} tx ${txid}: input ${conflicted.txid}:${conflicted.vout} was spent elsewhere`
+          console.log(
+            `❌ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} input ${conflicted.txid}:${conflicted.vout} spent elsewhere`
           );
           return { status: 'error', reason: 'inputs_spent' };
         }
-
-        console.log(`⏳ ${config.bitcoinNetwork} tx ${txid}: not found`);
         return { status: 'pending' };
       }
 
       console.error(
-        `❌ Error while monitoring ${txid}: ${
+        `❌ BitcoinMonitor: error monitoring ${txid}: ${
           error instanceof Error ? error.message : String(error)
         }`
       );

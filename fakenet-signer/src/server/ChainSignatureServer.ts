@@ -37,8 +37,15 @@ import type { BidirectionalHandlerContext } from '../modules/shared/Bidirectiona
 const pendingTransactions = new Map<string, PendingTransaction>();
 
 const BACKFILL_INTERVAL_MS = 5_000;
-const BACKFILL_BATCH_SIZE = 5;
+const DEFAULT_BACKFILL_BATCH_SIZE = 10;
+const DEFAULT_BACKFILL_MAX_BATCH_SIZE = 100;
 const MAX_PROCESSED_SIGNATURES = 1_000;
+const MAX_SIGNATURE_RETRIES = 3;
+const WS_STALE_THRESHOLD_MS = 15_000;
+const WS_HEALTH_CHECK_INTERVAL_MS = 10_000;
+const WS_RECONNECT_COOLDOWN_MS = 30_000;
+// When WS is healthy, only run backfill every Nth cycle as a safety net
+const BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY = 6;
 
 export class ChainSignatureServer {
   private connection: Connection;
@@ -50,13 +57,21 @@ export class ChainSignatureServer {
   private config: ServerConfig;
   private monitorIntervalId: NodeJS.Timeout | null = null;
   private backfillIntervalId: NodeJS.Timeout | null = null;
+  private wsHealthCheckIntervalId: NodeJS.Timeout | null = null;
   private processedSignatures = new Set<string>();
+  private failedSignatureRetries = new Map<string, number>();
   private cpiEventHandlers = new Map<
     string,
     (event: CpiEventData, slot: number) => Promise<void>
   >();
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
+  private lastWebSocketEventTime = 0;
+  private lastWsReconnectTime = 0;
+  private backfillBatchSize: number;
+  private backfillMaxBatchSize: number;
+  private currentBackfillBatchSize: number;
+  private backfillCycleCounter = 0;
 
   constructor(config: ServerConfig) {
     try {
@@ -73,6 +88,12 @@ export class ChainSignatureServer {
       }
       throw new Error('Invalid server configuration');
     }
+
+    this.backfillBatchSize =
+      this.config.backfillBatchSize ?? DEFAULT_BACKFILL_BATCH_SIZE;
+    this.backfillMaxBatchSize =
+      this.config.backfillMaxBatchSize ?? DEFAULT_BACKFILL_MAX_BATCH_SIZE;
+    this.currentBackfillBatchSize = this.backfillBatchSize;
 
     this.readyPromise = new Promise((resolve) => {
       this.resolveReady = resolve;
@@ -112,6 +133,30 @@ export class ChainSignatureServer {
     this.resolveReady?.();
   }
 
+  private log(message: string, ...args: unknown[]) {
+    if (this.config.verbose) {
+      console.log(message, ...args);
+    }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    label: string,
+    timeoutMs: number = CONFIG.RPC_TIMEOUT_MS
+  ): Promise<T> {
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error(`Timeout: ${label} after ${timeoutMs}ms`)),
+        timeoutMs
+      );
+    });
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+    });
+  }
+
   private async ensureInitialized() {
     const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from('program-state')],
@@ -119,9 +164,12 @@ export class ChainSignatureServer {
     );
 
     try {
-      console.log(`🔗 Solana RPC: getAccountInfo for program state PDA...`);
-      const accountInfo = await this.connection.getAccountInfo(programStatePda);
-      console.log(`✓ Solana RPC: getAccountInfo done (exists=${!!accountInfo})`);
+      this.log(`🔗 Solana RPC: getAccountInfo for program state PDA...`);
+      const accountInfo = await this.withTimeout(
+        this.connection.getAccountInfo(programStatePda),
+        'getAccountInfo'
+      );
+      this.log(`✓ Solana RPC: getAccountInfo done (exists=${!!accountInfo})`);
       if (accountInfo) {
         return;
       }
@@ -141,14 +189,17 @@ export class ChainSignatureServer {
       this.config.chainId || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
     try {
-      console.log(`🔗 Solana RPC: program.initialize() (THIS CAN HANG)...`);
-      await this.program.methods
-        .initialize(new BN(signatureDeposit), chainId)
-        .accounts({
-          admin: this.wallet.publicKey,
-        })
-        .rpc();
-      console.log(`✓ Solana RPC: program.initialize() done`);
+      this.log(`🔗 Solana RPC: program.initialize()...`);
+      await this.withTimeout(
+        this.program.methods
+          .initialize(new BN(signatureDeposit), chainId)
+          .accounts({
+            admin: this.wallet.publicKey,
+          })
+          .rpc(),
+        'program.initialize()'
+      );
+      this.log(`✓ Solana RPC: program.initialize() done`);
     } catch (error: unknown) {
       const errorStr = String(error);
       const errorMsg = error instanceof Error ? error.message : errorStr;
@@ -173,11 +224,13 @@ export class ChainSignatureServer {
     this.monitorIntervalId = setInterval(async () => {
       this.pollCounter++;
 
-      if (pendingTransactions.size > 0) {
-        console.log(
-          `📊 Transaction monitor poll #${this.pollCounter} (pending=${pendingTransactions.size})`
-        );
+      if (pendingTransactions.size === 0) {
+        return;
       }
+
+      this.log(
+        `📊 Transaction monitor poll #${this.pollCounter} (pending=${pendingTransactions.size})`
+      );
 
       for (const [txHash, txInfo] of pendingTransactions.entries()) {
         if (txInfo.checkCount > 0) {
@@ -199,7 +252,7 @@ export class ChainSignatureServer {
         }
 
         try {
-          console.log(
+          this.log(
             `  🔍 Checking ${txInfo.namespace} tx: ${txHash} (attempt #${txInfo.checkCount + 1})`
           );
           const result =
@@ -217,7 +270,7 @@ export class ChainSignatureServer {
                   txInfo.nonce,
                   this.config
                 );
-          console.log(`  📋 Result for ${txHash}: ${result.status}`);
+          this.log(`  📋 Result for ${txHash}: ${result.status}`);
 
           txInfo.checkCount++;
 
@@ -234,10 +287,25 @@ export class ChainSignatureServer {
                 });
                 pendingTransactions.delete(txHash);
               } catch (handlerError) {
-                // Never delete on error - always retry. Duplicates are harmless, missing txs are not.
-                console.warn(`⚠️ Error in handleCompletedTransaction for ${txHash}, will retry: ${
-                  handlerError instanceof Error ? handlerError.message : String(handlerError)
-                }`);
+                if (this.isUnrecoverableError(handlerError)) {
+                  // TODO: removing without retry may reduce stability
+                  console.error(
+                    `⛔ Unrecoverable error in handleCompletedTransaction for ${txHash}, removing: ${
+                      handlerError instanceof Error
+                        ? handlerError.message
+                        : String(handlerError)
+                    }`
+                  );
+                  pendingTransactions.delete(txHash);
+                } else {
+                  console.warn(
+                    `⚠️ Error in handleCompletedTransaction for ${txHash}, will retry: ${
+                      handlerError instanceof Error
+                        ? handlerError.message
+                        : String(handlerError)
+                    }`
+                  );
+                }
               }
               break;
 
@@ -247,10 +315,25 @@ export class ChainSignatureServer {
                 await this.handleFailedTransaction(txHash, txInfo);
                 pendingTransactions.delete(txHash);
               } catch (handlerError) {
-                // Never delete on error - always retry. Duplicates are harmless, missing txs are not.
-                console.warn(`⚠️ Error in handleFailedTransaction for ${txHash}, will retry: ${
-                  handlerError instanceof Error ? handlerError.message : String(handlerError)
-                }`);
+                if (this.isUnrecoverableError(handlerError)) {
+                  // TODO: removing without retry may reduce stability
+                  console.error(
+                    `⛔ Unrecoverable error in handleFailedTransaction for ${txHash}, removing: ${
+                      handlerError instanceof Error
+                        ? handlerError.message
+                        : String(handlerError)
+                    }`
+                  );
+                  pendingTransactions.delete(txHash);
+                } else {
+                  console.warn(
+                    `⚠️ Error in handleFailedTransaction for ${txHash}, will retry: ${
+                      handlerError instanceof Error
+                        ? handlerError.message
+                        : String(handlerError)
+                    }`
+                  );
+                }
               }
               break;
 
@@ -263,12 +346,23 @@ export class ChainSignatureServer {
               break;
           }
         } catch (error) {
-          // Never delete on error - always retry. Duplicates are harmless, missing txs are not.
-          console.warn(
-            `⚠️ Error polling ${txHash}, will retry: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
+          txInfo.checkCount++;
+
+          if (this.isUnrecoverableError(error)) {
+            // TODO: removing without retry may reduce stability
+            console.error(
+              `⛔ Unrecoverable error polling ${txHash}, removing: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+            pendingTransactions.delete(txHash);
+          } else {
+            console.warn(
+              `⚠️ Error polling ${txHash}, will retry: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          }
         }
       }
     }, CONFIG.POLL_INTERVAL_MS);
@@ -285,35 +379,41 @@ export class ChainSignatureServer {
     if (!requestId) {
       throw new Error(`Missing request ID for tx ${txHash}`);
     }
-    console.log(`🔗 OutputSerializer: serialize...`);
+    this.log(`🔗 OutputSerializer: serialize...`);
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
       SerializationFormat.Borsh, // Server only respond to Solana for now
       txInfo.callbackSerializationSchema
     );
-    console.log(`✓ OutputSerializer: serialize done (${serializedOutput.length} bytes)`);
+    this.log(
+      `✓ OutputSerializer: serialize done (${serializedOutput.length} bytes)`
+    );
 
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-    console.log(`🔗 CryptoUtils: signBidirectionalResponse...`);
+    this.log(`🔗 CryptoUtils: signBidirectionalResponse...`);
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
       serializedOutput,
       this.config.mpcRootKey,
       txInfo.sender
     );
-    console.log(`✓ CryptoUtils: signBidirectionalResponse done`);
+    this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
-    console.log(`🔗 Solana RPC: respondBidirectional() for ${txHash} (THIS CAN HANG)...`);
-    await this.program.methods
-      .respondBidirectional(
-        Array.from(requestIdBytes),
-        Buffer.from(serializedOutput),
-        signature
-      )
-      .accounts({
-        responder: this.wallet.publicKey,
-      })
-      .rpc();
+    this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
+    await this.withTimeout(
+      this.program.methods
+        .respondBidirectional(
+          Array.from(requestIdBytes),
+          Buffer.from(serializedOutput),
+          signature
+        )
+        .accounts({
+          responder: this.wallet.publicKey,
+        })
+        .rpc(),
+      `respondBidirectional(${txHash})`
+    );
+    pendingTransactions.delete(txHash);
     console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
   }
 
@@ -336,27 +436,33 @@ export class ChainSignatureServer {
       throw new Error(`Missing request ID for tx ${txHash}`);
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-    console.log(`🔗 CryptoUtils: signBidirectionalResponse (error response)...`);
+    this.log(`🔗 CryptoUtils: signBidirectionalResponse (error response)...`);
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
       serializedOutput,
       this.config.mpcRootKey,
       txInfo.sender
     );
-    console.log(`✓ CryptoUtils: signBidirectionalResponse done`);
+    this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
-    console.log(`🔗 Solana RPC: respondBidirectional() error for ${txHash} (THIS CAN HANG)...`);
-    await this.program.methods
-      .respondBidirectional(
-        Array.from(requestIdBytes),
-        Buffer.from(serializedOutput),
-        signature
-      )
-      .accounts({
-        responder: this.wallet.publicKey,
-      })
-      .rpc();
-    console.log(`✓ Solana RPC: respondBidirectional() error done for ${txHash}`);
+    this.log(`🔗 Solana RPC: respondBidirectional() error for ${txHash}...`);
+    await this.withTimeout(
+      this.program.methods
+        .respondBidirectional(
+          Array.from(requestIdBytes),
+          Buffer.from(serializedOutput),
+          signature
+        )
+        .accounts({
+          responder: this.wallet.publicKey,
+        })
+        .rpc(),
+      `respondBidirectional-error(${txHash})`
+    );
+    pendingTransactions.delete(txHash);
+    console.log(
+      `✓ Solana RPC: respondBidirectional() error done for ${txHash}`
+    );
   }
 
   private setupEventListeners() {
@@ -413,52 +519,99 @@ export class ChainSignatureServer {
     );
 
     console.log('👂 Starting WebSocket subscription for program logs...');
+    this.subscribeToLogs();
+    this.startWebSocketHealthCheck();
+  }
+
+  private subscribeToLogs() {
     this.cpiSubscriptionId = this.connection.onLogs(
       this.program.programId,
       async (logs, context) => {
-        console.log(
+        this.lastWebSocketEventTime = Date.now();
+
+        this.log(
           `📡 WebSocket received logs for signature: ${logs.signature} (slot=${context.slot})`
         );
         if (logs.err) {
-          console.log(`  ⚠️ Skipping - transaction has error`);
+          this.log(`  ⚠️ Skipping - transaction has error`);
           return;
         }
         if (this.processedSignatures.has(logs.signature)) {
-          console.log(`  ⚠️ Skipping - already processed`);
+          this.log(`  ⚠️ Skipping - already processed`);
           return;
         }
 
         this.processedSignatures.add(logs.signature);
         try {
           await this.processTransaction(logs.signature, context.slot);
+          this.failedSignatureRetries.delete(logs.signature);
         } catch (error) {
-          // Always remove on error so backfill can retry. Duplicates are harmless, missing txs are not.
-          console.warn(`⚠️ WebSocket: ${logs.signature} needs retry: ${
-            error instanceof Error ? error.message : String(error)
-          }`);
-          this.processedSignatures.delete(logs.signature);
+          this.handleSignatureError(logs.signature, error);
         }
       },
       'confirmed'
     );
-    console.log(`✅ WebSocket subscription active (id=${this.cpiSubscriptionId})`);
+    console.log(
+      `✅ WebSocket subscription active (id=${this.cpiSubscriptionId})`
+    );
+  }
+
+  private startWebSocketHealthCheck() {
+    this.wsHealthCheckIntervalId = setInterval(() => {
+      if (this.lastWebSocketEventTime === 0) return;
+      if (Date.now() - this.lastWsReconnectTime < WS_RECONNECT_COOLDOWN_MS) {
+        return;
+      }
+
+      const staleDuration = Date.now() - this.lastWebSocketEventTime;
+      if (staleDuration > WS_STALE_THRESHOLD_MS) {
+        console.warn(
+          `⚠️ WebSocket appears stale (no events for ${Math.round(staleDuration / 1000)}s), reconnecting...`
+        );
+        void this.reconnectWebSocket();
+      }
+    }, WS_HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  private async reconnectWebSocket() {
+    if (this.cpiSubscriptionId !== null) {
+      try {
+        await this.withTimeout(
+          this.connection.removeOnLogsListener(this.cpiSubscriptionId),
+          'removeOnLogsListener',
+          5_000
+        );
+      } catch {
+        console.warn(
+          '⚠️ Failed to remove old WebSocket listener, proceeding with new subscription'
+        );
+      }
+      this.cpiSubscriptionId = null;
+    }
+
+    this.subscribeToLogs();
+    this.lastWebSocketEventTime = Date.now();
+    this.lastWsReconnectTime = Date.now();
   }
 
   private async processTransaction(
     signature: string,
     slot: number
   ): Promise<void> {
-    console.log(`🔎 Processing transaction: ${signature} (slot=${slot})`);
-    const events = await CpiEventParser.parseCpiEvents(
-      this.connection,
-      signature,
-      this.program.programId.toString(),
-      this.program
+    this.log(`🔎 Processing transaction: ${signature} (slot=${slot})`);
+    const events = await this.withTimeout(
+      CpiEventParser.parseCpiEvents(
+        this.connection,
+        signature,
+        this.program.programId.toString(),
+        this.program
+      ),
+      'parseCpiEvents'
     );
 
-    console.log(`  📦 Parsed ${events.length} event(s) from transaction`);
+    this.log(`  📦 Parsed ${events.length} event(s) from transaction`);
     for (const event of events) {
-      console.log(`  🎯 Event: ${event.name}`);
+      this.log(`  🎯 Event: ${event.name}`);
       const handler = this.cpiEventHandlers.get(event.name);
       if (handler) {
         await handler(event.data, slot);
@@ -468,26 +621,48 @@ export class ChainSignatureServer {
 
   private startBackfillMonitor() {
     console.log(
-      `🔄 Starting backfill monitor (interval=${BACKFILL_INTERVAL_MS}ms, batch=${BACKFILL_BATCH_SIZE})`
+      `🔄 Starting backfill monitor (interval=${BACKFILL_INTERVAL_MS}ms, batch=${this.backfillBatchSize}, max=${this.backfillMaxBatchSize})`
     );
     const backfill = async () => {
-      console.log(
-        `🔍 Backfill: polling for recent signatures (processed=${this.processedSignatures.size})`
+      this.backfillCycleCounter++;
+
+      // When WS is healthy, reduce backfill frequency instead of skipping entirely.
+      // Backfill must always remain active as an independent safety net for
+      // partial WS drops and failed retries.
+      const wsHealthy =
+        this.lastWebSocketEventTime > 0 &&
+        Date.now() - this.lastWebSocketEventTime < WS_STALE_THRESHOLD_MS;
+      if (
+        wsHealthy &&
+        this.backfillCycleCounter % BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY !== 0
+      ) {
+        this.log('🔄 Backfill: skipping this cycle (WebSocket is healthy)');
+        return;
+      }
+
+      this.log(
+        `🔍 Backfill: polling for recent signatures (batch=${this.currentBackfillBatchSize}, processed=${this.processedSignatures.size})`
       );
       try {
-        console.log(`  🔗 Solana RPC: getSignaturesForAddress...`);
-        const signatures = await this.connection.getSignaturesForAddress(
-          this.program.programId,
-          { limit: BACKFILL_BATCH_SIZE },
-          'confirmed'
+        const signatures = await this.withTimeout(
+          this.connection.getSignaturesForAddress(
+            this.program.programId,
+            { limit: this.currentBackfillBatchSize },
+            'confirmed'
+          ),
+          'getSignaturesForAddress'
         );
-        console.log(`  ✓ Solana RPC: getSignaturesForAddress done`);
 
-        console.log(`  📋 Backfill: found ${signatures.length} signature(s)`, signatures.map(s => ({
-          sig: s.signature,
-          slot: s.slot,
-          status: this.processedSignatures.has(s.signature) ? 'processed' : 'pending'
-        })));
+        this.log(
+          `  📋 Backfill: found ${signatures.length} signature(s)`,
+          signatures.map((s) => ({
+            sig: s.signature,
+            slot: s.slot,
+            status: this.processedSignatures.has(s.signature)
+              ? 'processed'
+              : 'pending',
+          }))
+        );
 
         let newCount = 0;
         for (const sigInfo of signatures) {
@@ -501,17 +676,21 @@ export class ChainSignatureServer {
           this.processedSignatures.add(sigInfo.signature);
           try {
             await this.processTransaction(sigInfo.signature, sigInfo.slot);
+            this.failedSignatureRetries.delete(sigInfo.signature);
           } catch (error) {
-            // Always remove on error so next backfill can retry. Duplicates are harmless, missing txs are not.
-            console.warn(`⚠️ Backfill: ${sigInfo.signature} needs retry: ${
-              error instanceof Error ? error.message : String(error)
-            }`);
-            this.processedSignatures.delete(sigInfo.signature);
+            this.handleSignatureError(sigInfo.signature, error);
           }
         }
 
-        if (newCount === 0) {
-          console.log(`  ✓ Backfill: no new signatures to process`);
+        // Dynamic batch sizing: scale up when finding new events, reset when quiet
+        if (newCount > 0) {
+          this.currentBackfillBatchSize = Math.min(
+            this.currentBackfillBatchSize * 2,
+            this.backfillMaxBatchSize
+          );
+        } else {
+          this.currentBackfillBatchSize = this.backfillBatchSize;
+          this.log(`  ✓ Backfill: no new signatures to process`);
         }
 
         this.trimProcessedSignatures();
@@ -536,22 +715,64 @@ export class ChainSignatureServer {
     for (const sig of this.processedSignatures) {
       if (removed >= excess) break;
       this.processedSignatures.delete(sig);
+      this.failedSignatureRetries.delete(sig);
       removed++;
     }
   }
 
+  private isUnrecoverableError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const msg = error.message;
+    return (
+      msg.includes('Missing request ID') ||
+      msg.includes('custom program error') ||
+      msg.includes('Modulus not supported') ||
+      msg.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
+      msg.includes('Failed to load keypair')
+    );
+  }
+
+  private handleSignatureError(signature: string, error: unknown): void {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    // Transient errors always retry without counting toward the cap
+    if (!this.isUnrecoverableError(error)) {
+      this.processedSignatures.delete(signature);
+      console.warn(
+        `⚠️ ${signature}: transient error, will retry (${errorMsg})`
+      );
+      return;
+    }
+
+    const retries = (this.failedSignatureRetries.get(signature) ?? 0) + 1;
+
+    if (retries >= MAX_SIGNATURE_RETRIES) {
+      this.failedSignatureRetries.delete(signature);
+      console.warn(
+        `⛔ ${signature}: giving up after ${retries} failed attempts (${errorMsg})`
+      );
+      return;
+    }
+
+    this.failedSignatureRetries.set(signature, retries);
+    this.processedSignatures.delete(signature);
+    console.warn(
+      `⚠️ ${signature}: attempt ${retries}/${MAX_SIGNATURE_RETRIES} failed, will retry (${errorMsg})`
+    );
+  }
+
   private async handleSignBidirectional(event: SignBidirectionalEvent) {
     const namespace = getNamespaceFromCaip2(event.caip2Id);
-    console.log(
+    this.log(
       `🧾 SignBidirectional payload namespace=${namespace} caip2Id=${event.caip2Id} keyVersion=${event.keyVersion} path=${event.path} algo=${event.algo} dest=${event.dest} params=${event.params} sender=${event.sender.toString()}`
     );
-    console.log(`🔗 CryptoUtils: deriveSigningKey for bidirectional...`);
+    this.log(`🔗 CryptoUtils: deriveSigningKey for bidirectional...`);
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
       this.config.mpcRootKey
     );
-    console.log(`✓ CryptoUtils: deriveSigningKey done`);
+    this.log(`✓ CryptoUtils: deriveSigningKey done`);
 
     if (namespace === 'bip122') {
       await handleBitcoinBidirectional(
@@ -586,33 +807,34 @@ export class ChainSignatureServer {
       params: event.params,
     });
 
-    console.log(`🔑 Request ID: ${requestId}`);
+    this.log(`🔑 Request ID: ${requestId}`);
 
-    console.log(`🔗 CryptoUtils: deriveSigningKey...`);
+    this.log(`🔗 CryptoUtils: deriveSigningKey...`);
     const derivedPrivateKey = await CryptoUtils.deriveSigningKey(
       event.path,
       event.sender.toString(),
       this.config.mpcRootKey
     );
-    console.log(`✓ CryptoUtils: deriveSigningKey done`);
+    this.log(`✓ CryptoUtils: deriveSigningKey done`);
 
-    console.log(`🔗 CryptoUtils: signMessage...`);
+    this.log(`🔗 CryptoUtils: signMessage...`);
     const signature = await CryptoUtils.signMessage(
       event.payload,
       derivedPrivateKey
     );
-    console.log(`✓ CryptoUtils: signMessage done`);
+    this.log(`✓ CryptoUtils: signMessage done`);
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
-    console.log(`🔗 Solana RPC: respond() (THIS CAN HANG)...`);
-    const tx = await this.program.methods
-      .respond([requestIdBytes], [signature])
-      .accounts({
-        responder: this.wallet.publicKey,
-      })
-      .rpc();
-    console.log(`✓ Solana RPC: respond() done`);
-
+    this.log(`🔗 Solana RPC: respond()...`);
+    const tx = await this.withTimeout(
+      this.program.methods
+        .respond([requestIdBytes], [signature])
+        .accounts({
+          responder: this.wallet.publicKey,
+        })
+        .rpc(),
+      'respond()'
+    );
     console.log(`✅ Signature sent! tx=${tx}`);
   }
 
@@ -654,10 +876,14 @@ export class ChainSignatureServer {
       clearInterval(this.backfillIntervalId);
       this.backfillIntervalId = null;
     }
+    if (this.wsHealthCheckIntervalId !== null) {
+      clearInterval(this.wsHealthCheckIntervalId);
+      this.wsHealthCheckIntervalId = null;
+    }
     if (this.cpiSubscriptionId !== null) {
-      console.log(`🔗 Solana RPC: removeOnLogsListener...`);
+      this.log(`🔗 Solana RPC: removeOnLogsListener...`);
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);
-      console.log(`✓ Solana RPC: removeOnLogsListener done`);
+      this.log(`✓ Solana RPC: removeOnLogsListener done`);
       this.cpiSubscriptionId = null;
     }
   }
