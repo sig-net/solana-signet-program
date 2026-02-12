@@ -76,7 +76,7 @@ async function handleBitcoinSigningPlan(
     throw new Error('Bitcoin PSBT must contain at least one input');
   }
 
-  const { program, wallet, config, pendingTransactions } = context;
+  const { program, wallet, config, pendingTransactions, withTimeout } = context;
 
   // Use the explorer-facing txid (big-endian) for all aggregated request IDs;
   // never flip the byte order here.
@@ -164,12 +164,15 @@ async function handleBitcoinSigningPlan(
       derivedPrivateKey
     );
 
-    const tx = await program.methods
-      .respond([perInputRequestIdBytes], [signature])
-      .accounts({
-        responder: wallet.publicKey,
-      })
-      .rpc();
+    const tx = await withTimeout(
+      program.methods
+        .respond([perInputRequestIdBytes], [signature])
+        .accounts({
+          responder: wallet.publicKey,
+        })
+        .rpc(),
+      `respond-bip122-input-${inputPlan.inputIndex}`
+    );
 
     submittedInputs.add(inputPlan.inputIndex);
 

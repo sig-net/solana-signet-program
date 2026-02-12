@@ -7,4 +7,5 @@ export interface BidirectionalHandlerContext {
   wallet: anchor.Wallet;
   config: ServerConfig;
   pendingTransactions: Map<string, PendingTransaction>;
+  withTimeout: <T>(promise: Promise<T>, label: string) => Promise<T>;
 }

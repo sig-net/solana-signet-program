@@ -106,6 +106,22 @@ export class ChainSignatureServer {
     this.connection = new Connection(this.config.solanaRpcUrl, {
       commitment: 'confirmed',
       disableRetryOnRateLimit: true,
+      fetch: async (input, init) => {
+        const res = await globalThis.fetch(input, init);
+        if (res.status === 429) {
+          let method = 'unknown';
+          try {
+            const body = JSON.parse(init?.body as string);
+            method = Array.isArray(body)
+              ? body.map((r: { method: string }) => r.method).join(', ')
+              : body.method ?? 'unknown';
+          } catch {}
+          console.warn(
+            `\n[429 TRACE] RPC method: ${method}\n${new Error().stack}`
+          );
+        }
+        return res;
+      },
     });
     this.wallet = new anchor.Wallet(solanaKeypair);
     this.provider = new anchor.AnchorProvider(this.connection, this.wallet, {
@@ -276,93 +292,55 @@ export class ChainSignatureServer {
 
           switch (result.status) {
             case 'pending':
-              // Just increment count, continue polling
               break;
 
-            case 'success':
-              try {
-                await this.handleCompletedTransaction(txHash, txInfo, {
-                  success: result.success,
-                  output: result.output,
-                });
-                pendingTransactions.delete(txHash);
-              } catch (handlerError) {
-                if (this.isUnrecoverableError(handlerError)) {
-                  // TODO: removing without retry may reduce stability
-                  console.error(
-                    `⛔ Unrecoverable error in handleCompletedTransaction for ${txHash}, removing: ${
-                      handlerError instanceof Error
-                        ? handlerError.message
-                        : String(handlerError)
-                    }`
-                  );
-                  pendingTransactions.delete(txHash);
-                } else {
-                  console.warn(
-                    `⚠️ Error in handleCompletedTransaction for ${txHash}, will retry: ${
-                      handlerError instanceof Error
-                        ? handlerError.message
-                        : String(handlerError)
-                    }`
-                  );
-                }
-              }
+            case 'success': {
+              const done = await this.executeWithRecovery(
+                txHash,
+                txInfo,
+                () =>
+                  this.handleCompletedTransaction(txHash, txInfo, {
+                    success: result.success,
+                    output: result.output,
+                  }),
+                'handleCompletedTransaction',
+                true
+              );
+              if (done) pendingTransactions.delete(txHash);
               break;
+            }
 
-            case 'error':
-              // Only for reverted/replaced - send signed error
-              try {
-                await this.handleFailedTransaction(txHash, txInfo);
-                pendingTransactions.delete(txHash);
-              } catch (handlerError) {
-                if (this.isUnrecoverableError(handlerError)) {
-                  // TODO: removing without retry may reduce stability
-                  console.error(
-                    `⛔ Unrecoverable error in handleFailedTransaction for ${txHash}, removing: ${
-                      handlerError instanceof Error
-                        ? handlerError.message
-                        : String(handlerError)
-                    }`
-                  );
-                  pendingTransactions.delete(txHash);
-                } else {
-                  console.warn(
-                    `⚠️ Error in handleFailedTransaction for ${txHash}, will retry: ${
-                      handlerError instanceof Error
-                        ? handlerError.message
-                        : String(handlerError)
-                    }`
-                  );
-                }
-              }
+            case 'error': {
+              // Reverted/replaced — send signed error back to Solana
+              const done = await this.executeWithRecovery(
+                txHash,
+                txInfo,
+                () => this.handleFailedTransaction(txHash, txInfo),
+                'handleFailedTransaction',
+                false // circular — can't send error response for a failed error response
+              );
+              if (done) pendingTransactions.delete(txHash);
               break;
+            }
 
             case 'fatal_error':
-              // Just remove from map, don't send signed error
               console.error(
                 `Fatal error for transaction ${txHash}: ${result.reason}`
               );
+              await this.sendErrorResponse(txHash, txInfo);
               pendingTransactions.delete(txHash);
               break;
           }
         } catch (error) {
           txInfo.checkCount++;
-
-          if (this.isUnrecoverableError(error)) {
-            // TODO: removing without retry may reduce stability
-            console.error(
-              `⛔ Unrecoverable error polling ${txHash}, removing: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-            pendingTransactions.delete(txHash);
-          } else {
-            console.warn(
-              `⚠️ Error polling ${txHash}, will retry: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-          }
+          const done = await this.executeWithRecovery(
+            txHash,
+            txInfo,
+            () => Promise.reject(error),
+            'monitorPoll',
+            true
+          );
+          if (done) pendingTransactions.delete(txHash);
         }
       }
     }, CONFIG.POLL_INTERVAL_MS);
@@ -413,7 +391,6 @@ export class ChainSignatureServer {
         .rpc(),
       `respondBidirectional(${txHash})`
     );
-    pendingTransactions.delete(txHash);
     console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
   }
 
@@ -459,7 +436,6 @@ export class ChainSignatureServer {
         .rpc(),
       `respondBidirectional-error(${txHash})`
     );
-    pendingTransactions.delete(txHash);
     console.log(
       `✓ Solana RPC: respondBidirectional() error done for ${txHash}`
     );
@@ -468,27 +444,15 @@ export class ChainSignatureServer {
   private setupEventListeners() {
     this.cpiEventHandlers.set(
       'signBidirectionalEvent',
-      async (eventData: CpiEventData, _slot: number) => {
+      async (eventData: CpiEventData) => {
         if (!isSignBidirectionalEvent(eventData)) {
           console.error('Invalid event type for signBidirectionalEvent');
           return;
         }
-
         console.log(
           `📨 SignBidirectionalEvent from ${eventData.sender.toString()}`
         );
-
-        try {
-          await this.handleSignBidirectional(eventData);
-        } catch (error) {
-          console.error(
-            `Error processing bidirectional: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
-          // Always re-throw so caller can retry. Duplicates are harmless, missing txs are not.
-          throw error;
-        }
+        await this.handleSignBidirectional(eventData);
       }
     );
 
@@ -499,22 +463,10 @@ export class ChainSignatureServer {
           console.error('Invalid event type for signatureRequestedEvent');
           return;
         }
-
         console.log(
           `📝 SignatureRequestedEvent from ${eventData.sender.toString()}`
         );
-
-        try {
-          await this.handleSignatureRequest(eventData);
-        } catch (error) {
-          console.error(
-            `Error sending signature: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
-          // Always re-throw so caller can retry. Duplicates are harmless, missing txs are not.
-          throw error;
-        }
+        await this.handleSignatureRequest(eventData);
       }
     );
 
@@ -541,13 +493,7 @@ export class ChainSignatureServer {
           return;
         }
 
-        this.processedSignatures.add(logs.signature);
-        try {
-          await this.processTransaction(logs.signature, context.slot);
-          this.failedSignatureRetries.delete(logs.signature);
-        } catch (error) {
-          this.handleSignatureError(logs.signature, error);
-        }
+        await this.processSignatureWithRetry(logs.signature, context.slot);
       },
       'confirmed'
     );
@@ -594,6 +540,19 @@ export class ChainSignatureServer {
     this.lastWsReconnectTime = Date.now();
   }
 
+  private async processSignatureWithRetry(
+    signature: string,
+    slot: number
+  ): Promise<void> {
+    this.processedSignatures.add(signature);
+    try {
+      await this.processTransaction(signature, slot);
+      this.failedSignatureRetries.delete(signature);
+    } catch (error) {
+      this.handleSignatureError(signature, error);
+    }
+  }
+
   private async processTransaction(
     signature: string,
     slot: number
@@ -614,7 +573,16 @@ export class ChainSignatureServer {
       this.log(`  🎯 Event: ${event.name}`);
       const handler = this.cpiEventHandlers.get(event.name);
       if (handler) {
-        await handler(event.data, slot);
+        try {
+          await handler(event.data, slot);
+        } catch (error) {
+          console.error(
+            `Error in ${event.name}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+          throw error;
+        }
       }
     }
   }
@@ -673,13 +641,7 @@ export class ChainSignatureServer {
           console.log(
             `  🆕 Backfill: new signature ${sigInfo.signature} (slot=${sigInfo.slot})`
           );
-          this.processedSignatures.add(sigInfo.signature);
-          try {
-            await this.processTransaction(sigInfo.signature, sigInfo.slot);
-            this.failedSignatureRetries.delete(sigInfo.signature);
-          } catch (error) {
-            this.handleSignatureError(sigInfo.signature, error);
-          }
+          await this.processSignatureWithRetry(sigInfo.signature, sigInfo.slot);
         }
 
         // Dynamic batch sizing: scale up when finding new events, reset when quiet
@@ -728,8 +690,57 @@ export class ChainSignatureServer {
       msg.includes('custom program error') ||
       msg.includes('Modulus not supported') ||
       msg.includes('Failed to parse SOLANA_PRIVATE_KEY') ||
-      msg.includes('Failed to load keypair')
+      msg.includes('Failed to load keypair') ||
+      msg.includes('insufficient funds') ||
+      msg.includes('already been processed')
     );
+  }
+
+  private async sendErrorResponse(
+    txHash: string,
+    txInfo: PendingTransaction
+  ): Promise<void> {
+    try {
+      await this.handleFailedTransaction(txHash, txInfo);
+    } catch (error) {
+      console.error(
+        `⛔ Could not send error response for ${txHash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  /**
+   * Execute a monitor action with standardized error handling.
+   * Returns true if the transaction should be removed from the pending map.
+   */
+  private async executeWithRecovery(
+    txHash: string,
+    txInfo: PendingTransaction,
+    action: () => Promise<void>,
+    label: string,
+    sendErrorOnFailure: boolean
+  ): Promise<boolean> {
+    try {
+      await action();
+      return true;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (this.isUnrecoverableError(error)) {
+        console.error(
+          `⛔ Unrecoverable error in ${label} for ${txHash}: ${errorMsg}`
+        );
+        if (sendErrorOnFailure) {
+          await this.sendErrorResponse(txHash, txInfo);
+        }
+        return true;
+      }
+      console.warn(
+        `⚠️ Error in ${label} for ${txHash}, will retry: ${errorMsg}`
+      );
+      return false;
+    }
   }
 
   private handleSignatureError(signature: string, error: unknown): void {
@@ -844,6 +855,7 @@ export class ChainSignatureServer {
       wallet: this.wallet,
       config: this.config,
       pendingTransactions,
+      withTimeout: this.withTimeout.bind(this),
     };
   }
 

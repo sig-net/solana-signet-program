@@ -9,7 +9,7 @@ export async function handleEthereumBidirectional(
   context: BidirectionalHandlerContext,
   derivedPrivateKey: string
 ): Promise<void> {
-  const { program, wallet, pendingTransactions } = context;
+  const { program, wallet, pendingTransactions, withTimeout } = context;
 
   const requestId = getRequestIdBidirectional({
     sender: event.sender.toString(),
@@ -31,12 +31,15 @@ export async function handleEthereumBidirectional(
   const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
   const requestIds = result.signature.map(() => Array.from(requestIdBytes));
 
-  const tx = await program.methods
-    .respond(requestIds, result.signature)
-    .accounts({
-      responder: wallet.publicKey,
-    })
-    .rpc();
+  const tx = await withTimeout(
+    program.methods
+      .respond(requestIds, result.signature)
+      .accounts({
+        responder: wallet.publicKey,
+      })
+      .rpc(),
+    'respond-eip155'
+  );
 
   console.log(`✅ eip155: signed tx=${result.signedTxHash} from=${result.fromAddress} (solana tx=${tx})`);
 
