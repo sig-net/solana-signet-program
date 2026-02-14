@@ -1,6 +1,6 @@
 {
   "name": "fakenet-signer",
-  "version": "1.7.1-beta.5",
+  "version": "1.7.1-beta.8",
   "description": "Multi-chain signature orchestrator for Solana - listens for signature requests, executes transactions on target chains (Ethereum, Bitcoin, etc.), and returns results. Includes Bitcoin adapters for mempool.space API and Bitcoin Core RPC.",
   "type": "module",
   "main": "./dist/index.cjs",

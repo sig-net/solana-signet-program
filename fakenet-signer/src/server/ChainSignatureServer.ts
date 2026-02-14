@@ -72,6 +72,7 @@ export class ChainSignatureServer {
   private backfillMaxBatchSize: number;
   private currentBackfillBatchSize: number;
   private backfillCycleCounter = 0;
+  private lastBackfillSignature: string | undefined;
 
   constructor(config: ServerConfig) {
     try {
@@ -94,6 +95,7 @@ export class ChainSignatureServer {
     this.backfillMaxBatchSize =
       this.config.backfillMaxBatchSize ?? DEFAULT_BACKFILL_MAX_BATCH_SIZE;
     this.currentBackfillBatchSize = this.backfillBatchSize;
+    this.lastBackfillSignature = this.config.lastBackfillSignature;
 
     this.readyPromise = new Promise((resolve) => {
       this.resolveReady = resolve;
@@ -114,7 +116,7 @@ export class ChainSignatureServer {
             const body = JSON.parse(init?.body as string);
             method = Array.isArray(body)
               ? body.map((r: { method: string }) => r.method).join(', ')
-              : body.method ?? 'unknown';
+              : (body.method ?? 'unknown');
           } catch {}
           console.warn(
             `\n[429 TRACE] RPC method: ${method}\n${new Error().stack}`
@@ -609,13 +611,18 @@ export class ChainSignatureServer {
       }
 
       this.log(
-        `🔍 Backfill: polling for recent signatures (batch=${this.currentBackfillBatchSize}, processed=${this.processedSignatures.size})`
+        `🔍 Backfill: polling for recent signatures (batch=${this.currentBackfillBatchSize}, cursor=${this.lastBackfillSignature ?? 'none'}, processed=${this.processedSignatures.size})`
       );
       try {
         const signatures = await this.withTimeout(
           this.connection.getSignaturesForAddress(
             this.program.programId,
-            { limit: this.currentBackfillBatchSize },
+            {
+              ...(this.lastBackfillSignature
+                ? { until: this.lastBackfillSignature }
+                : {}),
+              limit: this.currentBackfillBatchSize,
+            },
             'confirmed'
           ),
           'getSignaturesForAddress'
@@ -631,6 +638,12 @@ export class ChainSignatureServer {
               : 'pending',
           }))
         );
+
+        // Advance cursor to newest signature so next cycle only fetches newer ones
+        const newestSig = signatures[0];
+        if (newestSig) {
+          this.lastBackfillSignature = newestSig.signature;
+        }
 
         let newCount = 0;
         for (const sigInfo of signatures) {

@@ -16,6 +16,7 @@ export interface ServerConfig {
   bitcoinNetwork: BitcoinNetwork;
   backfillBatchSize?: number;
   backfillMaxBatchSize?: number;
+  lastBackfillSignature?: string;
 }
 
 export const serverConfigSchema = z.object({
@@ -43,6 +44,7 @@ export const serverConfigSchema = z.object({
   bitcoinNetwork: z.enum(['regtest', 'testnet']),
   backfillBatchSize: z.number().int().positive().optional(),
   backfillMaxBatchSize: z.number().int().positive().optional(),
+  lastBackfillSignature: z.string().optional(),
 });
 
 export interface SignBidirectionalEvent {
