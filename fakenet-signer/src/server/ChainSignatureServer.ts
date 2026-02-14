@@ -117,7 +117,9 @@ export class ChainSignatureServer {
             method = Array.isArray(body)
               ? body.map((r: { method: string }) => r.method).join(', ')
               : (body.method ?? 'unknown');
-          } catch { /* best-effort parse */ }
+          } catch {
+            /* best-effort parse */
+          }
           console.warn(
             `\n[429 TRACE] RPC method: ${method}\n${new Error().stack}`
           );

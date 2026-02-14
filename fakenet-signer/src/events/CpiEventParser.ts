@@ -41,7 +41,9 @@ export class CpiEventParser {
       });
 
       if (!tx || !tx.meta) {
-        throw new Error(`Transaction ${signature} has no metadata - will retry`);
+        throw new Error(
+          `Transaction ${signature} has no metadata - will retry`
+        );
       }
 
       const innerInstructions = tx.meta.innerInstructions || [];
@@ -65,9 +67,11 @@ export class CpiEventParser {
       }
     } catch (error) {
       // Always re-throw so caller can retry. Duplicates are harmless, missing txs are not.
-      console.warn(`⚠️ CpiEventParser: ${signature} needs retry: ${
-        error instanceof Error ? error.message : String(error)
-      }`);
+      console.warn(
+        `⚠️ CpiEventParser: ${signature} needs retry: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
       throw error;
     }
 

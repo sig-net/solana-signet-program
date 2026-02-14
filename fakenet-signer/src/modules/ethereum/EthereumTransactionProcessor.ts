@@ -1,8 +1,5 @@
 import { ethers } from 'ethers';
-import {
-  ProcessedTransaction,
-  SignatureResponse,
-} from '../../types';
+import { ProcessedTransaction, SignatureResponse } from '../../types';
 
 export class EthereumTransactionProcessor {
   static async processTransactionForSigning(

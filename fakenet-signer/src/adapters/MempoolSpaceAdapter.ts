@@ -58,7 +58,9 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
     }
 
     const tx = (await response.json()) as MempoolTransaction;
-    console.log(`    ✓ Mempool.space: tx fetched (confirmed=${tx.status.confirmed})`);
+    console.log(
+      `    ✓ Mempool.space: tx fetched (confirmed=${tx.status.confirmed})`
+    );
     console.log(`    🔗 Mempool.space: fetching current block height...`);
     const currentHeight = await this.getCurrentBlockHeight();
     console.log(`    ✓ Mempool.space: block height=${currentHeight}`);
@@ -127,7 +129,9 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
   }
 
   async isPrevoutSpent(txid: string, vout: number): Promise<boolean> {
-    console.log(`    🔗 Mempool.space: checking outspends for ${txid}:${vout}...`);
+    console.log(
+      `    🔗 Mempool.space: checking outspends for ${txid}:${vout}...`
+    );
     const response = await fetch(`${this.baseUrl}/tx/${txid}/outspends`);
 
     if (!response.ok) {
@@ -141,14 +145,11 @@ export class MempoolSpaceAdapter implements IBitcoinAdapter {
       );
     }
 
-    const outspends = (await response.json()) as Array<
-      | {
-          spent: boolean;
-          txid: string;
-          vin: number;
-        }
-      | null
-    >;
+    const outspends = (await response.json()) as Array<{
+      spent: boolean;
+      txid: string;
+      vin: number;
+    } | null>;
 
     const info = outspends[vout];
     const spent = info !== null && info !== undefined && info.spent === true;

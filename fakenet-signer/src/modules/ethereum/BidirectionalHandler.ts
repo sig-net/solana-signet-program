@@ -41,7 +41,9 @@ export async function handleEthereumBidirectional(
     'respond-eip155'
   );
 
-  console.log(`✅ eip155: signed tx=${result.signedTxHash} from=${result.fromAddress} (solana tx=${tx})`);
+  console.log(
+    `✅ eip155: signed tx=${result.signedTxHash} from=${result.fromAddress} (solana tx=${tx})`
+  );
 
   pendingTransactions.set(result.signedTxHash, {
     txHash: result.signedTxHash,

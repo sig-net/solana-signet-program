@@ -181,5 +181,7 @@ async function handleBitcoinSigningPlan(
     );
   }
 
-  console.log(`🔍 Monitoring bip122 tx ${plan.explorerTxid} (${config.bitcoinNetwork})`);
+  console.log(
+    `🔍 Monitoring bip122 tx ${plan.explorerTxid} (${config.bitcoinNetwork})`
+  );
 }

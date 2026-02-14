@@ -35,7 +35,9 @@ export class EthereumMonitor {
 
       if (receipt) {
         if (receipt.status === 0) {
-          console.log(`❌ EthereumMonitor: tx ${txHash} reverted (block=${receipt.blockNumber})`);
+          console.log(
+            `❌ EthereumMonitor: tx ${txHash} reverted (block=${receipt.blockNumber})`
+          );
           return { status: 'error', reason: 'reverted' };
         }
 
@@ -53,7 +55,9 @@ export class EthereumMonitor {
             explorerDeserializationSchema,
             fromAddress
           );
-          console.log(`✅ EthereumMonitor: tx ${txHash} confirmed (block=${receipt.blockNumber})`);
+          console.log(
+            `✅ EthereumMonitor: tx ${txHash} confirmed (block=${receipt.blockNumber})`
+          );
           return {
             status: 'success',
             success: output.success,
@@ -68,7 +72,9 @@ export class EthereumMonitor {
         if (currentNonce > nonce) {
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
-            console.log(`❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} already used)`);
+            console.log(
+              `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} already used)`
+            );
             return { status: 'error', reason: 'replaced' };
           }
         }
