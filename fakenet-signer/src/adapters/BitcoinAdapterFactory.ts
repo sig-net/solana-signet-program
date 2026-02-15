@@ -18,9 +18,7 @@ export class BitcoinAdapterFactory {
    * @param network Bitcoin network identifier (`regtest` | `testnet`).
    * @returns Adapter implementing `IBitcoinAdapter`.
    */
-  static async create(
-    network: BitcoinNetwork
-  ): Promise<IBitcoinAdapter> {
+  static async create(network: BitcoinNetwork): Promise<IBitcoinAdapter> {
     if (network === 'regtest') {
       const adapter = BitcoinCoreRpcAdapter.createRegtestAdapter();
 
@@ -44,7 +42,9 @@ export class BitcoinAdapterFactory {
     }
 
     if (network !== 'testnet') {
-      throw new Error(`Unsupported Bitcoin network '${network}'. Only regtest and testnet are available.`);
+      throw new Error(
+        `Unsupported Bitcoin network '${network}'. Only regtest and testnet are available.`
+      );
     }
 
     const adapter = MempoolSpaceAdapter.create(network);

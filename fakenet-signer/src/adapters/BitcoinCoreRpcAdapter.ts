@@ -39,7 +39,11 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
     try {
       // Use getrawtransaction with verbose=true to get ANY transaction
       // (not just wallet transactions like gettransaction does)
+      console.log(`    🔗 BitcoinRPC: getrawtransaction ${txid}...`);
       const tx = await this.client.command('getrawtransaction', txid, true);
+      console.log(
+        `    ✓ BitcoinRPC: tx fetched (confs=${tx.confirmations || 0})`
+      );
 
       return {
         txid: tx.txid,
@@ -65,9 +69,15 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
   }
 
   async getAddressUtxos(address: string): Promise<UTXO[]> {
+    console.log(
+      `    🔗 BitcoinRPC: scantxoutset for ${address} (THIS CAN BE SLOW)...`
+    );
     const result = await this.client.command('scantxoutset', 'start', [
       `addr(${address})`,
     ]);
+    console.log(
+      `    ✓ BitcoinRPC: scantxoutset done (${(result.unspents as RpcUnspent[]).length} UTXOs)`
+    );
 
     return (result.unspents as RpcUnspent[]).map((utxo) => ({
       txid: utxo.txid,
@@ -118,7 +128,10 @@ export class BitcoinCoreRpcAdapter implements IBitcoinAdapter {
   }
 
   async isPrevoutSpent(txid: string, vout: number): Promise<boolean> {
+    console.log(`    🔗 BitcoinRPC: gettxout ${txid}:${vout}...`);
     const utxo = await this.client.command('gettxout', txid, vout, true);
-    return utxo === null;
+    const spent = utxo === null;
+    console.log(`    ✓ BitcoinRPC: gettxout done (spent=${spent})`);
+    return spent;
   }
 }

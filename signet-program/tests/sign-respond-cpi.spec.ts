@@ -32,6 +32,7 @@ describe('Sign/Respond CPI tests', () => {
     const response = await waitForSignatureResponse(
       signArgs,
       signetSolContract,
+      signetProgram.programId,
       txSignature
     );
 
@@ -50,7 +51,12 @@ describe('Sign/Respond CPI tests', () => {
           provider.wallet.publicKey,
           eventAuthorityPda
         );
-        return waitForSignatureResponse(signArgs1, signetSolContract, tx1);
+        return waitForSignatureResponse(
+          signArgs1,
+          signetSolContract,
+          signetProgram.programId,
+          tx1
+        );
       })(),
       (async () => {
         const tx2 = await callProxySign(
@@ -59,7 +65,12 @@ describe('Sign/Respond CPI tests', () => {
           provider.wallet.publicKey,
           eventAuthorityPda
         );
-        return waitForSignatureResponse(signArgs2, signetSolContract, tx2);
+        return waitForSignatureResponse(
+          signArgs2,
+          signetSolContract,
+          signetProgram.programId,
+          tx2
+        );
       })(),
     ]);
 

@@ -88,6 +88,7 @@ The package provides a unified interface for Bitcoin operations across different
 - **testnet** → mempool.space testnet4 API
 
 Each supported network uses different address prefixes:
+
 - **Testnet**: `tb1q...` addresses
 - **Regtest**: `bcrt1q...` addresses
 
@@ -334,6 +335,7 @@ yarn docker:stop
 ```
 
 The Docker container includes:
+
 - **Bitcoin Core** in regtest mode on `localhost:18443`
 - **Auto-mining** every 10 seconds (101 initial blocks)
 - **Web Explorer UI** at `http://localhost:5173`
@@ -346,6 +348,7 @@ BITCOIN_NETWORK=regtest
 ```
 
 **Features:**
+
 - ⚡ Zero-config setup
 - 🌐 Visual blockchain explorer
 - 🔧 Programmatic API access

@@ -50,27 +50,18 @@ export class BitcoinMonitor {
       const tx = await adapter.getTransaction(txid);
 
       if (tx.confirmations < requiredConfs) {
-        const conflicted = await this.getConflictedPrevout(
-          prevouts,
-          adapter
-        );
+        const conflicted = await this.getConflictedPrevout(prevouts, adapter);
         if (conflicted) {
-          console.error(
-            `❌ ${config.bitcoinNetwork} tx ${txid}: input ${conflicted.txid}:${conflicted.vout} was spent elsewhere`
+          console.log(
+            `❌ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} input ${conflicted.txid}:${conflicted.vout} spent elsewhere`
           );
           return { status: 'error', reason: 'inputs_spent' };
         }
-
-        const hint = `${tx.confirmations}/${requiredConfs} confirmations`;
-
-        console.log(
-          `⏳ ${config.bitcoinNetwork} tx ${txid}: ${hint}`
-        );
         return { status: 'pending' };
       }
 
       console.log(
-        `✅ ${config.bitcoinNetwork} tx ${txid}: ${tx.confirmations} confirmation(s)`
+        `✅ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} confirmed (${tx.confirmations} conf)`
       );
 
       const output: TransactionOutputData = {
@@ -85,23 +76,18 @@ export class BitcoinMonitor {
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
-        const conflicted = await this.getConflictedPrevout(
-          prevouts,
-          adapter
-        );
+        const conflicted = await this.getConflictedPrevout(prevouts, adapter);
         if (conflicted) {
-          console.error(
-            `❌ ${config.bitcoinNetwork} tx ${txid}: input ${conflicted.txid}:${conflicted.vout} was spent elsewhere`
+          console.log(
+            `❌ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} input ${conflicted.txid}:${conflicted.vout} spent elsewhere`
           );
           return { status: 'error', reason: 'inputs_spent' };
         }
-
-        console.log(`⏳ ${config.bitcoinNetwork} tx ${txid}: not found`);
         return { status: 'pending' };
       }
 
       console.error(
-        `❌ Error while monitoring ${txid}: ${
+        `❌ BitcoinMonitor: error monitoring ${txid}: ${
           error instanceof Error ? error.message : String(error)
         }`
       );

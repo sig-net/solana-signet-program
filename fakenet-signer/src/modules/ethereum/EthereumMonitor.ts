@@ -30,21 +30,14 @@ export class EthereumMonitor {
       return { status: 'fatal_error', reason: 'unsupported_chain' };
     }
 
-    console.log(`⏳ Checking transaction ${txHash}...`);
-
     try {
       const receipt = await provider.getTransactionReceipt(txHash);
 
       if (receipt) {
-        console.log(`✅ Transaction found! Confirmation complete.`);
-        console.log(`  📦 Block number: ${receipt.blockNumber}`);
-        console.log(
-          `  ${receipt.status === 1 ? '✅' : '❌'} Status: ${
-            receipt.status === 1 ? 'Success' : 'Failed'
-          }`
-        );
-
         if (receipt.status === 0) {
+          console.log(
+            `❌ EthereumMonitor: tx ${txHash} reverted (block=${receipt.blockNumber})`
+          );
           return { status: 'error', reason: 'reverted' };
         }
 
@@ -62,6 +55,9 @@ export class EthereumMonitor {
             explorerDeserializationSchema,
             fromAddress
           );
+          console.log(
+            `✅ EthereumMonitor: tx ${txHash} confirmed (block=${receipt.blockNumber})`
+          );
           return {
             status: 'success',
             success: output.success,
@@ -74,22 +70,20 @@ export class EthereumMonitor {
         // No receipt - check if replaced
         const currentNonce = await provider.getTransactionCount(fromAddress);
         if (currentNonce > nonce) {
-          // Check if it was our transaction
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
+            console.log(
+              `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} already used)`
+            );
             return { status: 'error', reason: 'replaced' };
           }
         }
 
-        // Check if transaction exists
         const tx = await provider.getTransaction(txHash);
         if (!tx) {
           return { status: 'pending' };
         }
 
-        console.log(`✅ Transaction found! Waiting for confirmation...`);
-
-        // Already checked receipt above and it was null, so return pending
         return { status: 'pending' };
       }
     } catch {
@@ -120,7 +114,9 @@ export class EthereumMonitor {
         throw new Error(`Unsupported chain namespace: ${namespace}`);
     }
 
-    const provider = new ethers.JsonRpcProvider(url);
+    const fetchRequest = new ethers.FetchRequest(url);
+    fetchRequest.timeout = 30_000;
+    const provider = new ethers.JsonRpcProvider(fetchRequest);
     this.providerCache.set(cacheKey, provider);
     return provider;
   }
@@ -138,8 +134,6 @@ export class EthereumMonitor {
 
     if (isContractCall && serializationFormat === SerializationFormat.ABI) {
       try {
-        console.log('  📞 Getting function return value...');
-
         const callResult = await provider.call({
           to: tx.to,
           data: tx.data,
@@ -166,8 +160,7 @@ export class EthereumMonitor {
         });
 
         return { success: true, output: decodedOutput };
-      } catch (e) {
-        console.error('Error extracting output:', e);
+      } catch {
         return { success: true, output: { success: true } };
       }
     } else {

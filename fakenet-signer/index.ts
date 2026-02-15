@@ -8,7 +8,6 @@ export {
   CpiEventParser,
   EMIT_CPI_INSTRUCTION_DISCRIMINATOR,
 } from './src/events/CpiEventParser';
-export { RequestIdGenerator } from './src/modules/RequestIdGenerator';
 export { OutputSerializer } from './src/modules/OutputSerializer';
 export * from './src/types';
 export * from './src/modules/ChainUtils';

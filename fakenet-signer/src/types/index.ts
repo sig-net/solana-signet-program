@@ -14,6 +14,9 @@ export interface ServerConfig {
   chainId?: string;
   verbose?: boolean;
   bitcoinNetwork: BitcoinNetwork;
+  backfillBatchSize?: number;
+  backfillMaxBatchSize?: number;
+  lastBackfillSignature?: string;
 }
 
 export const serverConfigSchema = z.object({
@@ -39,6 +42,9 @@ export const serverConfigSchema = z.object({
   chainId: z.string().optional(),
   verbose: z.boolean().optional(),
   bitcoinNetwork: z.enum(['regtest', 'testnet']),
+  backfillBatchSize: z.number().int().positive().optional(),
+  backfillMaxBatchSize: z.number().int().positive().optional(),
+  lastBackfillSignature: z.string().optional(),
 });
 
 export interface SignBidirectionalEvent {
@@ -117,6 +123,9 @@ export interface PendingTransaction {
   prevouts: PrevoutRef[];
 
   sender: string;
+
+  /** Input indices already submitted to Solana (Bitcoin PSBT only). */
+  submittedInputs?: Set<number>;
 }
 
 // Borsh schema types

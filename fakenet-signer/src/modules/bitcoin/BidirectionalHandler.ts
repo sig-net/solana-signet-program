@@ -1,4 +1,5 @@
-import { RequestIdGenerator } from '../RequestIdGenerator';
+import { contracts } from 'signet.js';
+const { getRequestIdBidirectional } = contracts.solana;
 import { CryptoUtils } from '../CryptoUtils';
 import {
   BitcoinTransactionProcessor,
@@ -20,9 +21,8 @@ export async function handleBitcoinBidirectional(
 ): Promise<void> {
   const { config } = context;
 
-  console.log(`🔍 Bitcoin transaction detected on ${config.bitcoinNetwork}`);
   console.log(
-    `📦 PSBT received (${event.serializedTransaction.length} bytes, ${event.caip2Id})`
+    `📦 bip122: PSBT received (${event.serializedTransaction.length} bytes, ${config.bitcoinNetwork})`
   );
 
   const bitcoinPlan = BitcoinTransactionProcessor.createSigningPlan(
@@ -31,7 +31,7 @@ export async function handleBitcoinBidirectional(
   );
 
   console.log(
-    `✅ PSBT parsed successfully → tx ${bitcoinPlan.explorerTxid} (${bitcoinPlan.inputs.length} input(s))`
+    `✅ bip122: PSBT parsed → txid=${bitcoinPlan.explorerTxid} (${bitcoinPlan.inputs.length} input(s))`
   );
 
   await handleBitcoinSigningPlan(
@@ -76,7 +76,7 @@ async function handleBitcoinSigningPlan(
     throw new Error('Bitcoin PSBT must contain at least one input');
   }
 
-  const { program, wallet, config, pendingTransactions } = context;
+  const { program, wallet, config, pendingTransactions, withTimeout } = context;
 
   // Use the explorer-facing txid (big-endian) for all aggregated request IDs;
   // never flip the byte order here.
@@ -86,31 +86,37 @@ async function handleBitcoinSigningPlan(
     vout,
   }));
 
-  const aggregateRequestId =
-    RequestIdGenerator.generateSignBidirectionalRequestId(
-      event.sender.toString(),
-      Array.from(txidBytes),
-      event.caip2Id,
-      event.keyVersion,
-      event.path,
-      event.algo,
-      event.dest,
-      event.params
-    );
-
-  pendingTransactions.set(plan.explorerTxid, {
-    txHash: plan.explorerTxid,
-    requestId: aggregateRequestId,
-    caip2Id: event.caip2Id,
-    explorerDeserializationSchema: event.outputDeserializationSchema,
-    callbackSerializationSchema: event.respondSerializationSchema,
-    fromAddress: 'bitcoin',
-    nonce: 0,
-    checkCount: 0,
-    namespace: 'bip122',
-    prevouts,
+  const aggregateRequestId = getRequestIdBidirectional({
     sender: event.sender.toString(),
+    payload: Array.from(txidBytes),
+    caip2Id: event.caip2Id,
+    keyVersion: event.keyVersion,
+    path: event.path,
+    algo: event.algo,
+    dest: event.dest,
+    params: event.params,
   });
+
+  // On retry, preserve the existing entry (keeps submittedInputs state)
+  const existing = pendingTransactions.get(plan.explorerTxid);
+  const submittedInputs = existing?.submittedInputs ?? new Set<number>();
+
+  if (!existing) {
+    pendingTransactions.set(plan.explorerTxid, {
+      txHash: plan.explorerTxid,
+      requestId: aggregateRequestId,
+      caip2Id: event.caip2Id,
+      explorerDeserializationSchema: event.outputDeserializationSchema,
+      callbackSerializationSchema: event.respondSerializationSchema,
+      fromAddress: 'bitcoin',
+      nonce: 0,
+      checkCount: 0,
+      namespace: 'bip122',
+      prevouts,
+      sender: event.sender.toString(),
+      submittedInputs,
+    });
+  }
 
   // Simulate MPC nodes returning signatures out of order so clients rely on
   // requestId when matching signatures. Shuffle deterministically per run using
@@ -127,21 +133,27 @@ async function handleBitcoinSigningPlan(
   }
 
   for (const inputPlan of signingQueue) {
+    if (submittedInputs.has(inputPlan.inputIndex)) {
+      console.log(
+        `⏭️ bip122: skipping input ${inputPlan.inputIndex}/${plan.inputs.length} for ${plan.explorerTxid} (already submitted)`
+      );
+      continue;
+    }
+
     const inputIndexBytes = Buffer.alloc(4);
     inputIndexBytes.writeUInt32LE(inputPlan.inputIndex, 0);
     const txDataForInput = Buffer.concat([txidBytes, inputIndexBytes]);
 
-    const perInputRequestId =
-      RequestIdGenerator.generateSignBidirectionalRequestId(
-        event.sender.toString(),
-        Array.from(txDataForInput),
-        event.caip2Id,
-        event.keyVersion,
-        event.path,
-        event.algo,
-        event.dest,
-        event.params
-      );
+    const perInputRequestId = getRequestIdBidirectional({
+      sender: event.sender.toString(),
+      payload: Array.from(txDataForInput),
+      caip2Id: event.caip2Id,
+      keyVersion: event.keyVersion,
+      path: event.path,
+      algo: event.algo,
+      dest: event.dest,
+      params: event.params,
+    });
 
     const perInputRequestIdBytes = Array.from(
       Buffer.from(perInputRequestId.slice(2), 'hex')
@@ -152,17 +164,24 @@ async function handleBitcoinSigningPlan(
       derivedPrivateKey
     );
 
-    const tx = await program.methods
-      .respond([perInputRequestIdBytes], [signature])
-      .accounts({
-        responder: wallet.publicKey,
-      })
-      .rpc();
+    const tx = await withTimeout(
+      program.methods
+        .respond([perInputRequestIdBytes], [signature])
+        .accounts({
+          responder: wallet.publicKey,
+        })
+        .rpc(),
+      `respond-bip122-input-${inputPlan.inputIndex}`
+    );
+
+    submittedInputs.add(inputPlan.inputIndex);
 
     console.log(
-      `✅ Signed input ${inputPlan.inputIndex} for ${plan.explorerTxid} (tx: ${tx})`
+      `✅ bip122: signed input ${inputPlan.inputIndex}/${plan.inputs.length} for ${plan.explorerTxid} (solana tx=${tx})`
     );
   }
 
-  console.log(`🔍 Monitoring ${config.bitcoinNetwork} tx ${plan.explorerTxid}`);
+  console.log(
+    `🔍 Monitoring bip122 tx ${plan.explorerTxid} (${config.bitcoinNetwork})`
+  );
 }

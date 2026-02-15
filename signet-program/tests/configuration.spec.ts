@@ -79,6 +79,10 @@ describe('Configuration Functions', () => {
       const depositUpdatedEvents = events.filter(
         (e) => e.name === 'depositUpdatedEvent'
       );
+      assert.ok(
+        depositUpdatedEvents.length > 0,
+        'DepositUpdatedEvent should have been emitted'
+      );
 
       const eventData = depositUpdatedEvents[0].data;
       assert.ok(
@@ -124,8 +128,8 @@ describe('Configuration Functions', () => {
         await program.account.programState.fetch(programStatePda);
 
         if (
-          programStateInfoBefore.data &&
           programStateInfoBefore &&
+          programStateInfoBefore.data &&
           programStateInfoBefore.lamports > 0
         ) {
           const rentExemptAmount =
@@ -228,9 +232,10 @@ describe('Configuration Functions', () => {
     });
 
     it('Should fail when trying to withdraw more than available', async () => {
-      const programStateInfo =
-        (await connection.getAccountInfo(programStatePda)) ||
-        (await program.provider.connection.getAccountInfo(programStatePda));
+      const programStateInfo = await connection.getAccountInfo(
+        programStatePda,
+        'confirmed'
+      );
 
       if (!programStateInfo) {
         throw new Error('Program state account not found');
