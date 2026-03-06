@@ -36,9 +36,8 @@ export class EthereumTransactionProcessor {
 
     // Decode and prepare signed transaction
     const decoded = ethers.decodeRlp(rlpData) as string[];
-    const nonce = isEIP1559
-      ? parseInt(decoded[1], 16) // Second field for EIP-1559
-      : parseInt(decoded[0], 16); // First field for legacy
+    const nonceHex = isEIP1559 ? decoded[1] : decoded[0];
+    const nonce = (!nonceHex || nonceHex === '0x') ? 0 : parseInt(nonceHex, 16);
     console.log(' 📝 Transaction nonce:', nonce);
     const vValue = isEIP1559 ? signature.v - 27 : signature.v;
 
