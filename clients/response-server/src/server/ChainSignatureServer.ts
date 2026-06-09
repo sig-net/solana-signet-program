@@ -2,7 +2,8 @@ import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
-import * as bitcoin from 'bitcoinjs-lib'; 
+import * as bitcoin from 'bitcoinjs-lib';
+import { ethers } from 'ethers'; 
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -34,6 +35,8 @@ import { CpiEventParser } from '../events/CpiEventParser';
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
+import { MidnightMonitor, type MidnightSigningRequest } from '../modules/MidnightMonitor';
+import { EthereumTransactionProcessor } from '../modules/ethereum/EthereumTransactionProcessor';
 
 import * as borsh from 'borsh';
 
@@ -61,6 +64,7 @@ export class ChainSignatureServer {
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
   private substrateMonitor: SubstrateMonitor | null = null;
+  private midnightMonitor: MidnightMonitor | null = null;
   private inProgressTransactions = new Set<string>(); // Track transactions being processed
 
   constructor(config: ServerConfig) {
@@ -100,6 +104,7 @@ export class ChainSignatureServer {
     if (this.config.substrateWsUrl) {
       this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
     }
+    this.midnightMonitor = MidnightMonitor.fromServerConfig(this.config);
   }
 
   async start() {
@@ -111,6 +116,10 @@ export class ChainSignatureServer {
 
     if (this.substrateMonitor) {
       await this.connectToSubstrate();
+    }
+
+    if (this.midnightMonitor) {
+      await this.connectToMidnight();
     }
 
     this.startTransactionMonitor();
@@ -168,6 +177,91 @@ export class ChainSignatureServer {
     } catch (error) {
       console.log({ error }, 'Failed to connect to Substrate');
     }
+  }
+
+  private async connectToMidnight() {
+    if (!this.midnightMonitor) return;
+
+    try {
+      await this.midnightMonitor.initialize();
+      console.log('Connected to Midnight network');
+
+      await this.midnightMonitor.start({
+        onSigningRequest: async (request: MidnightSigningRequest) => {
+          console.log(
+            `Midnight signing request: 0x${Buffer.from(request.requestId).toString('hex')} amount=${request.amount} caip2=${request.caip2Id}`
+          );
+          try {
+            await this.handleMidnightSigningRequest(request);
+          } catch (error) {
+            console.error('Error processing Midnight signing request:', error);
+          }
+        },
+      });
+    } catch (error) {
+      console.error('Failed to connect to Midnight:', error);
+    }
+  }
+
+  /**
+   * Handle a signing request from the Midnight vault contract.
+   *
+   * The MPC reads calldata args + EVM gas params from the contract's ledger,
+   * builds ABI calldata + RLP transaction off-chain from contract-controlled values,
+   * signs with the derived secp256k1 key, and sends the signed tx to the client
+   * via WebSocket. The CLIENT broadcasts to Sepolia. The MPC monitors for the tx hash.
+   */
+  private async handleMidnightSigningRequest(request: MidnightSigningRequest) {
+    if (!this.midnightMonitor) return;
+
+    // Build the unsigned EVM transaction from contract-controlled calldata + gas params
+    const unsignedTxBytes = this.midnightMonitor.buildSerializedTransaction(request);
+
+    // Derive the signing key using the contract's path field as the derivation path.
+    // Path is the userCommitment stored as Field → Bytes<256> (raw bytes, not UTF-8).
+    const pathHex = this.midnightMonitor.getPathHex(request);
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      pathHex,
+      request.predecessor,
+      this.config.mpcRootKey,
+      'midnight:testnet'
+    );
+
+    // Parse the unsigned tx and sign it properly with ethers
+    const unsignedTx = ethers.Transaction.from(ethers.hexlify(unsignedTxBytes));
+    const wallet = new ethers.Wallet(derivedPrivateKey);
+    const signedTxHex = await wallet.signTransaction(unsignedTx);
+    const signedTx = ethers.Transaction.from(signedTxHex);
+    const signedTxHash = signedTx.hash!;
+
+    console.log(`Midnight: Signed tx ${signedTxHash}`);
+    console.log(`  Signing address: ${wallet.address}`);
+
+    const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
+
+    // Send the signed transaction to the client via WebSocket (client will broadcast)
+    this.midnightMonitor.broadcastSignedTransaction({
+      requestId: requestIdHex,
+      signedTransaction: signedTxHex,
+      txHash: signedTxHash,
+    });
+
+    // Store as pending transaction for the monitor to track.
+    // The client broadcasts to Sepolia; the MPC watches for confirmation.
+    pendingTransactions.set(signedTxHash, {
+      txHash: signedTxHash,
+      requestId: requestIdHex,
+      caip2Id: request.caip2Id,
+      explorerDeserializationSchema: Buffer.from(request.outputDeserializationSchema),
+      callbackSerializationSchema: Buffer.from(request.respondSerializationSchema),
+      fromAddress: wallet.address,
+      nonce: Number(unsignedTx.nonce),
+      checkCount: 0,
+      namespace: request.caip2Id.split(':')[0],
+      source: 'midnight',
+    });
+
+    console.log(`Midnight: Monitoring EVM tx ${signedTxHash} (client will broadcast)`);
   }
 
   private async ensureInitialized() {
@@ -328,39 +422,50 @@ export class ChainSignatureServer {
     if (!requestId) {
       throw new Error(`Missing request ID for tx ${txHash}`);
     }
-    const serializedOutput = await OutputSerializer.serialize(
-      result.output,
-      SerializationFormat.Borsh,
-      txInfo.callbackSerializationSchema
-    );
-
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-    const signature = await CryptoUtils.signBidirectionalResponse(
-      requestIdBytes,
-      serializedOutput,
-      this.config.mpcRootKey
-    );
 
     try {
-      if (txInfo.source === 'polkadot' && this.substrateMonitor) {
-        await this.substrateMonitor.sendRespondBidirectional(
+      if (txInfo.source === 'midnight' && this.midnightMonitor) {
+        const serializedOutput = await OutputSerializer.serialize(
+          result.output,
+          SerializationFormat.Midnight,
+          txInfo.callbackSerializationSchema
+        );
+        await this.midnightMonitor.signAndBroadcastResponse(requestIdBytes, serializedOutput);
+        console.log('✅ Response signed and broadcast via WebSocket');
+      } else {
+        // Solana / Substrate: serialize output + compute ed25519 signature
+        const serializedOutput = await OutputSerializer.serialize(
+          result.output,
+          SerializationFormat.Borsh,
+          txInfo.callbackSerializationSchema
+        );
+        const signature = await CryptoUtils.signBidirectionalResponse(
           requestIdBytes,
           serializedOutput,
-          signature
+          this.config.mpcRootKey
         );
-        console.log('✅ Response sent to Substrate');
-      } else {
-        await this.program.methods
-          .respondBidirectional(
-            Array.from(requestIdBytes),
-            Buffer.from(serializedOutput),
+
+        if (txInfo.source === 'polkadot' && this.substrateMonitor) {
+          await this.substrateMonitor.sendRespondBidirectional(
+            requestIdBytes,
+            serializedOutput,
             signature
-          )
-          .accounts({
-            responder: this.wallet.publicKey,
-          })
-          .rpc();
-        console.log('✅ Response sent to Solana');
+          );
+          console.log('✅ Response sent to Substrate');
+        } else {
+          await this.program.methods
+            .respondBidirectional(
+              Array.from(requestIdBytes),
+              Buffer.from(serializedOutput),
+              signature
+            )
+            .accounts({
+              responder: this.wallet.publicKey,
+            })
+            .rpc();
+          console.log('✅ Response sent to Solana');
+        }
       }
 
       pendingTransactions.delete(txHash);
@@ -385,45 +490,62 @@ export class ChainSignatureServer {
     console.warn(`❌ Transaction failed: ${txHash}`);
 
     try {
-      const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
-
-      const errorSchema = { struct: { error: 'bool' } };
-      const borshData = borsh.serialize(errorSchema, { error: true });
-      const errorData = Buffer.concat([MAGIC_ERROR_PREFIX, borshData]);
-
-      const serializedOutput = new Uint8Array(errorData);
-
       const requestId = txInfo.requestId;
       if (!requestId) {
         throw new Error(`Missing request ID for tx ${txHash}`);
       }
       const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-      const signature = await CryptoUtils.signBidirectionalResponse(
-        requestIdBytes,
-        serializedOutput,
-        this.config.mpcRootKey
-      );
 
-      // Check source and send to appropriate chain (same logic as handleCompletedTransaction)
-      if (txInfo.source === 'polkadot' && this.substrateMonitor) {
-        await this.substrateMonitor.sendRespondBidirectional(
+      if (txInfo.source === 'midnight' && this.midnightMonitor) {
+        // Midnight: deadbeef prefix + serialized error using respond schema.
+        // deadbeef in first 4 bytes makes claim() fail (byte 0 = 0xde != 0x01),
+        // and a future refund() circuit can detect it via slice<4>(outputData, 0).
+        const MAGIC_ERROR_PREFIX = [0xde, 0xad, 0xbe, 0xef];
+        const errorOutput = { success: false };
+        const serializedError = await OutputSerializer.serialize(
+          errorOutput,
+          SerializationFormat.Midnight,
+          txInfo.callbackSerializationSchema
+        );
+        const outputData = new Uint8Array(MAGIC_ERROR_PREFIX.length + serializedError.length);
+        outputData.set(MAGIC_ERROR_PREFIX);
+        outputData.set(serializedError, MAGIC_ERROR_PREFIX.length);
+        await this.midnightMonitor.signAndBroadcastResponse(requestIdBytes, outputData);
+        console.log('✅ Error response signed and broadcast via WebSocket');
+      } else {
+        // Solana / Substrate: serialize error + compute ed25519 signature
+        const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+        const errorSchema = { struct: { error: 'bool' } };
+        const borshData = borsh.serialize(errorSchema, { error: true });
+        const errorData = Buffer.concat([MAGIC_ERROR_PREFIX, borshData]);
+        const serializedOutput = new Uint8Array(errorData);
+
+        const signature = await CryptoUtils.signBidirectionalResponse(
           requestIdBytes,
           serializedOutput,
-          signature
+          this.config.mpcRootKey
         );
-        console.log('✅ Error response sent to Substrate');
-      } else {
-        await this.program.methods
-          .respondBidirectional(
-            Array.from(requestIdBytes),
-            Buffer.from(serializedOutput),
+
+        if (txInfo.source === 'polkadot' && this.substrateMonitor) {
+          await this.substrateMonitor.sendRespondBidirectional(
+            requestIdBytes,
+            serializedOutput,
             signature
-          )
-          .accounts({
-            responder: this.wallet.publicKey,
-          })
-          .rpc();
-        console.log('✅ Error response sent to Solana');
+          );
+          console.log('✅ Error response sent to Substrate');
+        } else {
+          await this.program.methods
+            .respondBidirectional(
+              Array.from(requestIdBytes),
+              Buffer.from(serializedOutput),
+              signature
+            )
+            .accounts({
+              responder: this.wallet.publicKey,
+            })
+            .rpc();
+          console.log('✅ Error response sent to Solana');
+        }
       }
     } catch (error) {
       console.error(
@@ -741,6 +863,10 @@ export class ChainSignatureServer {
     if (this.substrateMonitor) {
       await this.substrateMonitor.disconnect();
       this.substrateMonitor = null;
+    }
+    if (this.midnightMonitor) {
+      await this.midnightMonitor.stop();
+      this.midnightMonitor = null;
     }
   }
 }

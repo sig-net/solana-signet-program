@@ -5,6 +5,7 @@ import {
   TransactionOutputData,
   BorshSchema,
   AbiSchemaField,
+  MidnightSchemaField,
   SerializableValue,
 } from '../types';
 
@@ -14,13 +15,29 @@ export class OutputSerializer {
     format: number,
     schema: Buffer | number[]
   ): Promise<Uint8Array> {
+    this.validateSchema(schema);
+
     if (format === 0) {
       return this.serializeBorsh(output, schema);
     } else if (format === 1) {
       return this.serializeAbi(output, schema);
+    } else if (format === 3) {
+      return this.serializeMidnight(output, schema);
     }
 
     throw new Error(`Unsupported serialization format: ${format}`);
+  }
+
+  private static validateSchema(schema: Buffer | number[]): void {
+    const schemaStr = this.getSchemaString(schema).trim();
+    if (!schemaStr) {
+      throw new Error('Empty serialization schema — cannot serialize without a valid schema');
+    }
+    try {
+      JSON.parse(schemaStr);
+    } catch {
+      throw new Error(`Invalid serialization schema — not valid JSON: ${schemaStr.slice(0, 100)}`);
+    }
   }
 
   private static async serializeBorsh(
@@ -121,6 +138,150 @@ export class OutputSerializer {
     );
 
     return ethers.getBytes(encoded);
+  }
+
+  /**
+   * Midnight serialization for Compact contracts.
+   *
+   * Layout rules (each value LE, matching Compact's `slice<N>(data, offset) as Field`):
+   *   Fixed types (bool, uint*, int*, address, bytes1-32): 32 bytes LE
+   *   string/bytes: 32-byte LE length + payload zero-padded to maxBytes
+   *   Dynamic arrays (type[]): 32-byte LE count + each element 32 bytes LE, padded to maxItems
+   *
+   * Fields are concatenated in schema order. The contract reads at compile-time-known offsets.
+   */
+  private static async serializeMidnight(
+    output: TransactionOutputData,
+    schema: Buffer | number[]
+  ): Promise<Uint8Array> {
+    const schemaStr = this.getSchemaString(schema);
+    const parsedSchema = JSON.parse(schemaStr) as MidnightSchemaField[];
+
+    let dataToEncode: TransactionOutputData = output;
+    if (output.isFunctionCall === false) {
+      dataToEncode = this.createMidnightDefaults(parsedSchema, output);
+    }
+
+    const totalSize = this.midnightTotalSize(parsedSchema);
+    const result = new Uint8Array(totalSize);
+    let offset = 0;
+
+    for (const field of parsedSchema) {
+      const value = dataToEncode[field.name];
+      const { bytes, size } = this.midnightEncodeField(value, field);
+      result.set(bytes, offset);
+      offset += size;
+    }
+
+    return result;
+  }
+
+  private static midnightFieldSize(field: MidnightSchemaField): number {
+    const { type } = field;
+    if (type === 'string' || type === 'bytes') {
+      if (!field.maxBytes) throw new Error(`Midnight schema: '${field.name}' (${type}) requires maxBytes`);
+      return 32 + field.maxBytes;
+    }
+    if (type.endsWith('[]')) {
+      if (!field.maxItems) throw new Error(`Midnight schema: '${field.name}' (${type}) requires maxItems`);
+      return 32 + field.maxItems * 32;
+    }
+    return 32;
+  }
+
+  private static midnightTotalSize(schema: MidnightSchemaField[]): number {
+    return schema.reduce((sum, f) => sum + this.midnightFieldSize(f), 0);
+  }
+
+  private static midnightEncodeField(
+    value: unknown,
+    field: MidnightSchemaField,
+  ): { bytes: Uint8Array; size: number } {
+    const { type } = field;
+    const size = this.midnightFieldSize(field);
+
+    if (type.endsWith('[]')) {
+      const arr = value as unknown[];
+      const bytes = new Uint8Array(size);
+      bytes.set(this.bigintToBytes32LE(BigInt(arr.length)), 0);
+      for (let i = 0; i < Math.min(arr.length, field.maxItems!); i++) {
+        const elemValue = typeof arr[i] === 'bigint' ? arr[i] as bigint : BigInt(arr[i] as number);
+        bytes.set(this.bigintToBytes32LE(elemValue), 32 + i * 32);
+      }
+      return { bytes, size };
+    }
+
+    if (type === 'bool') {
+      return { bytes: this.bigintToBytes32LE(value ? 1n : 0n), size };
+    }
+
+    if (type.startsWith('uint') || type.startsWith('int')) {
+      const n = typeof value === 'bigint' ? value : BigInt(value as number);
+      return { bytes: this.bigintToBytes32LE(n), size };
+    }
+
+    if (type === 'address') {
+      const addr = typeof value === 'string' ? value : String(value);
+      const addrBigint = BigInt(addr);
+      return { bytes: this.bigintToBytes32LE(addrBigint), size };
+    }
+
+    if (type.match(/^bytes\d+$/)) {
+      const raw = value instanceof Uint8Array ? value : ethers.getBytes(value as string);
+      const word = new Uint8Array(32);
+      word.set(raw.slice(0, 32));
+      return { bytes: word, size };
+    }
+
+    if (type === 'string') {
+      const str = typeof value === 'string' ? value : String(value);
+      const payload = new TextEncoder().encode(str);
+      const bytes = new Uint8Array(size);
+      const lenBytes = this.bigintToBytes32LE(BigInt(payload.length));
+      bytes.set(lenBytes, 0);
+      bytes.set(payload.slice(0, field.maxBytes!), 32);
+      return { bytes, size };
+    }
+
+    if (type === 'bytes') {
+      const raw = value instanceof Uint8Array ? value : ethers.getBytes(value as string);
+      const bytes = new Uint8Array(size);
+      const lenBytes = this.bigintToBytes32LE(BigInt(raw.length));
+      bytes.set(lenBytes, 0);
+      bytes.set(raw.slice(0, field.maxBytes!), 32);
+      return { bytes, size };
+    }
+
+    throw new Error(`Unsupported Midnight type: ${type}`);
+  }
+
+  private static bigintToBytes32LE(n: bigint): Uint8Array {
+    const bytes = new Uint8Array(32);
+    let val = n < 0n ? -n : n;
+    for (let i = 0; i < 32 && val > 0n; i++) {
+      bytes[i] = Number(val & 0xffn);
+      val >>= 8n;
+    }
+    return bytes;
+  }
+
+  private static createMidnightDefaults(
+    schema: MidnightSchemaField[],
+    fallback?: TransactionOutputData,
+  ): TransactionOutputData {
+    const data: TransactionOutputData = {};
+    for (const field of schema) {
+      if (fallback && field.name in fallback) {
+        data[field.name] = fallback[field.name];
+        continue;
+      }
+      if (field.type === 'bool') data[field.name] = true;
+      else if (field.type === 'string') data[field.name] = '';
+      else if (field.type === 'bytes') data[field.name] = new Uint8Array(0);
+      else if (field.type.endsWith('[]')) data[field.name] = [];
+      else data[field.name] = 0n;
+    }
+    return data;
   }
 
   private static getSchemaString(schema: Buffer | number[]): string {

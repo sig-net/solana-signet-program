@@ -12,7 +12,15 @@ async function main() {
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
     verbose: envConfig.VERBOSE,
     bitcoinNetwork: envConfig.BITCOIN_NETWORK,
-    substrateWsUrl: envConfig.SUBSTRATE_WS_URL
+    substrateWsUrl: envConfig.SUBSTRATE_WS_URL,
+    midnightIndexerUrl: envConfig.MIDNIGHT_INDEXER_URL,
+    midnightIndexerWsUrl: envConfig.MIDNIGHT_INDEXER_WS_URL,
+    midnightNodeUrl: envConfig.MIDNIGHT_NODE_URL,
+    midnightProofServerUrl: envConfig.MIDNIGHT_PROOF_SERVER_URL,
+    midnightContractAddresses: envConfig.MIDNIGHT_CONTRACT_ADDRESSES
+      ? envConfig.MIDNIGHT_CONTRACT_ADDRESSES.split(',').map(s => s.trim()).filter(Boolean)
+      : undefined,
+    midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,
   };
 
   const server = new ChainSignatureServer(config);

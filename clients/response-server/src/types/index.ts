@@ -15,6 +15,13 @@ export interface ServerConfig {
   verbose?: boolean;
   bitcoinNetwork: BitcoinNetwork;
   substrateWsUrl?: string;
+  // Midnight config
+  midnightIndexerUrl?: string;
+  midnightIndexerWsUrl?: string;
+  midnightNodeUrl?: string;
+  midnightProofServerUrl?: string;
+  midnightContractAddresses?: string[];
+  midnightWalletSeed?: string;
 }
 
 export const serverConfigSchema = z.object({
@@ -41,6 +48,13 @@ export const serverConfigSchema = z.object({
   verbose: z.boolean().optional(),
   bitcoinNetwork: z.enum(['regtest', 'testnet']),
   substrateWsUrl: z.string().optional(),
+  // Midnight config
+  midnightIndexerUrl: z.string().optional(),
+  midnightIndexerWsUrl: z.string().optional(),
+  midnightNodeUrl: z.string().optional(),
+  midnightProofServerUrl: z.string().optional(),
+  midnightContractAddresses: z.array(z.string()).optional(),
+  midnightWalletSeed: z.string().optional(),
 });
 
 export interface SignBidirectionalEvent {
@@ -116,7 +130,7 @@ export interface PendingTransaction {
    * the monitor can detect if any input was double-spent elsewhere.
    */
   prevouts?: PrevoutRef[];
-  source?: 'solana' | 'polkadot';
+  source?: 'solana' | 'polkadot' | 'midnight';
 }
 
 // Borsh schema types
@@ -133,6 +147,14 @@ export interface BorshSchema {
 export interface AbiSchemaField {
   name: string;
   type: string;
+}
+
+// Midnight schema field — extends ABI field with size hints for dynamic types
+export interface MidnightSchemaField {
+  name: string;
+  type: string;
+  maxBytes?: number;
+  maxItems?: number;
 }
 
 // Serialization output types

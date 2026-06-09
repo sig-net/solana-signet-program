@@ -153,6 +153,10 @@ export class EthereumMonitor {
                 new Uint8Array(explorerDeserializationSchema)
               );
 
+        if (!schemaStr.trim()) {
+          throw new Error('Empty output deserialization schema — cannot decode EVM return value');
+        }
+
         const schema = JSON.parse(schemaStr) as AbiSchemaField[];
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
           schema.map((s) => s.type),

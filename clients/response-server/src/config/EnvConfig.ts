@@ -21,7 +21,16 @@ const envSchema = z.object({
     .optional()
     .transform((val) => val === 'true'),
   BITCOIN_NETWORK: z.enum(['regtest', 'testnet']).optional().default('testnet'),
-  SUBSTRATE_WS_URL: z.string().url().default('ws://localhost:8000'),
+  SUBSTRATE_WS_URL: z.string().url().optional(),
+  // Midnight config
+  MIDNIGHT_INDEXER_URL: z.string().url().optional(),
+  MIDNIGHT_INDEXER_WS_URL: z.string().optional(),
+  MIDNIGHT_NODE_URL: z.string().url().optional(),
+  MIDNIGHT_PROOF_SERVER_URL: z.string().url().optional(),
+  MIDNIGHT_CONTRACT_ADDRESSES: z.string().optional(),
+  MIDNIGHT_WALLET_SEED: z.string().optional(),
+  MIDNIGHT_ZK_CONFIG_PATH: z.string().optional(),
+  MIDNIGHT_CONTRACT_MODULE_PATH: z.string().optional(),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -36,7 +45,15 @@ function validateEnv(): EnvConfig {
       PROGRAM_ID: process.env.PROGRAM_ID,
       VERBOSE: process.env.VERBOSE,
       BITCOIN_NETWORK: process.env.BITCOIN_NETWORK,
-      SUBSTRATE_WS_URL: process.env.SUBSTRATE_WS_URL
+      SUBSTRATE_WS_URL: process.env.SUBSTRATE_WS_URL,
+      MIDNIGHT_INDEXER_URL: process.env.MIDNIGHT_INDEXER_URL,
+      MIDNIGHT_INDEXER_WS_URL: process.env.MIDNIGHT_INDEXER_WS_URL,
+      MIDNIGHT_NODE_URL: process.env.MIDNIGHT_NODE_URL,
+      MIDNIGHT_PROOF_SERVER_URL: process.env.MIDNIGHT_PROOF_SERVER_URL,
+      MIDNIGHT_CONTRACT_ADDRESSES: process.env.MIDNIGHT_CONTRACT_ADDRESSES,
+      MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,
+      MIDNIGHT_ZK_CONFIG_PATH: process.env.MIDNIGHT_ZK_CONFIG_PATH,
+      MIDNIGHT_CONTRACT_MODULE_PATH: process.env.MIDNIGHT_CONTRACT_MODULE_PATH,
     });
 
     return env;
