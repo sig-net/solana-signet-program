@@ -18,7 +18,10 @@
 import { Buffer } from 'buffer';
 import WebSocket, { WebSocketServer } from 'ws';
 import type { ServerConfig } from '../types';
-import { schnorrSign, deriveJubjubKeypair, hashJubjubPoint } from '../managed/erc20-vault/signet/schnorr';
+import { schnorrSign, buildSignetMessage, deriveJubjubKeypair, hashJubjubPoint } from '../managed/erc20-vault/signet/schnorr';
+// Shared, app-neutral Schnorr challenge — one compiled copy of the `schnorr`
+// module, identical for every signet contract. The MPC stays contract-agnostic.
+import { pureCircuits as schnorrLib } from '../managed/schnorr-lib/contract/index.js';
 import { buildTransactionFromRequest } from '../managed/erc20-vault/signet/calldata-builder';
 import type { SigningRequest, EvmGasParams, CalldataFields } from '../managed/erc20-vault/signet/types';
 import { OUTPUT_DATA_SIZE } from '../managed/erc20-vault/signet/constants';
@@ -27,29 +30,34 @@ import { calldataArgKey, computeRequestId, computeCalldataArgsCommitment } from 
 
 // ---- Signet Standard Field Indices (fixed across all contracts) ----
 // All signet-conforming contracts MUST declare these fields first.
+// Flat field indices in ledger declaration order. The runtime chunks fields
+// into nested arrays whose split point depends on the TOTAL field count, so we
+// resolve the chunk dynamically (see getNode) rather than hardcode [chunk,inner].
+// This stays generic across signet contracts regardless of trailing/contract
+// fields or sealed config fields.
 const IDX = {
-  mpcPubKeyHash:         [0, 0],
-  signetNonce:           [0, 1],
-  signetRequestNonce:    [0, 2],
-  signetCalldataFuncSig: [0, 3],
-  signetCalldataArgCount:[0, 4],
-  signetCalldataArgs:    [0, 5],
-  signetEvmTo:           [0, 6],
-  signetEvmChainId:      [0, 7],
-  signetEvmNonce:        [0, 8],
-  signetEvmGasLimit:     [1, 0],
-  signetEvmMaxFee:       [1, 1],
-  signetEvmPriorityFee:  [1, 2],
-  signetEvmValue:        [1, 3],
-  signetCaip2Id:         [1, 4],
-  signetKeyVersion:      [1, 5],
-  signetPath:            [1, 6],
-  signetAlgo:            [1, 7],
-  signetDest:            [1, 8],
-  signetParams:          [1, 9],
-  signetOutputSchema:    [1, 10],
-  signetRespondSchema:   [1, 11],
-  signetOutputData:      [1, 12],
+  mpcPubKeyHash:          0,
+  signetNonce:            1,
+  signetRequestNonce:     2,
+  signetCalldataFuncSig:  3,
+  signetCalldataArgCount: 4,
+  signetCalldataArgs:     5,
+  signetEvmTo:            6,
+  signetEvmChainId:       7,
+  signetEvmNonce:         8,
+  signetEvmGasLimit:      9,
+  signetEvmMaxFee:        10,
+  signetEvmPriorityFee:   11,
+  signetEvmValue:         12,
+  signetCaip2Id:          13,
+  signetKeyVersion:       14,
+  signetPath:             15,
+  signetAlgo:             16,
+  signetDest:             17,
+  signetParams:           18,
+  signetOutputSchema:     19,
+  signetRespondSchema:    20,
+  signetOutputData:       21,
 } as const;
 
 // ---- Types ----
@@ -63,10 +71,8 @@ export interface SignedResponse {
   requestId: string;
   outputData: string;
   pk: { x: string; y: string };
-  sigR: { x: string; y: string };
-  sigS: string;
-  challengeH: string;
-  challengeQuotient: string;
+  announcement: { x: string; y: string };
+  response: string;
 }
 
 export interface MidnightMonitorConfig {
@@ -138,26 +144,35 @@ export class MidnightMonitor {
   // State is a nested array: root[i][j] where [i,j] matches the signet field index.
   // StateMap uses .keys() + .get() — it is NOT iterable with for...of.
 
-  private getNode(state: any, index: readonly [number, number]): any {
+  // Resolve a flat field index to its node by walking the runtime's field
+  // chunks. The chunk boundaries shift with total field count, so we locate the
+  // chunk dynamically instead of assuming a fixed [chunk, inner] split.
+  private getNode(state: any, flatIndex: number): any {
     const raw = state.state ?? state;
-    return raw.asArray()[index[0]].asArray()[index[1]];
+    let idx = flatIndex;
+    for (const chunk of raw.asArray()) {
+      const arr = chunk.asArray();
+      if (idx < arr.length) return arr[idx];
+      idx -= arr.length;
+    }
+    throw new Error(`Field index ${flatIndex} out of range`);
   }
 
-  private readCounter(state: any, index: readonly [number, number]): bigint {
+  private readCounter(state: any, index: number): bigint {
     const node = this.getNode(state, index);
     const cr = this.compactRuntime;
     const desc = new cr.CompactTypeUnsignedInteger(18446744073709551615n, 8);
     return desc.fromValue([...node.asCell().value]);
   }
 
-  private readCell(state: any, index: readonly [number, number], size: number): Uint8Array {
+  private readCell(state: any, index: number, size: number): Uint8Array {
     const node = this.getNode(state, index);
     const cr = this.compactRuntime;
     const desc = new cr.CompactTypeBytes(size);
     return desc.fromValue([...node.asCell().value]);
   }
 
-  private readMapKeys(state: any, index: readonly [number, number]): Array<{ raw: any; bytes: Uint8Array }> {
+  private readMapKeys(state: any, index: number): Array<{ raw: any; bytes: Uint8Array }> {
     const node = this.getNode(state, index);
     const cr = this.compactRuntime;
     const keyDesc = new cr.CompactTypeBytes(32);
@@ -165,7 +180,7 @@ export class MidnightMonitor {
     return map.keys().map((k: any) => ({ raw: k, bytes: keyDesc.fromValue([...k.value]) }));
   }
 
-  private lookupMap(state: any, index: readonly [number, number], key: Uint8Array, valueDesc: any): any {
+  private lookupMap(state: any, index: number, key: Uint8Array, valueDesc: any): any {
     const node = this.getNode(state, index);
     const map = node.asMap();
     const mapKeys = map.keys();
@@ -200,7 +215,7 @@ export class MidnightMonitor {
         if (odKeys.some(({ bytes: k }) => k.every((b: number, i: number) => b === requestId[i]))) continue;
       } catch { /* no outputData map yet */ }
 
-      const lookup = (idx: readonly [number, number], key: Uint8Array, desc: any) => {
+      const lookup = (idx: number, key: Uint8Array, desc: any) => {
         return this.lookupMap(state, idx, key, desc);
       };
 
@@ -390,16 +405,17 @@ export class MidnightMonitor {
     const outputData = new Uint8Array(OUTPUT_DATA_SIZE);
     outputData.set(evmReturnData.slice(0, OUTPUT_DATA_SIZE));
 
-    const sig = schnorrSign(this.jubjubSk, requestId, outputData);
+    const msg = buildSignetMessage(requestId, outputData);
+    const sig = schnorrSign(this.jubjubSk, msg, (ax, ay, px, py, m) =>
+      schnorrLib.schnorrChallenge(ax, ay, px, py, m),
+    );
 
     const response: SignedResponse = {
       requestId: requestIdHex,
       outputData: Buffer.from(outputData).toString('hex'),
       pk: { x: this.jubjubPk.x.toString(), y: this.jubjubPk.y.toString() },
-      sigR: { x: sig.R.x.toString(), y: sig.R.y.toString() },
-      sigS: sig.s.toString(),
-      challengeH: sig.challengeH.toString(),
-      challengeQuotient: sig.challengeQuotient.toString(),
+      announcement: { x: sig.announcement.x.toString(), y: sig.announcement.y.toString() },
+      response: sig.response.toString(),
     };
 
     if (this.wss) {

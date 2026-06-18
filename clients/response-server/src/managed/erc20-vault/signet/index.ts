@@ -26,6 +26,9 @@ export {
 export type { RequestIdFields } from './request-id';
 export { computeRequestId, calldataArgKey, computeCalldataArgsCommitment } from './request-id';
 
+export type { SignetLedger, SignetMap } from './state-reader';
+export { readRequest, readAllRequests, readCalldataArgs, matchesMpcPubKeyHash } from './state-reader';
+
 export type { EvmTxParams } from './tx-builder';
 export { buildUnsignedEip1559Tx, buildErc20TransferData } from './tx-builder';
 
@@ -40,15 +43,15 @@ export type {
   CalldataFields,
 } from './types';
 
-export type { SchnorrSignature } from './schnorr';
+export type { SchnorrSignature, SchnorrChallengeFn } from './schnorr';
 export {
   JUBJUB_ORDER,
   BLS_ORDER,
   schnorrSign,
   schnorrVerify,
+  buildSignetMessage,
   deriveJubjubKeypair,
   hashJubjubPoint,
-  computeChallenge,
   bigintToBytes32,
   bytesToBigint,
 } from './schnorr';

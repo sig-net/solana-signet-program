@@ -4,25 +4,21 @@
  * Implements Schnorr signing and verification using the Jubjub curve
  * embedded in BLS12-381, via Midnight's compact-runtime EC operations.
  *
- * Protocol:
- *   Sign(sk, requestId, outputData):
- *     pk = sk * G
- *     k  = Hash(sk, requestId, attempt) % JUBJUB_ORDER   (deterministic nonce)
- *     R  = k * G
- *     h_full = Hash(R, pk, requestId, Hash(outputData)) as Field
- *     h  = h_full % JUBJUB_ORDER           (reduced challenge)
- *     s  = (k + h * sk) % JUBJUB_ORDER
- *     Return (R, s, h, quotient)
+ * Matches the shared `schnorr` Compact module (Midnight zkloan polyfill):
+ *   Sign(sk, msg):
+ *     pk = sk * G;  k = random;  R = k * G
+ *     cFull = transientHash(R.x, R.y, pk.x, pk.y, msg)   (Poseidon, via schnorrChallenge)
+ *     c = cFull mod 2^248                                (truncation; circuit does the same)
+ *     s = (k + c * sk) mod JUBJUB_ORDER
+ *     Return (announcement = R, response = s)
  *
- *   Verify(pk, requestId, outputData, R, s, h, quotient):
- *     h_full = Hash(R, pk, requestId, Hash(outputData)) as Field
- *     Check: h + quotient * JUBJUB_ORDER == h_full
- *     Check: s * G == R + h * pk
+ *   Verify(pk, msg, R, s):  s * G == R + c * pk
  *
- * The challenge reduction (h, quotient) is needed because Midnight's
- * EC operations reject scalars >= JUBJUB_ORDER.
+ * The challenge is Poseidon (transientHash), so the caller injects the
+ * contract's `pureCircuits.schnorrChallenge` to compute it identically.
  */
 
+import { randomBytes } from 'node:crypto';
 import {
   ecMulGenerator,
   ecMul,
@@ -47,8 +43,6 @@ export const BLS_ORDER = 5243587517512619047944774050818596583769055250052763782
 const bytes32Type = new CompactTypeBytes(32);
 const bytes4096Type = new CompactTypeBytes(4096);
 const vec2x32Type = new CompactTypeVector(2, bytes32Type);
-const vec3x32Type = new CompactTypeVector(3, bytes32Type);
-const vec4x32Type = new CompactTypeVector(4, bytes32Type);
 
 // ---- Scalar/bytes conversion ----
 
@@ -80,126 +74,90 @@ export function bytesToBigint(bytes: Uint8Array): bigint {
 
 // ---- Schnorr signature ----
 
-/** Result of a Schnorr signature. */
+/** 2^248 — challenge truncation modulus (matches the `schnorr` module). */
+const TWO_248 = 452312848583266388373324160190187140051835877600158453279131187530910662656n;
+
+/** Result of a Schnorr signature (matches the `schnorr` module's SchnorrSignature). */
 export interface SchnorrSignature {
   /** Nonce commitment R = k * G. */
-  R: JubjubPoint;
-  /** Signature scalar s = (k + h * sk) mod JUBJUB_ORDER. */
-  s: bigint;
-  /** Reduced challenge h = hash_full mod JUBJUB_ORDER. */
-  challengeH: bigint;
-  /** Quotient of the challenge reduction (hash_full - h) / JUBJUB_ORDER. */
-  challengeQuotient: bigint;
+  announcement: JubjubPoint;
+  /** Signature scalar s = (k + c * sk) mod JUBJUB_ORDER. */
+  response: bigint;
 }
 
 /**
- * Compute the Schnorr challenge hash (raw, possibly >= BLS_ORDER).
- *
- * This MUST match the circuit's computation exactly:
- *   persistentHash<Vector<4, Bytes<32>>>([
- *     persistentHash<JubjubPoint>(sigR),
- *     persistentHash<JubjubPoint>(pk),
- *     requestId,
- *     persistentHash<Bytes<4096>>(outputData)
- *   ])
- * interpreted as a little-endian integer (matching Compact's `Bytes<32> as Field`).
- *
- * NOTE: The returned value may exceed BLS_ORDER. The caller must check and
- * retry with a different nonce if so, because Compact's `as Field` rejects overflow.
+ * Computes the Schnorr challenge (full Poseidon transientHash output). Injected
+ * by the caller — typically a contract's `pureCircuits.schnorrChallenge`, which
+ * embeds the shared `schnorr` module. Keeping it injected keeps this signer
+ * contract-agnostic (one implementation serves every signet contract).
  */
-export function computeChallenge(
-  R: JubjubPoint,
-  pk: JubjubPoint,
-  requestId: Uint8Array,
-  outputData: Uint8Array,
-): bigint {
-  const rHash = persistentHash(CompactTypeJubjubPoint, R);
-  const pkHash = persistentHash(CompactTypeJubjubPoint, pk);
-  const outputDataHash = persistentHash(bytes4096Type, outputData);
+export type SchnorrChallengeFn = (
+  annX: bigint, annY: bigint, pkX: bigint, pkY: bigint, msg: bigint[],
+) => bigint;
 
-  const hashBytes = persistentHash(vec4x32Type, [rHash, pkHash, requestId, outputDataHash]);
-  return bytesToBigint(hashBytes); // LE interpretation, matches Compact's `as Field`
+/** Read 16 bytes little-endian as a bigint (matches Compact's `Bytes<16> as Field`). */
+function leLimb16(bytes: Uint8Array, offset: number): bigint {
+  let r = 0n;
+  for (let i = 15; i >= 0; i--) r = (r << 8n) | BigInt(bytes[offset + i]);
+  return r;
 }
 
 /**
- * Sign a message with Schnorr on the Jubjub curve.
+ * Build the signet response message: (requestId, hash(outputData)) encoded as
+ * four 16-byte little-endian field limbs — exactly what the circuit hashes.
+ */
+export function buildSignetMessage(requestId: Uint8Array, outputData: Uint8Array): bigint[] {
+  const outHash = persistentHash(bytes4096Type, outputData);
+  return [
+    leLimb16(requestId, 0), leLimb16(requestId, 16),
+    leLimb16(outHash, 0), leLimb16(outHash, 16),
+  ];
+}
+
+/**
+ * Sign a signet message with Schnorr on Jubjub, matching the shared `schnorr`
+ * Compact module. Returns (announcement R, response s); the circuit's witness
+ * derives the challenge reduction, so no (h, quotient) are sent.
  *
- * The nonce is derived deterministically with an attempt counter. If the
- * challenge hash (interpreted as LE integer) exceeds BLS_ORDER, the circuit's
- * `as Field` cast would reject it. In that case we increment the counter and
- * retry with a different nonce. ~25% of hashes fit, so average ~4 attempts.
- *
- * @param sk - Jubjub private key scalar (must be < JUBJUB_ORDER)
- * @param requestId - The request ID (32 bytes)
- * @param outputData - The EVM return data (4096 bytes, zero-padded)
- * @returns Schnorr signature (R, s, challengeH, challengeQuotient)
+ * @param sk - Jubjub private key scalar
+ * @param msg - message field limbs (see buildSignetMessage)
+ * @param schnorrChallenge - the contract's pureCircuits.schnorrChallenge
  */
 export function schnorrSign(
   sk: bigint,
-  requestId: Uint8Array,
-  outputData: Uint8Array,
+  msg: bigint[],
+  schnorrChallenge: SchnorrChallengeFn,
 ): SchnorrSignature {
-  if (sk <= 0n || sk >= JUBJUB_ORDER) {
-    throw new Error('Private key must be in (0, JUBJUB_ORDER)');
-  }
+  sk = ((sk % JUBJUB_ORDER) + JUBJUB_ORDER) % JUBJUB_ORDER;
+  if (sk === 0n) throw new Error('Private key must be non-zero mod JUBJUB_ORDER');
 
   const pk = ecMulGenerator(sk);
+  const k = (bytesToBigint(randomBytes(32)) % JUBJUB_ORDER) || 1n;
+  const R = ecMulGenerator(k);
 
-  for (let attempt = 0; attempt < 256; attempt++) {
-    // Deterministic nonce with attempt counter: k = Hash(sk, requestId, attempt) % JUBJUB_ORDER
-    const counterBytes = bigintToBytes32(BigInt(attempt));
-    const kSeed = persistentHash(vec3x32Type, [bigintToBytes32(sk), requestId, counterBytes]);
-    const k = (bytesToBigint(kSeed) % JUBJUB_ORDER) || 1n; // ensure k != 0
-    const R = ecMulGenerator(k);
+  // schnorrChallenge returns the full Poseidon hash; truncate to 248 bits
+  // (mod 2^248) to match the circuit's witness-assisted reduction.
+  const cFull = schnorrChallenge(R.x, R.y, pk.x, pk.y, msg);
+  const c = cFull % TWO_248;
 
-    // Compute challenge hash (raw LE bigint, may exceed BLS_ORDER)
-    const hFull = computeChallenge(R, pk, requestId, outputData);
-
-    // Compact's `as Field` rejects values >= BLS_ORDER — retry with different nonce
-    if (hFull >= BLS_ORDER) continue;
-
-    const challengeH = hFull % JUBJUB_ORDER;
-    const challengeQuotient = (hFull - challengeH) / JUBJUB_ORDER;
-
-    // Signature scalar: s = (k + h * sk) mod JUBJUB_ORDER
-    const s = ((k + challengeH * sk) % JUBJUB_ORDER + JUBJUB_ORDER) % JUBJUB_ORDER;
-
-    return { R, s, challengeH, challengeQuotient };
-  }
-
-  throw new Error('Failed to find valid Schnorr nonce after 256 attempts (extremely unlikely)');
+  const s = ((k + c * sk) % JUBJUB_ORDER + JUBJUB_ORDER) % JUBJUB_ORDER;
+  return { announcement: R, response: s };
 }
 
 /**
- * Verify a Schnorr signature on the Jubjub curve.
- *
- * Matches the circuit's verification logic:
- *   1. h + quotient * JUBJUB_ORDER == hFull
- *   2. s * G == R + h * pk
- *
+ * Verify a Schnorr signature — mirrors the circuit's `schnorrVerify`.
  * @returns true if the signature is valid
  */
 export function schnorrVerify(
   pk: JubjubPoint,
-  requestId: Uint8Array,
-  outputData: Uint8Array,
+  msg: bigint[],
   sig: SchnorrSignature,
+  schnorrChallenge: SchnorrChallengeFn,
 ): boolean {
-  // Recompute full challenge
-  const hFull = computeChallenge(sig.R, pk, requestId, outputData);
-
-  // The hash must fit in a Field (< BLS_ORDER) — same check as Compact's `as Field`
-  if (hFull >= BLS_ORDER) return false;
-
-  // Verify challenge reduction: h + quotient * JUBJUB_ORDER == hFull (in Field arithmetic)
-  const reconstructed = (sig.challengeH + sig.challengeQuotient * JUBJUB_ORDER) % BLS_ORDER;
-  if (reconstructed !== hFull) {
-    return false;
-  }
-
-  // Verify Schnorr equation: s*G == R + h*pk
-  const lhs = ecMulGenerator(sig.s);
-  const rhs = ecAdd(sig.R, ecMul(pk, sig.challengeH));
+  const cFull = schnorrChallenge(sig.announcement.x, sig.announcement.y, pk.x, pk.y, msg);
+  const c = cFull % TWO_248;
+  const lhs = ecMulGenerator(sig.response);
+  const rhs = ecAdd(sig.announcement, ecMul(pk, c));
   return lhs.x === rhs.x && lhs.y === rhs.y;
 }
 
