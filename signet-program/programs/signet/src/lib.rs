@@ -199,11 +199,10 @@ pub mod chain_signatures {
 
     /// Initiate a bidirectional cross-chain transaction with execution result callback.
     ///
-    /// This is the primary entry point for cross-chain transactions. The flow:
-    /// 1. User submits unsigned transaction → MPC signs and responds
-    /// 2. User broadcasts to destination chain
-    /// 3. MPC observes execution via light client
-    /// 4. MPC returns execution result via [`respond_bidirectional`]
+    /// This is the primary entry point for cross-chain transactions: the MPC signs and
+    /// answers via [`respond`], the caller broadcasts the signed transaction (the MPC
+    /// does not), and the execution result arrives via [`respond_bidirectional`].
+    /// Full lifecycle: <https://docs.sig.network/architecture/sign-bidirectional>
     ///
     /// # Arguments
     ///

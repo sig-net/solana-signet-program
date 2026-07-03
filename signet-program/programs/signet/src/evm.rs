@@ -5,32 +5,12 @@
 //!
 //! ## Overview
 //!
-//! The bidirectional flow enables Solana programs to:
-//! 1. Execute transactions on EVM chains
-//! 2. Receive cryptographically verified execution results back on Solana
-//!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                        SOLANA → EVM FLOW                                │
-//! ├─────────────────────────────────────────────────────────────────────────┤
-//! │                                                                         │
-//! │  Solana Program              MPC Network              EVM Chain         │
-//! │       │                           │                       │             │
-//! │       │ sign_bidirectional()      │                       │             │
-//! │       ├──────────────────────────►│                       │             │
-//! │       │                           │ Sign tx               │             │
-//! │       │◄──── SignatureResponded ──┤                       │             │
-//! │       │                           │                       │             │
-//! │       │              User broadcasts signed tx ──────────►│             │
-//! │       │                           │                       │             │
-//! │       │                           │◄─── Light client ─────┤             │
-//! │       │                           │     observes tx       │             │
-//! │       │                           │                       │             │
-//! │       │◄─ RespondBidirectional ───┤                       │             │
-//! │       │   (execution result)      │                       │             │
-//! │                                                                         │
-//! └─────────────────────────────────────────────────────────────────────────┘
-//! ```
+//! The bidirectional flow lets a Solana program execute a transaction on an EVM chain
+//! and receive the cryptographically verified execution result back on Solana. The
+//! chain-agnostic lifecycle is documented once at
+//! <https://docs.sig.network/architecture/sign-bidirectional>; this module covers the
+//! EVM-destination specifics: transaction encoding, schemas, request ids, and response
+//! verification.
 //!
 //! # Building EVM Transactions
 //!
@@ -324,7 +304,9 @@
 //!
 //! ## Magic Error Prefix
 //!
-//! Failed EVM transactions return output prefixed with `0xDEADBEEF`:
+//! Failed EVM transactions return output prefixed with `0xDEADBEEF` (the protocol-wide
+//! error convention — see
+//! <https://docs.sig.network/architecture/sign-bidirectional#error-handling>):
 //!
 //! ```rust,ignore
 //! const ERROR_PREFIX: [u8; 4] = [0xDE, 0xAD, 0xBE, 0xEF];
@@ -336,14 +318,10 @@
 //!
 //! # Response Signature Verification
 //!
-//! The response signature uses a **different derivation path** than the transaction signature:
-//!
-//! | Signature | Derivation Path |
-//! |-----------|-----------------|
-//! | Transaction signature | User's `path` parameter |
-//! | Response signature | `"solana response key"` (hardcoded) |
-//!
-//! This means you must derive the expected response public key using:
+//! The response signature uses the fixed `"solana response key"` derivation path, never
+//! the request's `path` — the response-key model is described in
+//! <https://docs.sig.network/architecture/sign-bidirectional#response-signature-verification>.
+//! Derive the expected response key (and its EVM-style address, if comparing addresses) as:
 //! ```text
 //! epsilon = derive_epsilon(key_version, sender, "solana response key")
 //! response_pubkey = derive_key(mpc_root_pubkey, epsilon)
