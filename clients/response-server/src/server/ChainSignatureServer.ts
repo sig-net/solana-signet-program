@@ -219,7 +219,7 @@ export class ChainSignatureServer {
 
     // Derive the signing key using the contract's path field as the derivation path.
     // Path is the userCommitment stored as Field → Bytes<256> (raw bytes, not UTF-8).
-    const pathHex = this.midnightMonitor.getPathHex(request);
+    const pathHex = this.midnightMonitor.getPath(request);
     const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
       pathHex,
       request.predecessor,

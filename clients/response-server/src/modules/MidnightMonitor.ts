@@ -454,6 +454,10 @@ export class MidnightMonitor {
     return Buffer.from(request.path).toString('hex');
   }
 
+ getPath(request: MidnightSigningRequest): string {
+    return Buffer.from(request.path).toString('utf8').replace(/\0/g, '');
+  }  
+
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
     if (!config.midnightIndexerUrl || !config.midnightContractAddresses?.length) {
       return null;
