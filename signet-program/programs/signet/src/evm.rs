@@ -9,6 +9,8 @@
 //! 1. Execute transactions on EVM chains
 //! 2. Receive cryptographically verified execution results back on Solana
 //!
+//! Chain-agnostic lifecycle reference: <https://docs.sig.network/architecture/sign-bidirectional>
+//!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │                        SOLANA → EVM FLOW                                │
