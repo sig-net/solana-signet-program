@@ -205,6 +205,8 @@ pub mod chain_signatures {
     /// 3. MPC observes execution via light client
     /// 4. MPC returns execution result via [`respond_bidirectional`]
     ///
+    /// Chain-agnostic lifecycle reference: <https://docs.sig.network/architecture/sign-bidirectional>
+    ///
     /// # Arguments
     ///
     /// * `serialized_transaction` - serialized unsigned transaction for destination chain

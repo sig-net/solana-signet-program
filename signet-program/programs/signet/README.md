@@ -7,6 +7,10 @@ Solana program for cross-chain signature requests with verified response callbac
 This program enables users to request ECDSA signatures from the Signet MPC network,
 supporting both simple signing and bidirectional cross-chain transactions.
 
+> The chain-agnostic version of this flow — shared by all Signet source chains — is
+> documented at [Sign Bidirectional Flow](https://docs.sig.network/architecture/sign-bidirectional).
+> This README documents it in depth with the Solana specifics.
+
 ## Instructions Reference
 
 ### Developer Instructions
