@@ -133,165 +133,6 @@ export class MidnightMonitor {
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
   }
 
-  // ---- Generic state tree reader ----
-  // State is a nested array: root[i][j] where [i,j] matches the signet field index.
-  // StateMap uses .keys() + .get() — it is NOT iterable with for...of.
-
-  // Resolve a flat field index to its node by walking the runtime's field
-  // chunks. The chunk boundaries shift with total field count, so we locate the
-  // chunk dynamically instead of assuming a fixed [chunk, inner] split.
-  private getNode(state: any, flatIndex: number): any {
-    const raw = state.state ?? state;
-    let idx = flatIndex;
-    for (const chunk of raw.asArray()) {
-      const arr = chunk.asArray();
-      if (idx < arr.length) return arr[idx];
-      idx -= arr.length;
-    }
-    throw new Error(`Field index ${flatIndex} out of range`);
-  }
-
-  private readCounter(state: any, index: number): bigint {
-    const node = this.getNode(state, index);
-    const cr = this.compactRuntime;
-    const desc = new cr.CompactTypeUnsignedInteger(18446744073709551615n, 8);
-    return desc.fromValue([...node.asCell().value]);
-  }
-
-  private readCell(state: any, index: number, size: number): Uint8Array {
-    const node = this.getNode(state, index);
-    const cr = this.compactRuntime;
-    const desc = new cr.CompactTypeBytes(size);
-    return desc.fromValue([...node.asCell().value]);
-  }
-
-  private readMapKeys(state: any, index: number): Array<{ raw: any; bytes: Uint8Array }> {
-    const node = this.getNode(state, index);
-    const cr = this.compactRuntime;
-    const keyDesc = new cr.CompactTypeBytes(32);
-    const map = node.asMap();
-    return map.keys().map((k: any) => ({ raw: k, bytes: keyDesc.fromValue([...k.value]) }));
-  }
-
-  private lookupMap(state: any, index: number, key: Uint8Array, valueDesc: any): any {
-    const node = this.getNode(state, index);
-    const map = node.asMap();
-    const mapKeys = map.keys();
-    const cr = this.compactRuntime;
-    const keyDesc = new cr.CompactTypeBytes(32);
-    for (const k of mapKeys) {
-      const kBytes = keyDesc.fromValue([...k.value]);
-      if (kBytes.length === key.length && kBytes.every((b: number, i: number) => b === key[i])) {
-        const val = map.get(k);
-        return valueDesc.fromValue([...val.asCell().value]);
-      }
-    }
-    throw new Error(`Key not found in map at [${index}]`);
-  }
-
-  // ---- State reading using fixed indices ----
-
-  private readAllRequests(state: any, contractAddress: string): SigningRequest[] {
-    const cr = this.compactRuntime;
-    const bytesDesc = (n: number) => new cr.CompactTypeBytes(n);
-    const uintDesc = (max: bigint, bytes: number) => new cr.CompactTypeUnsignedInteger(max, bytes);
-
-    const requests: SigningRequest[] = [];
-
-    // Iterate signetRequestNonce map for all request IDs
-    const nonceKeys = this.readMapKeys(state, IDX.signetRequestNonce);
-
-    for (const { bytes: requestId } of nonceKeys) {
-      // Skip if already has outputData (already claimed)
-      try {
-        const odKeys = this.readMapKeys(state, IDX.signetOutputData);
-        if (odKeys.some(({ bytes: k }) => k.every((b: number, i: number) => b === requestId[i]))) continue;
-      } catch { /* no outputData map yet */ }
-
-      const lookup = (idx: number, key: Uint8Array, desc: any) => {
-        return this.lookupMap(state, idx, key, desc);
-      };
-
-      try {
-        const nonce = lookup(IDX.signetRequestNonce, requestId, uintDesc(18446744073709551615n, 8));
-        const funcSigRaw = lookup(IDX.signetCalldataFuncSig, requestId, bytesDesc(256));
-        const argCount = Number(lookup(IDX.signetCalldataArgCount, requestId, uintDesc(4294967295n, 4)));
-
-        const args: Uint8Array[] = [];
-        for (let i = 0; i < argCount; i++) {
-          const key = calldataArgKey(requestId, i);
-          args.push(lookup(IDX.signetCalldataArgs, key, bytesDesc(32)));
-        }
-
-        const funcSig = decodePaddedString(funcSigRaw);
-        const calldata: CalldataFields = { funcSig, argCount, args };
-
-        const evmTo = lookup(IDX.signetEvmTo, requestId, bytesDesc(20));
-        const evmChainId = lookup(IDX.signetEvmChainId, requestId, uintDesc(18446744073709551615n, 8));
-        const evmNonce = lookup(IDX.signetEvmNonce, requestId, uintDesc(18446744073709551615n, 8));
-        const evmGasLimit = lookup(IDX.signetEvmGasLimit, requestId, uintDesc(18446744073709551615n, 8));
-        const evmMaxFee = lookup(IDX.signetEvmMaxFee, requestId, uintDesc(340282366920938463463374607431768211455n, 16));
-        const evmPriorityFee = lookup(IDX.signetEvmPriorityFee, requestId, uintDesc(340282366920938463463374607431768211455n, 16));
-        const evmValue = lookup(IDX.signetEvmValue, requestId, uintDesc(340282366920938463463374607431768211455n, 16));
-
-        const caip2IdRaw = lookup(IDX.signetCaip2Id, requestId, bytesDesc(64));
-        const keyVersion = Number(lookup(IDX.signetKeyVersion, requestId, uintDesc(4294967295n, 4)));
-        const pathRaw = new Uint8Array(lookup(IDX.signetPath, requestId, bytesDesc(256)));
-        const algoRaw = lookup(IDX.signetAlgo, requestId, bytesDesc(32));
-        const destRaw = lookup(IDX.signetDest, requestId, bytesDesc(64));
-        const paramsRaw = lookup(IDX.signetParams, requestId, bytesDesc(512));
-        const outputSchemaRaw = lookup(IDX.signetOutputSchema, requestId, bytesDesc(256));
-        const respondSchemaRaw = lookup(IDX.signetRespondSchema, requestId, bytesDesc(256));
-
-        const expectedRequestId = computeRequestId({
-          nonce,
-          evmChainId,
-          evmNonce,
-          evmGasLimit,
-          evmMaxFee,
-          evmPriorityFee,
-          evmValue,
-          evmTo,
-          calldataFuncSig: funcSigRaw,
-          calldataArgsCommitment: computeCalldataArgsCommitment(args),
-          caip2Id: caip2IdRaw,
-          keyVersion,
-          path: pathRaw,
-          algo: algoRaw,
-          dest: destRaw,
-          params: paramsRaw,
-          outputSchema: outputSchemaRaw,
-          respondSchema: respondSchemaRaw,
-        });
-
-        if (!requestId.every((b: number, i: number) => b === expectedRequestId[i])) {
-          console.error(`MidnightMonitor: REFUSING request — requestId mismatch. Contract stored ${Buffer.from(requestId).toString('hex')}, recomputed ${Buffer.from(expectedRequestId).toString('hex')}`);
-          continue;
-        }
-
-        requests.push({
-          predecessor: contractAddress,
-          requestId,
-          nonce,
-          evmParams: { evmTo, evmChainId, evmNonce, evmGasLimit, evmMaxFee, evmPriorityFee, evmValue },
-          calldata,
-          caip2Id: decodeString(caip2IdRaw),
-          keyVersion,
-          path: pathRaw,
-          algo: decodeString(algoRaw),
-          dest: decodeString(destRaw),
-          params: decodeLengthPrefixed(paramsRaw),
-          outputDeserializationSchema: decodeLengthPrefixed(outputSchemaRaw),
-          respondSerializationSchema: decodeLengthPrefixed(respondSchemaRaw),
-        });
-      } catch (e) {
-        console.error(`MidnightMonitor: Failed to read request ${Buffer.from(requestId).toString('hex')}:`, e);
-      }
-    }
-
-    return requests;
-  }
-
   // ---- Polling ----
 
   async start(handlers: {
@@ -328,16 +169,67 @@ export class MidnightMonitor {
 
     for (const contractAddress of this.config.contractAddresses) {
       try {
-        console.log(`MIDNIGHT!!!!!!!!! check for txns for ADDRESS '${contractAddress}' !!!!!!!!!`)
+        console.debug(`check midnight for signetEVMSignatureRequests at contract address '${contractAddress}'...`);
 
         const contractState = await this.publicDataProvider.queryContractState(contractAddress);
         if (!contractState?.data) {
           console.warn(`no state data found for contract '${contractAddress}'`);
           continue;
         };
+        const typedState = readSignetEVMSignatureRequestIndexFromState(contractState.data);
 
-        // const state = contractState.data;
-        // const currentNonce = this.readCounter(state, IDX.signetNonce);
+        // FIXME: put back nonce functionality to prevent full ledger read each time until nonce increments
+        for (const [requestId, signetRequest] of typedState.entries()) {
+          console.log(`found request: ${requestId}`);
+
+          const { evmTransaction, calldata, mpcRouting } = signetRequest;
+          const argCount = Number(calldata.argCount);
+          const args = calldata.args.slice(0, argCount);
+
+          const request: MidnightSigningRequest = {
+            predecessor: contractAddress,
+            requestId: new Uint8Array(Buffer.from(requestId, 'hex')),
+            nonce: signetRequest.requestNonce,
+            evmParams: {
+              evmTo: evmTransaction.to,
+              evmChainId: evmTransaction.chainId,
+              evmNonce: evmTransaction.nonce,
+              evmGasLimit: evmTransaction.gasLimit,
+              evmMaxFee: evmTransaction.maxFeePerGas,
+              evmPriorityFee: evmTransaction.maxPriorityFeePerGas,
+              evmValue: evmTransaction.value,
+            },
+            calldata: {
+              funcSig: decodePaddedString(calldata.funcSig),
+              argCount,
+              args,
+            },
+            caip2Id: decodePaddedString(mpcRouting.caip2Id),
+            keyVersion: Number(mpcRouting.keyVersion),
+            path: mpcRouting.path,
+            algo: decodePaddedString(mpcRouting.algo),
+            dest: decodePaddedString(mpcRouting.dest),
+            params: mpcRouting.params,
+            outputDeserializationSchema: mpcRouting.outputSchema,
+            respondSerializationSchema: mpcRouting.respondSchema,
+            erc20Address: '0x' + Buffer.from(evmTransaction.to).toString('hex'),
+            amount: args.length > 1 ? bytesToBigintLE(args[1]) : 0n,
+          };
+
+         this.processedRequests.add(requestId);
+
+          console.log(`MidnightMonitor: New request ${requestId}`);
+          console.log(`  Contract: ${contractAddress}`);
+          console.log(`  ERC20: ${request.erc20Address}`);
+          console.log(`  Amount: ${request.amount}`);
+
+          try {
+            await onSigningRequest(request);
+          } catch (error) {
+            console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
+            this.processedRequests.delete(requestId);
+          }          
+        } 
 
         // const lastNonce = this.lastNonces.get(contractAddress);
         // if (lastNonce === undefined) {
@@ -365,21 +257,6 @@ export class MidnightMonitor {
         //     erc20Address: '0x' + Buffer.from(erc20Bytes).toString('hex'),
         //     amount,
         //   };
-
-        //   this.processedRequests.add(requestId);
-
-        //   console.log(`MidnightMonitor: New request ${requestId}`);
-        //   console.log(`  Contract: ${contractAddress}`);
-        //   console.log(`  ERC20: ${request.erc20Address}`);
-        //   console.log(`  Amount: ${request.amount}`);
-
-        //   try {
-        //     await onSigningRequest(request);
-        //   } catch (error) {
-        //     console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
-        //     this.processedRequests.delete(requestId);
-        //   }
-        // }
       } catch (error) {
         console.error(`MidnightMonitor: Error polling ${contractAddress}:`, error);
       }
@@ -412,6 +289,8 @@ export class MidnightMonitor {
       response: sig.response.toString(),
     };
 
+    console.debug("SIGNATURE RESPONSE! SEND THIS TO CLIENT!!!", JSON.stringify({ type: 'signet_response', data: response }));
+
     // if (this.wss) {
     //   const message = JSON.stringify({ type: 'signet_response', data: response });
     //   for (const client of this.wss.clients) {
@@ -425,20 +304,21 @@ export class MidnightMonitor {
     return response;
   }
 
-  // broadcastSignedTransaction(data: {
-  //   requestId: string;
-  //   signedTransaction: string;
-  //   txHash: string;
-  // }): void {
-  //   if (this.wss) {
-  //     const message = JSON.stringify({ type: 'signet_signed_tx', data });
-  //     for (const client of this.wss.clients) {
-  //       if (client.readyState === WebSocket.OPEN) {
-  //         client.send(message);
-  //       }
-  //     }
-  //   }
-  // }
+  broadcastSignedTransaction(data: {
+    requestId: string;
+    signedTransaction: string;
+    txHash: string;
+  }): void {
+    console.debug("MIDNIGHT MONITOR broadcastSignedTransaction running!!!!!!!");
+    // if (this.wss) {
+    //   const message = JSON.stringify({ type: 'signet_signed_tx', data });
+    //   for (const client of this.wss.clients) {
+    //     if (client.readyState === WebSocket.OPEN) {
+    //       client.send(message);
+    //     }
+    //   }
+    // }
+  }
 
   getJubjubPk(): any {
     return this.jubjubPk;
