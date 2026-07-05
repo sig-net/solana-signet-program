@@ -16,9 +16,11 @@
  */
 
 import { Buffer } from 'buffer';
-import WebSocket, { WebSocketServer } from 'ws';
 import type { ServerConfig } from '../types';
+
+// FIXME, MAJOR!!!: import these from the pure circuits near the contract to prevent rebuilding!!!
 import { schnorrSign, buildSignetMessage, deriveJubjubKeypair, hashJubjubPoint } from '../managed/erc20-vault/signet/schnorr';
+
 // Shared, app-neutral Schnorr challenge — one compiled copy of the `schnorr`
 // module, identical for every signet contract. The MPC stays contract-agnostic.
 import { pureCircuits as schnorrLib } from '../managed/schnorr-lib/contract/index.js';
@@ -27,6 +29,10 @@ import type { SigningRequest, EvmGasParams, CalldataFields } from '../managed/er
 import { OUTPUT_DATA_SIZE } from '../managed/erc20-vault/signet/constants';
 import { decodeLengthPrefixed, decodeString } from '../managed/erc20-vault/signet/codec';
 import { calldataArgKey, computeRequestId, computeCalldataArgsCommitment } from '../managed/erc20-vault/signet/request-id';
+import { readSignetEVMSignatureRequestIndexFromState } from "@midnight-erc20-vault/signet-midnight";
+
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
 
 // ---- Signet Standard Field Indices (fixed across all contracts) ----
 // All signet-conforming contracts MUST declare these fields first.
@@ -36,28 +42,28 @@ import { calldataArgKey, computeRequestId, computeCalldataArgsCommitment } from 
 // This stays generic across signet contracts regardless of trailing/contract
 // fields or sealed config fields.
 const IDX = {
-  mpcPubKeyHash:          0,
-  signetNonce:            1,
-  signetRequestNonce:     2,
-  signetCalldataFuncSig:  3,
+  mpcPubKeyHash: 0,
+  signetNonce: 1,
+  signetRequestNonce: 2,
+  signetCalldataFuncSig: 3,
   signetCalldataArgCount: 4,
-  signetCalldataArgs:     5,
-  signetEvmTo:            6,
-  signetEvmChainId:       7,
-  signetEvmNonce:         8,
-  signetEvmGasLimit:      9,
-  signetEvmMaxFee:        10,
-  signetEvmPriorityFee:   11,
-  signetEvmValue:         12,
-  signetCaip2Id:          13,
-  signetKeyVersion:       14,
-  signetPath:             15,
-  signetAlgo:             16,
-  signetDest:             17,
-  signetParams:           18,
-  signetOutputSchema:     19,
-  signetRespondSchema:    20,
-  signetOutputData:       21,
+  signetCalldataArgs: 5,
+  signetEvmTo: 6,
+  signetEvmChainId: 7,
+  signetEvmNonce: 8,
+  signetEvmGasLimit: 9,
+  signetEvmMaxFee: 10,
+  signetEvmPriorityFee: 11,
+  signetEvmValue: 12,
+  signetCaip2Id: 13,
+  signetKeyVersion: 14,
+  signetPath: 15,
+  signetAlgo: 16,
+  signetDest: 17,
+  signetParams: 18,
+  signetOutputSchema: 19,
+  signetRespondSchema: 20,
+  signetOutputData: 21,
 } as const;
 
 // ---- Types ----
@@ -93,13 +99,11 @@ export class MidnightMonitor {
   private lastNonces = new Map<string, bigint>();
   private processedRequests = new Set<string>();
 
-  private publicDataProvider: any = null;
+  private publicDataProvider: PublicDataProvider | null = null;
   private compactRuntime: any = null;
 
   private jubjubSk: bigint = 0n;
   private jubjubPk: any = null;
-
-  private wss: InstanceType<typeof WebSocketServer> | null = null;
 
   constructor(config: MidnightMonitorConfig) {
     this.config = {
@@ -121,21 +125,10 @@ export class MidnightMonitor {
 
     this.compactRuntime = await import('@midnight-ntwrk/compact-runtime');
 
-    const { indexerPublicDataProvider } = await import(
-      '@midnight-ntwrk/midnight-js-indexer-public-data-provider'
-    );
     this.publicDataProvider = indexerPublicDataProvider(
       this.config.indexerUrl,
       this.config.indexerWsUrl,
     );
-
-    this.wss = new WebSocketServer({ port: this.config.wsPort });
-    console.log(`MidnightMonitor: WebSocket server listening on port ${this.config.wsPort}`);
-
-    this.wss.on('connection', (ws: WebSocket) => {
-      console.log('MidnightMonitor: WebSocket client connected');
-      ws.on('close', () => console.log('MidnightMonitor: WebSocket client disconnected'));
-    });
 
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
   }
@@ -322,10 +315,6 @@ export class MidnightMonitor {
       clearInterval(this.pollIntervalId);
       this.pollIntervalId = null;
     }
-    if (this.wss) {
-      this.wss.close();
-      this.wss = null;
-    }
     console.log('MidnightMonitor: Stopped');
   }
 
@@ -339,53 +328,58 @@ export class MidnightMonitor {
 
     for (const contractAddress of this.config.contractAddresses) {
       try {
+        console.log(`MIDNIGHT!!!!!!!!! check for txns for ADDRESS '${contractAddress}' !!!!!!!!!`)
+
         const contractState = await this.publicDataProvider.queryContractState(contractAddress);
-        if (!contractState?.data) continue;
-
-        const state = contractState.data;
-        const currentNonce = this.readCounter(state, IDX.signetNonce);
-
-        const lastNonce = this.lastNonces.get(contractAddress);
-        if (lastNonce === undefined) {
-          this.lastNonces.set(contractAddress, currentNonce);
-          console.log(`MidnightMonitor: Seeded nonce for ${contractAddress} at ${currentNonce}`);
+        if (!contractState?.data) {
+          console.warn(`no state data found for contract '${contractAddress}'`);
           continue;
-        }
-        if (currentNonce <= lastNonce) continue;
+        };
 
-        console.log(`MidnightMonitor: New requests on ${contractAddress} (nonce ${lastNonce} -> ${currentNonce})`);
-        this.lastNonces.set(contractAddress, currentNonce);
+        // const state = contractState.data;
+        // const currentNonce = this.readCounter(state, IDX.signetNonce);
 
-        const requests = this.readAllRequests(state, contractAddress);
+        // const lastNonce = this.lastNonces.get(contractAddress);
+        // if (lastNonce === undefined) {
+        //   this.lastNonces.set(contractAddress, currentNonce);
+        //   console.log(`MidnightMonitor: Seeded nonce for ${contractAddress} at ${currentNonce}`);
+        //   continue;
+        // }
+        // if (currentNonce <= lastNonce) continue;
 
-        for (const req of requests) {
-          if (req.nonce < lastNonce) continue;
-          const requestId = '0x' + Buffer.from(req.requestId).toString('hex');
-          if (this.processedRequests.has(requestId)) continue;
+        // console.log(`MidnightMonitor: New requests on ${contractAddress} (nonce ${lastNonce} -> ${currentNonce})`);
+        // this.lastNonces.set(contractAddress, currentNonce);
 
-          const erc20Bytes = req.evmParams.evmTo;
-          const amount = req.calldata.args.length > 1 ? bytesToBigintLE(req.calldata.args[1]) : 0n;
+        // const requests = this.readAllRequests(state, contractAddress);
 
-          const request: MidnightSigningRequest = {
-            ...req,
-            erc20Address: '0x' + Buffer.from(erc20Bytes).toString('hex'),
-            amount,
-          };
+        // for (const req of requests) {
+        //   if (req.nonce < lastNonce) continue;
+        //   const requestId = '0x' + Buffer.from(req.requestId).toString('hex');
+        //   if (this.processedRequests.has(requestId)) continue;
 
-          this.processedRequests.add(requestId);
+        //   const erc20Bytes = req.evmParams.evmTo;
+        //   const amount = req.calldata.args.length > 1 ? bytesToBigintLE(req.calldata.args[1]) : 0n;
 
-          console.log(`MidnightMonitor: New request ${requestId}`);
-          console.log(`  Contract: ${contractAddress}`);
-          console.log(`  ERC20: ${request.erc20Address}`);
-          console.log(`  Amount: ${request.amount}`);
+        //   const request: MidnightSigningRequest = {
+        //     ...req,
+        //     erc20Address: '0x' + Buffer.from(erc20Bytes).toString('hex'),
+        //     amount,
+        //   };
 
-          try {
-            await onSigningRequest(request);
-          } catch (error) {
-            console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
-            this.processedRequests.delete(requestId);
-          }
-        }
+        //   this.processedRequests.add(requestId);
+
+        //   console.log(`MidnightMonitor: New request ${requestId}`);
+        //   console.log(`  Contract: ${contractAddress}`);
+        //   console.log(`  ERC20: ${request.erc20Address}`);
+        //   console.log(`  Amount: ${request.amount}`);
+
+        //   try {
+        //     await onSigningRequest(request);
+        //   } catch (error) {
+        //     console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
+        //     this.processedRequests.delete(requestId);
+        //   }
+        // }
       } catch (error) {
         console.error(`MidnightMonitor: Error polling ${contractAddress}:`, error);
       }
@@ -418,33 +412,33 @@ export class MidnightMonitor {
       response: sig.response.toString(),
     };
 
-    if (this.wss) {
-      const message = JSON.stringify({ type: 'signet_response', data: response });
-      for (const client of this.wss.clients) {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      }
-      console.log(`MidnightMonitor: Broadcast response for ${requestIdHex} to ${this.wss.clients.size} clients`);
-    }
+    // if (this.wss) {
+    //   const message = JSON.stringify({ type: 'signet_response', data: response });
+    //   for (const client of this.wss.clients) {
+    //     if (client.readyState === WebSocket.OPEN) {
+    //       client.send(message);
+    //     }
+    //   }
+    //   console.log(`MidnightMonitor: Broadcast response for ${requestIdHex} to ${this.wss.clients.size} clients`);
+    // }
 
     return response;
   }
 
-  broadcastSignedTransaction(data: {
-    requestId: string;
-    signedTransaction: string;
-    txHash: string;
-  }): void {
-    if (this.wss) {
-      const message = JSON.stringify({ type: 'signet_signed_tx', data });
-      for (const client of this.wss.clients) {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      }
-    }
-  }
+  // broadcastSignedTransaction(data: {
+  //   requestId: string;
+  //   signedTransaction: string;
+  //   txHash: string;
+  // }): void {
+  //   if (this.wss) {
+  //     const message = JSON.stringify({ type: 'signet_signed_tx', data });
+  //     for (const client of this.wss.clients) {
+  //       if (client.readyState === WebSocket.OPEN) {
+  //         client.send(message);
+  //       }
+  //     }
+  //   }
+  // }
 
   getJubjubPk(): any {
     return this.jubjubPk;
@@ -454,9 +448,9 @@ export class MidnightMonitor {
     return Buffer.from(request.path).toString('hex');
   }
 
- getPath(request: MidnightSigningRequest): string {
+  getPath(request: MidnightSigningRequest): string {
     return Buffer.from(request.path).toString('utf8').replace(/\0/g, '');
-  }  
+  }
 
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
     if (!config.midnightIndexerUrl || !config.midnightContractAddresses?.length) {
