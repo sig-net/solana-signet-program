@@ -2,17 +2,17 @@
  * MidnightMonitor - Generic signet monitor for any Midnight contract.
  *
  * The MPC needs ONLY a contract address. No compiled contract, no ZK keys,
- * no contract-info.json. State is read using fixed signet field indices
- * that all signet-conforming contracts share (declared first in source).
+ * no contract-info.json. State is read by the signet layout convention via
+ * the shared reader: request index at ledger field 0, request counter at
+ * field 1.
  *
  * Flow:
  * 1. Polls the contract's raw state via the Midnight GraphQL indexer
- * 2. Reads signetNonce (index 1) to detect new requests
- * 3. Iterates signetRequestNonce map (index 2) for request IDs
- * 4. Reads calldata + EVM params from fixed indices (3-21)
- * 5. Builds ABI calldata + RLP transaction off-chain
- * 6. After EVM tx confirmed, signs (requestId, outputData) with Schnorr
- * 7. Broadcasts signature via WebSocket — the USER calls claim() on-chain
+ * 2. Reads the signet nonce counter (field 1) to detect new requests cheaply
+ * 3. Decodes the request index (field 0) and skips already-processed ids
+ * 4. Builds ABI calldata + RLP transaction off-chain
+ * 5. After EVM tx confirmed, signs (requestId, outputData) with Schnorr
+ * 6. Broadcasts signature via WebSocket — the USER calls claim() on-chain
  */
 
 import { Buffer } from 'buffer';
@@ -25,46 +25,12 @@ import { schnorrSign, buildSignetMessage, deriveJubjubKeypair, hashJubjubPoint }
 // module, identical for every signet contract. The MPC stays contract-agnostic.
 import { pureCircuits as schnorrLib } from '../managed/schnorr-lib/contract/index.js';
 import { buildTransactionFromRequest } from '../managed/erc20-vault/signet/calldata-builder';
-import type { SigningRequest, EvmGasParams, CalldataFields } from '../managed/erc20-vault/signet/types';
+import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 import { OUTPUT_DATA_SIZE } from '../managed/erc20-vault/signet/constants';
-import { decodeLengthPrefixed, decodeString } from '../managed/erc20-vault/signet/codec';
-import { calldataArgKey, computeRequestId, computeCalldataArgsCommitment } from '../managed/erc20-vault/signet/request-id';
-import { readSignetEVMSignatureRequestIndexFromState } from "@midnight-erc20-vault/signet-midnight";
+import { readSignetRequestsLedgerFromState } from "@midnight-erc20-vault/signet-midnight";
 
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
-
-// ---- Signet Standard Field Indices (fixed across all contracts) ----
-// All signet-conforming contracts MUST declare these fields first.
-// Flat field indices in ledger declaration order. The runtime chunks fields
-// into nested arrays whose split point depends on the TOTAL field count, so we
-// resolve the chunk dynamically (see getNode) rather than hardcode [chunk,inner].
-// This stays generic across signet contracts regardless of trailing/contract
-// fields or sealed config fields.
-const IDX = {
-  mpcPubKeyHash: 0,
-  signetNonce: 1,
-  signetRequestNonce: 2,
-  signetCalldataFuncSig: 3,
-  signetCalldataArgCount: 4,
-  signetCalldataArgs: 5,
-  signetEvmTo: 6,
-  signetEvmChainId: 7,
-  signetEvmNonce: 8,
-  signetEvmGasLimit: 9,
-  signetEvmMaxFee: 10,
-  signetEvmPriorityFee: 11,
-  signetEvmValue: 12,
-  signetCaip2Id: 13,
-  signetKeyVersion: 14,
-  signetPath: 15,
-  signetAlgo: 16,
-  signetDest: 17,
-  signetParams: 18,
-  signetOutputSchema: 19,
-  signetRespondSchema: 20,
-  signetOutputData: 21,
-} as const;
 
 // ---- Types ----
 
@@ -100,7 +66,6 @@ export class MidnightMonitor {
   private processedRequests = new Set<string>();
 
   private publicDataProvider: PublicDataProvider | null = null;
-  private compactRuntime: any = null;
 
   private jubjubSk: bigint = 0n;
   private jubjubPk: any = null;
@@ -122,8 +87,6 @@ export class MidnightMonitor {
     this.jubjubPk = pk;
     console.log('MidnightMonitor: Jubjub keypair derived');
     console.log(`MidnightMonitor: Jubjub pk hash = ${Buffer.from(hashJubjubPoint(pk)).toString('hex')}`);
-
-    this.compactRuntime = await import('@midnight-ntwrk/compact-runtime');
 
     this.publicDataProvider = indexerPublicDataProvider(
       this.config.indexerUrl,
@@ -176,10 +139,18 @@ export class MidnightMonitor {
           console.warn(`no state data found for contract '${contractAddress}'`);
           continue;
         };
-        const typedState = readSignetEVMSignatureRequestIndexFromState(contractState.data);
+        const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(contractState.data);
 
-        // FIXME: put back nonce functionality to prevent full ledger read each time until nonce increments
-        for (const [requestId, signetRequest] of typedState.entries()) {
+        // Cheap change detection: the signet nonce counts requests ever
+        // created, so an unchanged value means nothing new since the last
+        // fully-processed poll.
+        const lastNonce = this.lastNonces.get(contractAddress);
+        if (lastNonce !== undefined && nonce <= lastNonce) continue;
+        console.log(`MidnightMonitor: nonce ${lastNonce ?? '(none)'} -> ${nonce} on ${contractAddress}`);
+
+        let allProcessed = true;
+        for (const [requestId, signetRequest] of requestsIndex.entries()) {
+          if (this.processedRequests.has(requestId)) continue;
           console.log(`found request: ${requestId}`);
 
           const { evmTransaction, calldata, mpcRouting } = signetRequest;
@@ -228,35 +199,16 @@ export class MidnightMonitor {
           } catch (error) {
             console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
             this.processedRequests.delete(requestId);
-          }          
-        } 
+            allProcessed = false;
+          }
+        }
 
-        // const lastNonce = this.lastNonces.get(contractAddress);
-        // if (lastNonce === undefined) {
-        //   this.lastNonces.set(contractAddress, currentNonce);
-        //   console.log(`MidnightMonitor: Seeded nonce for ${contractAddress} at ${currentNonce}`);
-        //   continue;
-        // }
-        // if (currentNonce <= lastNonce) continue;
-
-        // console.log(`MidnightMonitor: New requests on ${contractAddress} (nonce ${lastNonce} -> ${currentNonce})`);
-        // this.lastNonces.set(contractAddress, currentNonce);
-
-        // const requests = this.readAllRequests(state, contractAddress);
-
-        // for (const req of requests) {
-        //   if (req.nonce < lastNonce) continue;
-        //   const requestId = '0x' + Buffer.from(req.requestId).toString('hex');
-        //   if (this.processedRequests.has(requestId)) continue;
-
-        //   const erc20Bytes = req.evmParams.evmTo;
-        //   const amount = req.calldata.args.length > 1 ? bytesToBigintLE(req.calldata.args[1]) : 0n;
-
-        //   const request: MidnightSigningRequest = {
-        //     ...req,
-        //     erc20Address: '0x' + Buffer.from(erc20Bytes).toString('hex'),
-        //     amount,
-        //   };
+        // Advance the watermark only when every pending request went through:
+        // a failed request stays unprocessed, keeps the nonce gate open, and
+        // is retried on the next poll.
+        if (allProcessed) {
+          this.lastNonces.set(contractAddress, nonce);
+        }
       } catch (error) {
         console.error(`MidnightMonitor: Error polling ${contractAddress}:`, error);
       }
