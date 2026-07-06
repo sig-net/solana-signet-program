@@ -16,11 +16,13 @@ export interface ServerConfig {
   bitcoinNetwork: BitcoinNetwork;
   substrateWsUrl?: string;
   // Midnight config
+  midnightNetworkId?: string;
   midnightIndexerUrl?: string;
   midnightIndexerWsUrl?: string;
   midnightNodeUrl?: string;
   midnightProofServerUrl?: string;
   midnightContractAddresses?: string[];
+  midnightSignetContractAddress?: string;
   midnightWalletSeed?: string;
 }
 
@@ -49,11 +51,13 @@ export const serverConfigSchema = z.object({
   bitcoinNetwork: z.enum(['regtest', 'testnet']),
   substrateWsUrl: z.string().optional(),
   // Midnight config
+  midnightNetworkId: z.string().optional(),
   midnightIndexerUrl: z.string().optional(),
   midnightIndexerWsUrl: z.string().optional(),
   midnightNodeUrl: z.string().optional(),
   midnightProofServerUrl: z.string().optional(),
   midnightContractAddresses: z.array(z.string()).optional(),
+  midnightSignetContractAddress: z.string().optional(),
   midnightWalletSeed: z.string().optional(),
 });
 

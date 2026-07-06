@@ -239,8 +239,9 @@ export class ChainSignatureServer {
 
     const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
 
-    // Send the signed transaction to the client via WebSocket (client will broadcast)
-    this.midnightMonitor.broadcastSignedTransaction({
+    // Post the MPC signature on-chain to the signature-responses contract
+    // (the client polls it and broadcasts the EVM tx itself).
+    await this.midnightMonitor.broadcastSignedTransaction({
       requestId: requestIdHex,
       signedTransaction: signedTxHex,
       txHash: signedTxHash,

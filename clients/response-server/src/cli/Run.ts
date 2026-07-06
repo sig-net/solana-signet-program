@@ -13,6 +13,7 @@ async function main() {
     verbose: envConfig.VERBOSE,
     bitcoinNetwork: envConfig.BITCOIN_NETWORK,
     substrateWsUrl: envConfig.SUBSTRATE_WS_URL,
+    midnightNetworkId: envConfig.MIDNIGHT_NETWORK_ID,
     midnightIndexerUrl: envConfig.MIDNIGHT_INDEXER_URL,
     midnightIndexerWsUrl: envConfig.MIDNIGHT_INDEXER_WS_URL,
     midnightNodeUrl: envConfig.MIDNIGHT_NODE_URL,
@@ -20,6 +21,7 @@ async function main() {
     midnightContractAddresses: envConfig.MIDNIGHT_CONTRACT_ADDRESSES
       ? envConfig.MIDNIGHT_CONTRACT_ADDRESSES.split(',').map(s => s.trim()).filter(Boolean)
       : undefined,
+    midnightSignetContractAddress: envConfig.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
     midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,
   };
 
