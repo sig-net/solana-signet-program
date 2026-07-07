@@ -181,7 +181,7 @@ export class MidnightMonitor {
     if (this.responderWalletPromise) {
       try {
         const { walletFacade } = await this.responderWalletPromise;
-        await walletFacade.stop().catch(() => {});
+        await walletFacade.stop().catch(() => { });
       } catch {
         // Wallet construction failed earlier; nothing to stop.
       }
