@@ -61,6 +61,7 @@ export class ChainSignatureServer {
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
   private monitorIntervalId: NodeJS.Timeout | null = null;
+  private monitoring = false; // re-entrancy guard for the transaction monitor tick
   private readyPromise: Promise<void>;
   private resolveReady: (() => void) | null = null;
   private substrateMonitor: SubstrateMonitor | null = null;
@@ -297,15 +298,35 @@ export class ChainSignatureServer {
 
   private startTransactionMonitor() {
     this.monitorIntervalId = setInterval(async () => {
-      this.pollCounter++;
-
-      if (pendingTransactions.size > 0 && this.pollCounter % 12 === 1) {
-        console.log(
-          `📊 Monitoring pending transactions (count=${pendingTransactions.size})`
-        );
+      // Non-re-entrant: handling a confirmed tx posts a response on-chain,
+      // which can take far longer than the poll interval (e.g. a Midnight
+      // attestation proof + submit). Without this guard, overlapping ticks
+      // re-check the same still-in-flight tx every interval — flooding the log
+      // with duplicate "Checking transaction…" output and wasting RPC calls —
+      // before the in-progress guard below makes them no-op. Skip a tick while
+      // the previous one is still running (same reason MidnightMonitor.start does).
+      if (this.monitoring) return;
+      this.monitoring = true;
+      try {
+        await this.runTransactionMonitorTick();
+      } catch (error) {
+        console.error('Transaction monitor tick error:', error);
+      } finally {
+        this.monitoring = false;
       }
+    }, CONFIG.POLL_INTERVAL_MS);
+  }
 
-      for (const [txHash, txInfo] of pendingTransactions.entries()) {
+  private async runTransactionMonitorTick(): Promise<void> {
+    this.pollCounter++;
+
+    if (pendingTransactions.size > 0 && this.pollCounter % 12 === 1) {
+      console.log(
+        `📊 Monitoring pending transactions (count=${pendingTransactions.size})`
+      );
+    }
+
+    for (const [txHash, txInfo] of pendingTransactions.entries()) {
         if (txInfo.checkCount > 0) {
           let skipFactor = 1;
 
@@ -409,7 +430,6 @@ export class ChainSignatureServer {
           }
         }
       }
-    }, CONFIG.POLL_INTERVAL_MS);
   }
 
   private async handleCompletedTransaction(
