@@ -29,11 +29,6 @@ export { computeRequestId, calldataArgKey, computeCalldataArgsCommitment } from 
 export type { SignetLedger, SignetMap } from './state-reader';
 export { readRequest, readAllRequests, readCalldataArgs, matchesMpcPubKeyHash } from './state-reader';
 
-export type { EvmTxParams } from './tx-builder';
-export { buildUnsignedEip1559Tx, buildErc20TransferData } from './tx-builder';
-
-export { buildCalldata, buildTransactionFromRequest } from './calldata-builder';
-
 export type {
   SigningRequest,
   MonitoredContract,

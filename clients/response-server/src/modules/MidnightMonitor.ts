@@ -21,7 +21,6 @@ import { Buffer } from 'buffer';
 import { ethers } from 'ethers';
 import type { ServerConfig } from '../types';
 
-import { buildTransactionFromRequest } from '../managed/erc20-vault/signet/calldata-builder';
 import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 
 // Schnorr signing, the attestation-message circuit, and the Schnorr challenge
@@ -32,11 +31,13 @@ import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 // FIXME called for).
 import {
   readSignetRequestsLedgerFromState,
+  signetEVMSignatureRequestToUnsignedEVMTransaction,
   deriveJubjubKeypair,
   hashJubjubPoint,
   schnorrSign,
   pureCircuits as signetCircuits,
   OUTPUT_DATA_SIZE,
+  type SignetEVMSignatureRequest,
   type SignetRemoteExecutionResponse,
 } from "@midnight-erc20-vault/signet-midnight";
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
@@ -60,8 +61,13 @@ import type { MidnightNodeConfig } from "./midnight/midnight-node-config";
 // ---- Types ----
 
 export interface MidnightSigningRequest extends SigningRequest {
-  erc20Address: string;
-  amount: bigint;
+  /**
+   * The nested on-ledger request record as read by signet-midnight — the
+   * canonical source the shared tx builder consumes. The flat `SigningRequest`
+   * fields are the string-decoded/flattened view kept for key derivation,
+   * signing, and logging.
+   */
+  signetRequest: SignetEVMSignatureRequest;
 }
 
 export interface SignedResponse {
@@ -355,16 +361,16 @@ export class MidnightMonitor {
             params: mpcRouting.params,
             outputDeserializationSchema: mpcRouting.outputSchema,
             respondSerializationSchema: mpcRouting.respondSchema,
-            erc20Address: '0x' + Buffer.from(evmTransaction.to).toString('hex'),
-            amount: args.length > 1 ? bytesToBigintLE(args[1]) : 0n,
+            signetRequest,
           };
 
           this.processedRequests.add(requestId);
 
-          console.log(`MidnightMonitor: New request ${requestId}`);
-          console.log(`  Contract: ${contractAddress}`);
-          console.log(`  ERC20: ${request.erc20Address}`);
-          console.log(`  Amount: ${request.amount}`);
+          console.log(`MidnightMonitor: New request ${requestId} from contract ${contractAddress}`);
+          console.log(`  Function: ${request.calldata.funcSig}`);
+          console.log(
+            `  Args: ${request.calldata.args.map((arg) => '0x' + Buffer.from(arg).toString('hex')).join(', ')}`,
+          );
 
           try {
             await onSigningRequest(request);
@@ -390,7 +396,11 @@ export class MidnightMonitor {
   // ---- Transaction building & signing ----
 
   buildSerializedTransaction(request: MidnightSigningRequest): Uint8Array {
-    return buildTransactionFromRequest(request);
+    // Reuse signet-midnight's canonical builder (the same package the request
+    // reader comes from) rather than a vendored RLP re-implementation, so the
+    // unsigned transaction is assembled exactly as clients verify it.
+    const unsignedTx = signetEVMSignatureRequestToUnsignedEVMTransaction(request.signetRequest);
+    return ethers.getBytes(unsignedTx.unsignedSerialized);
   }
 
   async signAndBroadcastResponse(requestId: Uint8Array, evmReturnData: Uint8Array): Promise<SignedResponse> {
@@ -502,12 +512,4 @@ function decodePaddedString(bytes: Uint8Array): string {
     if (bytes[i] === 0) { end = i; break; }
   }
   return new TextDecoder().decode(bytes.slice(0, end));
-}
-
-function bytesToBigintLE(bytes: Uint8Array): bigint {
-  let result = 0n;
-  for (let i = bytes.length - 1; i >= 0; i--) {
-    result = (result << 8n) | BigInt(bytes[i]);
-  }
-  return result;
 }

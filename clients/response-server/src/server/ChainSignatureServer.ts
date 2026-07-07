@@ -189,7 +189,7 @@ export class ChainSignatureServer {
       await this.midnightMonitor.start({
         onSigningRequest: async (request: MidnightSigningRequest) => {
           console.log(
-            `Midnight signing request: 0x${Buffer.from(request.requestId).toString('hex')} amount=${request.amount} caip2=${request.caip2Id}`
+            `Midnight signing request: 0x${Buffer.from(request.requestId).toString('hex')} caip2=${request.caip2Id}`
           );
           try {
             await this.handleMidnightSigningRequest(request);
