@@ -146,12 +146,7 @@ export class EthereumMonitor {
           blockTag: receipt.blockNumber - 1,
         });
 
-        const schemaStr =
-          typeof explorerDeserializationSchema === 'string'
-            ? explorerDeserializationSchema
-            : new TextDecoder().decode(
-                new Uint8Array(explorerDeserializationSchema)
-              );
+        const schemaStr = decodePaddedSchema(explorerDeserializationSchema);
 
         if (!schemaStr.trim()) {
           throw new Error('Empty output deserialization schema — cannot decode EVM return value');
@@ -183,4 +178,17 @@ export class EthereumMonitor {
       };
     }
   }
+}
+
+/**
+ * Decode an on-chain schema byte array to its JSON string. Schemas are stored
+ * as fixed-size, NUL-padded buffers, so cut at the first NUL — trailing \0
+ * bytes are not whitespace and would make JSON.parse reject an otherwise-valid
+ * schema.
+ */
+function decodePaddedSchema(schema: Buffer | number[] | string): string {
+  if (typeof schema === 'string') return schema;
+  const raw = new TextDecoder().decode(new Uint8Array(schema));
+  const nul = raw.indexOf('\0');
+  return nul === -1 ? raw : raw.slice(0, nul);
 }

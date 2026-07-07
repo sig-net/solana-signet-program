@@ -118,6 +118,7 @@ type DeployedSignetContract = FoundContract<
 export class MidnightMonitor {
   private config: MidnightMonitorConfig;
   private pollIntervalId: NodeJS.Timeout | null = null;
+  private polling = false;
   private lastNonces = new Map<string, bigint>();
   private processedRequests = new Set<string>();
 
@@ -168,10 +169,19 @@ export class MidnightMonitor {
     console.log(`  Contracts: ${this.config.contractAddresses.join(', ')}`);
 
     this.pollIntervalId = setInterval(async () => {
+      // Non-re-entrant: wallet construction/sync and contract writes can take
+      // several seconds — longer than the poll interval. Skip a tick while the
+      // previous one is still running, or overlapping polls would issue
+      // concurrent writes to the single-writer LevelDB private-state store and
+      // deadlock on its lock (LEVEL_LOCKED).
+      if (this.polling) return;
+      this.polling = true;
       try {
         await this.fetchAndProcessRequests(handlers.onSigningRequest);
       } catch (error) {
         console.error('MidnightMonitor: Poll error:', error);
+      } finally {
+        this.polling = false;
       }
     }, this.config.pollIntervalMs);
   }

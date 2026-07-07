@@ -285,9 +285,13 @@ export class OutputSerializer {
   }
 
   private static getSchemaString(schema: Buffer | number[]): string {
-    return typeof schema === 'string'
-      ? schema
-      : new TextDecoder().decode(new Uint8Array(schema));
+    if (typeof schema === 'string') return schema;
+    // On-chain schemas are fixed-size, NUL-padded byte arrays. Cut at the first
+    // NUL before parsing — trailing \0 bytes are not whitespace, so `.trim()`
+    // leaves them in place and JSON.parse rejects them.
+    const raw = new TextDecoder().decode(new Uint8Array(schema));
+    const nul = raw.indexOf('\0');
+    return nul === -1 ? raw : raw.slice(0, nul);
   }
 
   private static createBorshData(
