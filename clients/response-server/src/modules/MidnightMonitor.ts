@@ -40,12 +40,15 @@ import {
   type SignetEVMSignatureRequest,
   type SignetEVMSignatureResponse,
   type SignetRespondBidirectional,
-} from "@midnight-erc20-vault/signet-midnight";
+} from '@midnight-erc20-vault/signet-midnight';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
-import { setNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
-import { findDeployedContract, type FoundContract } from "@midnight-ntwrk/midnight-js/contracts";
-import type { WalletFacade } from "@midnight-ntwrk/wallet-sdk-facade";
+import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
+import {
+  findDeployedContract,
+  type FoundContract,
+} from '@midnight-ntwrk/midnight-js/contracts';
+import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
 import {
   buildSignetContractProviders,
   signetContractCompiledContract,
@@ -53,11 +56,15 @@ import {
   createSignetContractPrivateState,
   type Contract as SignetContract,
   type SignetContractPrivateState,
-} from "@midnight-erc20-vault/signet-contract";
+} from '@midnight-erc20-vault/signet-contract';
 
-import { deriveAccountKeys, initialiseWalletFacade, type AccountKeys } from "./midnight/wallet";
-import type { NetworkId } from "./midnight/network-id";
-import type { MidnightNodeConfig } from "./midnight/midnight-node-config";
+import {
+  deriveAccountKeys,
+  initialiseWalletFacade,
+  type AccountKeys,
+} from './midnight/wallet';
+import type { NetworkId } from './midnight/network-id';
+import type { MidnightNodeConfig } from './midnight/midnight-node-config';
 
 // ---- Types ----
 
@@ -163,16 +170,20 @@ export class MidnightMonitor {
   async initialize(): Promise<void> {
     console.log('MidnightMonitor: Initializing (generic signet monitor)...');
 
-    const rootKeyBytes = new Uint8Array(Buffer.from(this.config.mpcRootKey.replace('0x', ''), 'hex'));
+    const rootKeyBytes = new Uint8Array(
+      Buffer.from(this.config.mpcRootKey.replace('0x', ''), 'hex')
+    );
     const { sk, pk } = deriveJubjubKeypair(rootKeyBytes);
     this.jubjubSk = sk;
     this.jubjubPk = pk;
     console.log('MidnightMonitor: Jubjub keypair derived');
-    console.log(`MidnightMonitor: Jubjub pk hash = ${Buffer.from(hashJubjubPoint(pk)).toString('hex')}`);
+    console.log(
+      `MidnightMonitor: Jubjub pk hash = ${Buffer.from(hashJubjubPoint(pk)).toString('hex')}`
+    );
 
     this.publicDataProvider = indexerPublicDataProvider(
       this.config.indexerUrl,
-      this.config.indexerWsUrl,
+      this.config.indexerWsUrl
     );
 
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
@@ -216,7 +227,7 @@ export class MidnightMonitor {
     if (this.responderWalletPromise) {
       try {
         const { walletFacade } = await this.responderWalletPromise;
-        await walletFacade.stop().catch(() => { });
+        await walletFacade.stop().catch(() => {});
       } catch {
         // Wallet construction failed earlier; nothing to stop.
       }
@@ -246,10 +257,12 @@ export class MidnightMonitor {
    */
   async responderWallet(): Promise<ResponderWallet> {
     if (!this.responderWalletPromise) {
-      this.responderWalletPromise = this.buildResponderWallet().catch((error) => {
-        this.responderWalletPromise = undefined; // allow a later retry
-        throw error;
-      });
+      this.responderWalletPromise = this.buildResponderWallet().catch(
+        (error) => {
+          this.responderWalletPromise = undefined; // allow a later retry
+          throw error;
+        }
+      );
     }
     return this.responderWalletPromise;
   }
@@ -257,9 +270,13 @@ export class MidnightMonitor {
   private async buildResponderWallet(): Promise<ResponderWallet> {
     const seed = this.config.responderWalletSeed;
     if (!seed) {
-      throw new Error('MidnightMonitor: responderWalletSeed is required to construct the responder wallet.');
+      throw new Error(
+        'MidnightMonitor: responderWalletSeed is required to construct the responder wallet.'
+      );
     }
-    console.log('MidnightMonitor: constructing responder wallet (derive keys -> start facade -> sync)...');
+    console.log(
+      'MidnightMonitor: constructing responder wallet (derive keys -> start facade -> sync)...'
+    );
     const keys = deriveAccountKeys(seed, this.config.networkId);
     const walletFacade = await initialiseWalletFacade(keys, this.nodeConfig);
     await walletFacade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
@@ -275,10 +292,12 @@ export class MidnightMonitor {
    */
   async responderContract(): Promise<DeployedSignetContract> {
     if (!this.responderContractPromise) {
-      this.responderContractPromise = this.buildResponderContract().catch((error) => {
-        this.responderContractPromise = undefined; // allow a later retry
-        throw error;
-      });
+      this.responderContractPromise = this.buildResponderContract().catch(
+        (error) => {
+          this.responderContractPromise = undefined; // allow a later retry
+          throw error;
+        }
+      );
     }
     return this.responderContractPromise;
   }
@@ -287,15 +306,21 @@ export class MidnightMonitor {
     const contractAddress = this.config.signetContractAddress;
     if (!contractAddress) {
       throw new Error(
-        'MidnightMonitor: signetContractAddress is required to join the signet contract.',
+        'MidnightMonitor: signetContractAddress is required to join the signet contract.'
       );
     }
     const { keys, walletFacade } = await this.responderWallet();
     // midnight-js reads a process-global network id — set it before building
     // providers / joining the contract.
     setNetworkId(this.config.networkId);
-    const providers = buildSignetContractProviders(walletFacade, keys, this.nodeConfig);
-    console.log(`MidnightMonitor: joining signet contract at ${contractAddress}...`);
+    const providers = buildSignetContractProviders(
+      walletFacade,
+      keys,
+      this.nodeConfig
+    );
+    console.log(
+      `MidnightMonitor: joining signet contract at ${contractAddress}...`
+    );
     return findDeployedContract(providers, {
       contractAddress,
       compiledContract: signetContractCompiledContract,
@@ -329,15 +354,21 @@ export class MidnightMonitor {
    * blocking the write chain. The timeout is deliberately long — a real
    * attestation proof + submit legitimately takes tens of seconds.
    */
-  private async timedPost<T>(label: string, post: () => Promise<T>): Promise<T> {
+  private async timedPost<T>(
+    label: string,
+    post: () => Promise<T>
+  ): Promise<T> {
     console.log(`MidnightMonitor: [timing] ${label} started...`);
     const startedAt = performance.now();
     let timeoutId: NodeJS.Timeout | undefined;
     try {
       const timeout = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(
-          () => reject(new Error(`${label} timed out after ${WRITE_TIMEOUT_MS / 1000}s`)),
-          WRITE_TIMEOUT_MS,
+          () =>
+            reject(
+              new Error(`${label} timed out after ${WRITE_TIMEOUT_MS / 1000}s`)
+            ),
+          WRITE_TIMEOUT_MS
         );
       });
       const result = await Promise.race([post(), timeout]);
@@ -346,7 +377,9 @@ export class MidnightMonitor {
       return result;
     } catch (error) {
       const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-      console.log(`MidnightMonitor: [timing] ${label} FAILED after ${seconds}s`);
+      console.log(
+        `MidnightMonitor: [timing] ${label} FAILED after ${seconds}s`
+      );
       throw error;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
@@ -359,7 +392,10 @@ export class MidnightMonitor {
    * necessity — verified off-chain. Lazily constructs the wallet + contract on
    * first call.
    */
-  async postSignatureResponse(requestId: Uint8Array, signatureResponse: SignetEVMSignatureResponse) {
+  async postSignatureResponse(
+    requestId: Uint8Array,
+    signatureResponse: SignetEVMSignatureResponse
+  ) {
     // Resolve the contract OUTSIDE the timer: the first call builds the
     // wallet + joins the contract (separately logged), and that one-off cost
     // would skew the post benchmark.
@@ -367,8 +403,9 @@ export class MidnightMonitor {
     return this.serializeWrite(() =>
       this.timedPost(
         `postSignatureResponse(0x${Buffer.from(requestId).toString('hex')})`,
-        () => contract.callTx.postSignatureResponse(requestId, signatureResponse),
-      ),
+        () =>
+          contract.callTx.postSignatureResponse(requestId, signatureResponse)
+      )
     );
   }
 
@@ -381,19 +418,23 @@ export class MidnightMonitor {
    */
   async postRespondBidirectional(
     requestId: Uint8Array,
-    respondBidirectional: SignetRespondBidirectional,
+    respondBidirectional: SignetRespondBidirectional
   ) {
     const contract = await this.responderContract();
     return this.serializeWrite(() =>
       this.timedPost(
         `postRespondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
-        () => contract.callTx.postRespondBidirectional(requestId, respondBidirectional),
-      ),
+        () =>
+          contract.callTx.postRespondBidirectional(
+            requestId,
+            respondBidirectional
+          )
+      )
     );
   }
 
   private async fetchAndProcessRequests(
-    onSigningRequest: (request: MidnightSigningRequest) => Promise<void>,
+    onSigningRequest: (request: MidnightSigningRequest) => Promise<void>
   ): Promise<void> {
     if (!this.publicDataProvider) {
       console.error('MidnightMonitor: not initialized');
@@ -402,21 +443,28 @@ export class MidnightMonitor {
 
     for (const contractAddress of this.config.contractAddresses) {
       try {
-        console.debug(`check midnight for signetEVMSignatureRequests at contract address '${contractAddress}'...`);
+        console.debug(
+          `check midnight for signetEVMSignatureRequests at contract address '${contractAddress}'...`
+        );
 
-        const contractState = await this.publicDataProvider.queryContractState(contractAddress);
+        const contractState =
+          await this.publicDataProvider.queryContractState(contractAddress);
         if (!contractState?.data) {
           console.warn(`no state data found for contract '${contractAddress}'`);
           continue;
-        };
-        const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(contractState.data);
+        }
+        const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
+          contractState.data
+        );
 
         // Cheap change detection: the signet nonce counts requests ever
         // created, so an unchanged value means nothing new since the last
         // fully-processed poll.
         const lastNonce = this.lastNonces.get(contractAddress);
         if (lastNonce !== undefined && nonce <= lastNonce) continue;
-        console.log(`MidnightMonitor: nonce ${lastNonce ?? '(none)'} -> ${nonce} on ${contractAddress}`);
+        console.log(
+          `MidnightMonitor: nonce ${lastNonce ?? '(none)'} -> ${nonce} on ${contractAddress}`
+        );
 
         let allProcessed = true;
         for (const [requestId, signetRequest] of requestsIndex.entries()) {
@@ -458,16 +506,21 @@ export class MidnightMonitor {
 
           this.processedRequests.add(requestId);
 
-          console.log(`MidnightMonitor: New request ${requestId} from contract ${contractAddress}`);
+          console.log(
+            `MidnightMonitor: New request ${requestId} from contract ${contractAddress}`
+          );
           console.log(`  Function: ${request.calldata.funcSig}`);
           console.log(
-            `  Args: ${request.calldata.args.map((arg) => '0x' + Buffer.from(arg).toString('hex')).join(', ')}`,
+            `  Args: ${request.calldata.args.map((arg) => '0x' + Buffer.from(arg).toString('hex')).join(', ')}`
           );
 
           try {
             await onSigningRequest(request);
           } catch (error) {
-            console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
+            console.error(
+              `MidnightMonitor: Error processing ${requestId}:`,
+              error
+            );
             this.processedRequests.delete(requestId);
             allProcessed = false;
           }
@@ -480,7 +533,10 @@ export class MidnightMonitor {
           this.lastNonces.set(contractAddress, nonce);
         }
       } catch (error) {
-        console.error(`MidnightMonitor: Error polling ${contractAddress}:`, error);
+        console.error(
+          `MidnightMonitor: Error polling ${contractAddress}:`,
+          error
+        );
       }
     }
   }
@@ -491,18 +547,25 @@ export class MidnightMonitor {
     // Reuse signet-midnight's canonical builder (the same package the request
     // reader comes from) rather than a vendored RLP re-implementation, so the
     // unsigned transaction is assembled exactly as clients verify it.
-    const unsignedTx = signetEVMSignatureRequestToUnsignedEVMTransaction(request.signetRequest);
+    const unsignedTx = signetEVMSignatureRequestToUnsignedEVMTransaction(
+      request.signetRequest
+    );
     return ethers.getBytes(unsignedTx.unsignedSerialized);
   }
 
-  async signAndBroadcastResponse(requestId: Uint8Array, evmReturnData: Uint8Array): Promise<SignedResponse> {
+  async signAndBroadcastResponse(
+    requestId: Uint8Array,
+    evmReturnData: Uint8Array
+  ): Promise<SignedResponse> {
     const requestIdHex = Buffer.from(requestId).toString('hex');
-    console.log(`MidnightMonitor: Signing respond-bidirectional attestation for ${requestIdHex}`);
+    console.log(
+      `MidnightMonitor: Signing respond-bidirectional attestation for ${requestIdHex}`
+    );
 
     if (evmReturnData.length > SERIALIZED_OUTPUT_BYTES) {
       throw new Error(
         `MidnightMonitor: execution output is ${evmReturnData.length} bytes — ` +
-        `does not fit the ${SERIALIZED_OUTPUT_BYTES}-byte serializedOutput field`,
+          `does not fit the ${SERIALIZED_OUTPUT_BYTES}-byte serializedOutput field`
       );
     }
     const serializedOutput = new Uint8Array(SERIALIZED_OUTPUT_BYTES);
@@ -513,9 +576,13 @@ export class MidnightMonitor {
     // compiled circuits the signet contract verifies against —
     // signetAttestationMessage + the Schnorr challenge — so the attestation
     // passes postRespondBidirectional's in-circuit check.
-    const msg = signetCircuits.signetAttestationMessage(requestId, serializedOutput, outputLen);
+    const msg = signetCircuits.signetAttestationMessage(
+      requestId,
+      serializedOutput,
+      outputLen
+    );
     const sig = schnorrSign(this.jubjubSk, msg, (ax, ay, px, py, m) =>
-      signetCircuits.schnorrChallenge(ax, ay, px, py, m),
+      signetCircuits.schnorrChallenge(ax, ay, px, py, m)
     );
 
     const response: SignedResponse = {
@@ -523,7 +590,10 @@ export class MidnightMonitor {
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
       outputLen: evmReturnData.length,
       pk: { x: this.jubjubPk.x.toString(), y: this.jubjubPk.y.toString() },
-      announcement: { x: sig.announcement.x.toString(), y: sig.announcement.y.toString() },
+      announcement: {
+        x: sig.announcement.x.toString(),
+        y: sig.announcement.y.toString(),
+      },
       response: sig.response.toString(),
     };
 
@@ -538,7 +608,9 @@ export class MidnightMonitor {
       announcement: sig.announcement,
       response: sig.response,
     });
-    console.log(`MidnightMonitor: posted respond-bidirectional attestation for ${requestIdHex}`);
+    console.log(
+      `MidnightMonitor: posted respond-bidirectional attestation for ${requestIdHex}`
+    );
 
     return response;
   }
@@ -562,15 +634,21 @@ export class MidnightMonitor {
     // bigR.y by decompressing (r, yParity) on the curve.
     const sig = ethers.Transaction.from(data.signedTransaction).signature;
     if (!sig) {
-      throw new Error(`broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`);
+      throw new Error(
+        `broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`
+      );
     }
     const signatureResponse = signatureToSignetEVMSignatureResponse(sig);
 
     const requestId = ethers.getBytes(data.requestId);
 
-    console.log(`MidnightMonitor: posting signature response for ${data.requestId} (tx ${data.txHash})...`);
+    console.log(
+      `MidnightMonitor: posting signature response for ${data.requestId} (tx ${data.txHash})...`
+    );
     await this.postSignatureResponse(requestId, signatureResponse);
-    console.log(`MidnightMonitor: posted signature response for ${data.requestId}`);
+    console.log(
+      `MidnightMonitor: posted signature response for ${data.requestId}`
+    );
   }
 
   getJubjubPk(): any {
@@ -586,20 +664,27 @@ export class MidnightMonitor {
   }
 
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
-    if (!config.midnightIndexerUrl || !config.midnightContractAddresses?.length) {
+    if (
+      !config.midnightIndexerUrl ||
+      !config.midnightContractAddresses?.length
+    ) {
       return null;
     }
 
     return new MidnightMonitor({
       networkId: (config.midnightNetworkId ?? 'undeployed') as NetworkId,
       indexerUrl: config.midnightIndexerUrl,
-      indexerWsUrl: config.midnightIndexerWsUrl || config.midnightIndexerUrl.replace('http', 'ws'),
+      indexerWsUrl:
+        config.midnightIndexerWsUrl ||
+        config.midnightIndexerUrl.replace('http', 'ws'),
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
       contractAddresses: config.midnightContractAddresses,
       signetContractAddress: config.midnightSignetContractAddress,
       mpcRootKey: config.mpcRootKey,
-      responderWalletSeed: config.midnightWalletSeed || '0000000000000000000000000000000000000000000000000000000000000001',
+      responderWalletSeed:
+        config.midnightWalletSeed ||
+        '0000000000000000000000000000000000000000000000000000000000000001',
     });
   }
 }
@@ -607,7 +692,10 @@ export class MidnightMonitor {
 function decodePaddedString(bytes: Uint8Array): string {
   let end = bytes.length;
   for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] === 0) { end = i; break; }
+    if (bytes[i] === 0) {
+      end = i;
+      break;
+    }
   }
   return new TextDecoder().decode(bytes.slice(0, end));
 }
