@@ -453,7 +453,6 @@ export class ChainSignatureServer {
           txInfo.callbackSerializationSchema
         );
         await this.midnightMonitor.signAndBroadcastResponse(requestIdBytes, serializedOutput);
-        console.log('✅ Response signed and broadcast via WebSocket');
       } else {
         // Solana / Substrate: serialize output + compute ed25519 signature
         const serializedOutput = await OutputSerializer.serialize(
@@ -532,7 +531,6 @@ export class ChainSignatureServer {
         outputData.set(MAGIC_ERROR_PREFIX);
         outputData.set(serializedError, MAGIC_ERROR_PREFIX.length);
         await this.midnightMonitor.signAndBroadcastResponse(requestIdBytes, outputData);
-        console.log('✅ Error response signed and broadcast via WebSocket');
       } else {
         // Solana / Substrate: serialize error + compute ed25519 signature
         const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
