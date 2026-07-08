@@ -12,9 +12,10 @@
  * 3. Decodes the request index (field 0) and skips already-processed ids
  * 4. Builds ABI calldata + RLP transaction off-chain
  * 5. Posts the MPC's ECDSA signature to the signet contract (postSignatureResponse)
- * 6. After the EVM tx confirms, Schnorr-signs (requestId, hash(outputData)) and
- *    posts the attestation on-chain (postRemoteExecutionResponse) — verified
- *    in-circuit against the sealed MPC key. The USER polls and calls claim().
+ * 6. After the EVM tx confirms, Schnorr-signs
+ *    (requestId, hash(serializedOutput, outputLen)) and posts the attestation
+ *    on-chain (postRespondBidirectional) — verified in-circuit against the
+ *    sealed MPC key. The USER polls and calls claimDeposit().
  */
 
 import { Buffer } from 'buffer';
@@ -26,19 +27,19 @@ import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 // Schnorr signing, the attestation-message circuit, and the Schnorr challenge
 // all come from signet-midnight — the SAME compiled circuits the signet
 // contract verifies against. Signing here with them is what makes an
-// attestation pass postRemoteExecutionResponse's in-circuit check (this is the
-// "import from the pure circuits near the contract, don't rebuild" the old
-// FIXME called for).
+// attestation pass postRespondBidirectional's in-circuit check.
 import {
   readSignetRequestsLedgerFromState,
+  signatureToSignetEVMSignatureResponse,
   signetEVMSignatureRequestToUnsignedEVMTransaction,
   deriveJubjubKeypair,
   hashJubjubPoint,
   schnorrSign,
   pureCircuits as signetCircuits,
-  OUTPUT_DATA_SIZE,
+  SERIALIZED_OUTPUT_BYTES,
   type SignetEVMSignatureRequest,
-  type SignetRemoteExecutionResponse,
+  type SignetEVMSignatureResponse,
+  type SignetRespondBidirectional,
 } from "@midnight-erc20-vault/signet-midnight";
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
@@ -72,7 +73,8 @@ export interface MidnightSigningRequest extends SigningRequest {
 
 export interface SignedResponse {
   requestId: string;
-  outputData: string;
+  serializedOutput: string;
+  outputLen: number;
   pk: { x: string; y: string };
   announcement: { x: string; y: string };
   response: string;
@@ -107,13 +109,21 @@ export interface ResponderWallet {
 /**
  * The joined signet contract handle — midnight-js's found-contract shape typed
  * to the generated contract, so `callTx.postSignatureResponse(...)` and
- * `callTx.postRemoteExecutionResponse(...)` carry the real circuit signatures.
+ * `callTx.postRespondBidirectional(...)` carry the real circuit signatures.
  */
 type DeployedSignetContract = FoundContract<
   SignetContract<SignetContractPrivateState>
 >;
 
 (globalThis as any).WebSocket = WebSocket;
+
+/**
+ * Upper bound on a single signet contract write (proof + submit + finalize).
+ * Long by design — a real attestation legitimately takes tens of seconds; this
+ * only trips when a `callTx` is genuinely wedged, turning a forever-hang into a
+ * retryable failure.
+ */
+const WRITE_TIMEOUT_MS = 120_000;
 
 export class MidnightMonitor {
   private config: MidnightMonitorConfig;
@@ -132,6 +142,15 @@ export class MidnightMonitor {
 
   private jubjubSk: bigint = 0n;
   private jubjubPk: any = null;
+
+  // Single-writer serialization for ALL signet contract writes. The joined
+  // contract shares one wallet + single-writer LevelDB private-state store, and
+  // two concurrent callTx.* invocations deadlock it (see the poll-loop note in
+  // start()). postSignatureResponse and postRespondBidirectional are driven by
+  // two INDEPENDENT loops (MidnightMonitor's poll and ChainSignatureServer's tx
+  // monitor), so their per-loop re-entrancy guards don't cover cross-loop
+  // overlap. This chain forces every write to queue behind the previous one.
+  private writeChain: Promise<unknown> = Promise.resolve();
 
   constructor(config: MidnightMonitorConfig) {
     this.config = {
@@ -252,7 +271,7 @@ export class MidnightMonitor {
   /**
    * The joined signet contract, built on first access and memoized (depends on
    * {@link responderWallet}). Its `callTx.postSignatureResponse` /
-   * `callTx.postRemoteExecutionResponse` are the responder's on-chain write paths.
+   * `callTx.postRespondBidirectional` are the responder's on-chain write paths.
    */
   async responderContract(): Promise<DeployedSignetContract> {
     if (!this.responderContractPromise) {
@@ -286,28 +305,91 @@ export class MidnightMonitor {
   }
 
   /**
-   * Post an MPC signature response (the 65-byte ECDSA signature) on-chain via
-   * the joined signet contract. Unauthenticated by necessity — verified
-   * off-chain. Lazily constructs the wallet + contract on first call.
+   * Serialize an on-chain write behind every prior one. The joined signet
+   * contract shares a single wallet + LevelDB private-state store, so concurrent
+   * `callTx.*` calls deadlock; chaining forces them to run one at a time.
    */
-  async postSignatureResponse(requestId: Uint8Array, signatureResponse: Uint8Array) {
-    const contract = await this.responderContract();
-    return contract.callTx.postSignatureResponse(requestId, signatureResponse);
+  private serializeWrite<T>(post: () => Promise<T>): Promise<T> {
+    const result = this.writeChain.then(post, post);
+    // Keep the chain alive past a rejection so one failed write doesn't wedge
+    // every subsequent write, and swallow the tail rejection (the real error is
+    // still delivered to the caller via `result`).
+    this.writeChain = result.catch(() => {});
+    return result;
   }
 
   /**
-   * Post the MPC's remote-execution attestation on-chain via the joined signet
-   * contract. The Schnorr signature over (requestId, hash(outputData)) is
-   * verified in-circuit against the contract's sealed MPC key at post time, so
-   * only a genuine attestation lands. Lazily constructs the wallet + contract
-   * on first call.
+   * Run one on-chain post and log how long it took (proof generation +
+   * submission + finalization) — basic latency benchmarking of the signet
+   * contract write paths. Logs on failure too, so timeouts are measurable.
+   *
+   * Bounded by {@link WRITE_TIMEOUT_MS}: a genuinely wedged `callTx` (e.g. a
+   * submission that never lands) rejects instead of hanging forever, so the
+   * request is marked failed and retried on the next poll rather than silently
+   * blocking the write chain. The timeout is deliberately long — a real
+   * attestation proof + submit legitimately takes tens of seconds.
    */
-  async postRemoteExecutionResponse(
+  private async timedPost<T>(label: string, post: () => Promise<T>): Promise<T> {
+    console.log(`MidnightMonitor: [timing] ${label} started...`);
+    const startedAt = performance.now();
+    let timeoutId: NodeJS.Timeout | undefined;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`${label} timed out after ${WRITE_TIMEOUT_MS / 1000}s`)),
+          WRITE_TIMEOUT_MS,
+        );
+      });
+      const result = await Promise.race([post(), timeout]);
+      const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+      console.log(`MidnightMonitor: [timing] ${label} took ${seconds}s`);
+      return result;
+    } catch (error) {
+      const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+      console.log(`MidnightMonitor: [timing] ${label} FAILED after ${seconds}s`);
+      throw error;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Post an MPC signature response (the canonical `{ bigR, s, recoveryId }`
+   * record) on-chain via the joined signet contract. Unauthenticated by
+   * necessity — verified off-chain. Lazily constructs the wallet + contract on
+   * first call.
+   */
+  async postSignatureResponse(requestId: Uint8Array, signatureResponse: SignetEVMSignatureResponse) {
+    // Resolve the contract OUTSIDE the timer: the first call builds the
+    // wallet + joins the contract (separately logged), and that one-off cost
+    // would skew the post benchmark.
+    const contract = await this.responderContract();
+    return this.serializeWrite(() =>
+      this.timedPost(
+        `postSignatureResponse(0x${Buffer.from(requestId).toString('hex')})`,
+        () => contract.callTx.postSignatureResponse(requestId, signatureResponse),
+      ),
+    );
+  }
+
+  /**
+   * Post the MPC's respond-bidirectional attestation on-chain via the joined
+   * signet contract. The Schnorr signature over
+   * (requestId, hash(serializedOutput, outputLen)) is verified in-circuit
+   * against the contract's sealed MPC key at post time, so only a genuine
+   * attestation lands. Lazily constructs the wallet + contract on first call.
+   */
+  async postRespondBidirectional(
     requestId: Uint8Array,
-    executionResponse: SignetRemoteExecutionResponse,
+    respondBidirectional: SignetRespondBidirectional,
   ) {
     const contract = await this.responderContract();
-    return contract.callTx.postRemoteExecutionResponse(requestId, executionResponse);
+    return this.serializeWrite(() =>
+      this.timedPost(
+        `postRespondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
+        () => contract.callTx.postRespondBidirectional(requestId, respondBidirectional),
+      ),
+    );
   }
 
   private async fetchAndProcessRequests(
@@ -369,8 +451,8 @@ export class MidnightMonitor {
             algo: decodePaddedString(mpcRouting.algo),
             dest: decodePaddedString(mpcRouting.dest),
             params: mpcRouting.params,
-            outputDeserializationSchema: mpcRouting.outputSchema,
-            respondSerializationSchema: mpcRouting.respondSchema,
+            outputDeserializationSchema: mpcRouting.outputDeserializationSchema,
+            respondSerializationSchema: mpcRouting.respondSerializationSchema,
             signetRequest,
           };
 
@@ -415,38 +497,48 @@ export class MidnightMonitor {
 
   async signAndBroadcastResponse(requestId: Uint8Array, evmReturnData: Uint8Array): Promise<SignedResponse> {
     const requestIdHex = Buffer.from(requestId).toString('hex');
-    console.log(`MidnightMonitor: Signing remote-execution attestation for ${requestIdHex}`);
+    console.log(`MidnightMonitor: Signing respond-bidirectional attestation for ${requestIdHex}`);
 
-    const outputData = new Uint8Array(OUTPUT_DATA_SIZE);
-    outputData.set(evmReturnData.slice(0, OUTPUT_DATA_SIZE));
+    if (evmReturnData.length > SERIALIZED_OUTPUT_BYTES) {
+      throw new Error(
+        `MidnightMonitor: execution output is ${evmReturnData.length} bytes — ` +
+        `does not fit the ${SERIALIZED_OUTPUT_BYTES}-byte serializedOutput field`,
+      );
+    }
+    const serializedOutput = new Uint8Array(SERIALIZED_OUTPUT_BYTES);
+    serializedOutput.set(evmReturnData);
+    const outputLen = BigInt(evmReturnData.length);
 
-    // Sign (requestId, hash(outputData)) with the same compiled circuits the
-    // signet contract verifies against — signetAttestationMessage + the Schnorr
-    // challenge — so the attestation passes postRemoteExecutionResponse's
-    // in-circuit check.
-    const msg = signetCircuits.signetAttestationMessage(requestId, outputData);
+    // Sign (requestId, hash(serializedOutput, outputLen)) with the same
+    // compiled circuits the signet contract verifies against —
+    // signetAttestationMessage + the Schnorr challenge — so the attestation
+    // passes postRespondBidirectional's in-circuit check.
+    const msg = signetCircuits.signetAttestationMessage(requestId, serializedOutput, outputLen);
     const sig = schnorrSign(this.jubjubSk, msg, (ax, ay, px, py, m) =>
       signetCircuits.schnorrChallenge(ax, ay, px, py, m),
     );
 
     const response: SignedResponse = {
       requestId: requestIdHex,
-      outputData: Buffer.from(outputData).toString('hex'),
+      serializedOutput: Buffer.from(serializedOutput).toString('hex'),
+      outputLen: evmReturnData.length,
       pk: { x: this.jubjubPk.x.toString(), y: this.jubjubPk.y.toString() },
       announcement: { x: sig.announcement.x.toString(), y: sig.announcement.y.toString() },
       response: sig.response.toString(),
     };
 
     // Post the attestation on-chain to the signet contract. There is no
-    // push/websocket channel — the contract's remoteExecutionResponseIndex is
-    // the delivery surface; the client polls it and presents the record to claim().
-    await this.postRemoteExecutionResponse(requestId, {
-      outputData,
+    // push/websocket channel — the contract's respondBidirectionalIndex is
+    // the delivery surface; the client polls it and presents the record to
+    // claimDeposit().
+    await this.postRespondBidirectional(requestId, {
+      serializedOutput,
+      outputLen,
       pk: this.jubjubPk,
       announcement: sig.announcement,
       response: sig.response,
     });
-    console.log(`MidnightMonitor: posted remote-execution response for ${requestIdHex}`);
+    console.log(`MidnightMonitor: posted respond-bidirectional attestation for ${requestIdHex}`);
 
     return response;
   }
@@ -454,9 +546,10 @@ export class MidnightMonitor {
   /**
    * Post the MPC's EVM signature for a request on-chain to the
    * signet contract. The input is the fully-signed EVM
-   * transaction the MPC produced; we extract its 65-byte `r || s || v`
-   * ECDSA signature — the payload a poller recovers the signer from — and
-   * submit it via the joined contract's `postSignatureResponse` circuit.
+   * transaction the MPC produced; we extract its ECDSA signature as the
+   * canonical `{ bigR, s, recoveryId }` record — the payload a poller
+   * recovers the signer from — and submit it via the joined contract's
+   * `postSignatureResponse` circuit.
    */
   async broadcastSignedTransaction(data: {
     requestId: string;
@@ -465,18 +558,13 @@ export class MidnightMonitor {
   }): Promise<void> {
     // The signature covers the transaction's unsigned hash, which is exactly
     // what a poller recovers the signer from (see signet-midnight's
-    // recoverSignetEVMSignatureResponseSigner).
+    // recoverSignetEVMSignatureResponseSigner). The record encoder recovers
+    // bigR.y by decompressing (r, yParity) on the curve.
     const sig = ethers.Transaction.from(data.signedTransaction).signature;
     if (!sig) {
       throw new Error(`broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`);
     }
-
-    // Pack r (32) || s (32) || v (1). v is the recovery id (0/1); the
-    // signature-responses reader normalises 0/1 and legacy 27/28 alike.
-    const signatureResponse = new Uint8Array(65);
-    signatureResponse.set(ethers.getBytes(sig.r), 0);
-    signatureResponse.set(ethers.getBytes(sig.s), 32);
-    signatureResponse[64] = sig.yParity;
+    const signatureResponse = signatureToSignetEVMSignatureResponse(sig);
 
     const requestId = ethers.getBytes(data.requestId);
 
