@@ -27,14 +27,16 @@ export interface EvmGasParams {
   evmValue: bigint;
 }
 
-/** Calldata fields read from the contract's signet maps. */
+/**
+ * Calldata fields read from the contract's signet maps — the flat
+ * logging/inspection view of the tagged-word calldata. Transaction
+ * re-assembly happens in signet-midnight's shared builder, never from this.
+ */
 export interface CalldataFields {
-  /** EVM function signature, e.g. "transfer(address,uint256)". */
-  funcSig: string;
-  /** Number of arguments. */
-  argCount: number;
-  /** Arguments as 32-byte values (ABI word size). */
-  args: Uint8Array[];
+  /** The 4-byte function selector as 0x hex; absent when the tx has no calldata. */
+  selector?: string;
+  /** The real (non-unused) tagged 32-byte ABI words, in order. */
+  words: { kind: number; value: Uint8Array }[];
 }
 
 /** A signing request read from a contract's standardized ledger fields. */

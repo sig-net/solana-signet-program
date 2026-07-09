@@ -29,17 +29,19 @@ import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 // contract verifies against. Signing here with them is what makes an
 // attestation pass postRespondBidirectional's in-circuit check.
 import {
+  ABIWordKind,
+  bytesToHex,
   readSignetRequestsLedgerFromState,
-  signatureToSignetEVMSignatureResponse,
-  signetEVMSignatureRequestToUnsignedEVMTransaction,
+  signatureToSignatureRespondedEvent,
+  signBidirectionalEventToUnsignedEVMTransaction,
   deriveJubjubKeypair,
   hashJubjubPoint,
   schnorrSign,
   pureCircuits as signetCircuits,
   SERIALIZED_OUTPUT_BYTES,
-  type SignetEVMSignatureRequest,
-  type SignetEVMSignatureResponse,
-  type SignetRespondBidirectional,
+  type SignBidirectionalEvent,
+  type SignatureRespondedEvent,
+  type RespondBidirectional,
 } from '@midnight-erc20-vault/signet-midnight';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
@@ -75,7 +77,7 @@ export interface MidnightSigningRequest extends SigningRequest {
    * fields are the string-decoded/flattened view kept for key derivation,
    * signing, and logging.
    */
-  signetRequest: SignetEVMSignatureRequest;
+  signetRequest: SignBidirectionalEvent;
 }
 
 export interface SignedResponse {
@@ -394,7 +396,7 @@ export class MidnightMonitor {
    */
   async postSignatureResponse(
     requestId: Uint8Array,
-    signatureResponse: SignetEVMSignatureResponse
+    signatureResponse: SignatureRespondedEvent
   ) {
     // Resolve the contract OUTSIDE the timer: the first call builds the
     // wallet + joins the contract (separately logged), and that one-off cost
@@ -418,7 +420,7 @@ export class MidnightMonitor {
    */
   async postRespondBidirectional(
     requestId: Uint8Array,
-    respondBidirectional: SignetRespondBidirectional
+    respondBidirectional: RespondBidirectional
   ) {
     const contract = await this.responderContract();
     return this.serializeWrite(() =>
@@ -444,7 +446,7 @@ export class MidnightMonitor {
     for (const contractAddress of this.config.contractAddresses) {
       try {
         console.debug(
-          `check midnight for signetEVMSignatureRequests at contract address '${contractAddress}'...`
+          `check midnight for SignBidirectionalEvents at contract address '${contractAddress}'...`
         );
 
         const contractState =
@@ -471,36 +473,42 @@ export class MidnightMonitor {
           if (this.processedRequests.has(requestId)) continue;
           console.log(`found request: ${requestId}`);
 
-          const { evmTransaction, calldata, mpcRouting } = signetRequest;
-          const argCount = Number(calldata.argCount);
-          const args = calldata.args.slice(0, argCount);
+          const { txParams } = signetRequest;
+          // The flat logging view of the calldata: the real (non-unused)
+          // tagged words. Re-assembly itself happens in the shared builder.
+          const words = txParams.calldata.is_some
+            ? txParams.calldata.value.words.filter(
+                (word) => word.kind !== ABIWordKind.unused
+              )
+            : [];
 
           const request: MidnightSigningRequest = {
             predecessor: contractAddress,
             requestId: new Uint8Array(Buffer.from(requestId, 'hex')),
             nonce: signetRequest.requestNonce,
             evmParams: {
-              evmTo: evmTransaction.to,
-              evmChainId: evmTransaction.chainId,
-              evmNonce: evmTransaction.nonce,
-              evmGasLimit: evmTransaction.gasLimit,
-              evmMaxFee: evmTransaction.maxFeePerGas,
-              evmPriorityFee: evmTransaction.maxPriorityFeePerGas,
-              evmValue: evmTransaction.value,
+              evmTo: txParams.to,
+              evmChainId: txParams.chainId,
+              evmNonce: txParams.nonce,
+              evmGasLimit: txParams.gasLimit,
+              evmMaxFee: txParams.maxFeePerGas,
+              evmPriorityFee: txParams.maxPriorityFeePerGas,
+              evmValue: txParams.value,
             },
             calldata: {
-              funcSig: decodePaddedString(calldata.funcSig),
-              argCount,
-              args,
+              selector: txParams.calldata.is_some
+                ? `0x${bytesToHex(txParams.calldata.value.selector)}`
+                : undefined,
+              words,
             },
-            caip2Id: decodePaddedString(mpcRouting.caip2Id),
-            keyVersion: Number(mpcRouting.keyVersion),
-            path: mpcRouting.path,
-            algo: decodePaddedString(mpcRouting.algo),
-            dest: decodePaddedString(mpcRouting.dest),
-            params: mpcRouting.params,
-            outputDeserializationSchema: mpcRouting.outputDeserializationSchema,
-            respondSerializationSchema: mpcRouting.respondSerializationSchema,
+            caip2Id: decodePaddedString(signetRequest.caip2Id),
+            keyVersion: Number(signetRequest.keyVersion),
+            path: signetRequest.path,
+            algo: decodePaddedString(signetRequest.algo),
+            dest: decodePaddedString(signetRequest.dest),
+            params: signetRequest.params,
+            outputDeserializationSchema: signetRequest.outputDeserializationSchema,
+            respondSerializationSchema: signetRequest.respondSerializationSchema,
             signetRequest,
           };
 
@@ -509,9 +517,9 @@ export class MidnightMonitor {
           console.log(
             `MidnightMonitor: New request ${requestId} from contract ${contractAddress}`
           );
-          console.log(`  Function: ${request.calldata.funcSig}`);
+          console.log(`  Selector: ${request.calldata.selector ?? '(no calldata)'}`);
           console.log(
-            `  Args: ${request.calldata.args.map((arg) => '0x' + Buffer.from(arg).toString('hex')).join(', ')}`
+            `  Words: ${request.calldata.words.map((word) => `${word.kind}:0x${bytesToHex(word.value)}`).join(', ')}`
           );
 
           try {
@@ -547,7 +555,7 @@ export class MidnightMonitor {
     // Reuse signet-midnight's canonical builder (the same package the request
     // reader comes from) rather than a vendored RLP re-implementation, so the
     // unsigned transaction is assembled exactly as clients verify it.
-    const unsignedTx = signetEVMSignatureRequestToUnsignedEVMTransaction(
+    const unsignedTx = signBidirectionalEventToUnsignedEVMTransaction(
       request.signetRequest
     );
     return ethers.getBytes(unsignedTx.unsignedSerialized);
@@ -630,7 +638,7 @@ export class MidnightMonitor {
   }): Promise<void> {
     // The signature covers the transaction's unsigned hash, which is exactly
     // what a poller recovers the signer from (see signet-midnight's
-    // recoverSignetEVMSignatureResponseSigner). The record encoder recovers
+    // recoverSignatureRespondedEventSigner). The record encoder recovers
     // bigR.y by decompressing (r, yParity) on the curve.
     const sig = ethers.Transaction.from(data.signedTransaction).signature;
     if (!sig) {
@@ -638,7 +646,7 @@ export class MidnightMonitor {
         `broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`
       );
     }
-    const signatureResponse = signatureToSignetEVMSignatureResponse(sig);
+    const signatureResponse = signatureToSignatureRespondedEvent(sig);
 
     const requestId = ethers.getBytes(data.requestId);
 
