@@ -31,7 +31,7 @@ import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 import {
   bytesToHex,
   SignetRequestFeed,
-  signatureToSignatureRespondedEvent,
+  signatureToSignatureResponse,
   signBidirectionalRequestToUnsignedEVMTransaction,
   deriveJubjubKeypair,
   hashJubjubPoint,
@@ -41,7 +41,7 @@ import {
   type ResolvedSignetRequest,
   type RequestIdHex,
   type SignBidirectionalRequest,
-  type SignatureRespondedEvent,
+  type SignatureResponse,
   type RespondBidirectional,
 } from '@midnight-erc20-vault/signet-midnight';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
@@ -192,10 +192,10 @@ export class MidnightMonitor {
       `MidnightMonitor: Jubjub pk hash = ${Buffer.from(hashJubjubPoint(pk)).toString('hex')}`
     );
 
-    this.publicDataProvider = indexerPublicDataProvider(
-      this.config.indexerUrl,
-      this.config.indexerWsUrl
-    );
+    this.publicDataProvider = indexerPublicDataProvider({
+      queryURL: this.config.indexerUrl,
+      subscriptionURL: this.config.indexerWsUrl,
+    });
 
     // One feed over the central signet contract's events — no requester list.
     // The indexer provider is both the event source and the state source the
@@ -417,7 +417,7 @@ export class MidnightMonitor {
    */
   async postSignatureResponse(
     requestId: Uint8Array,
-    signatureResponse: SignatureRespondedEvent
+    signatureResponse: SignatureResponse
   ) {
     // Resolve the contract OUTSIDE the timer: the first call builds the
     // wallet + joins the contract (separately logged), and that one-off cost
@@ -643,7 +643,7 @@ export class MidnightMonitor {
   }): Promise<void> {
     // The signature covers the transaction's unsigned hash, which is exactly
     // what a poller recovers the signer from (see signet-midnight's
-    // recoverSignatureRespondedEventSigner). The record encoder recovers
+    // recoverSignatureResponseSigner). The record encoder recovers
     // bigR.y by decompressing (r, yParity) on the curve.
     const sig = ethers.Transaction.from(data.signedTransaction).signature;
     if (!sig) {
@@ -651,7 +651,7 @@ export class MidnightMonitor {
         `broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`
       );
     }
-    const signatureResponse = signatureToSignatureRespondedEvent(sig);
+    const signatureResponse = signatureToSignatureResponse(sig);
 
     const requestId = ethers.getBytes(data.requestId);
 
