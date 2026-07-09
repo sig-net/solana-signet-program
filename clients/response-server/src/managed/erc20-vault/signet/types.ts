@@ -29,14 +29,14 @@ export interface EvmGasParams {
 
 /**
  * Calldata fields read from the contract's signet maps — the flat
- * logging/inspection view of the tagged-word calldata. Transaction
- * re-assembly happens in signet-midnight's shared builder, never from this.
+ * logging/inspection view of the word calldata. Transaction re-assembly
+ * happens in signet-midnight's shared builder, never from this.
  */
 export interface CalldataFields {
   /** The 4-byte function selector as 0x hex; absent when the tx has no calldata. */
   selector?: string;
-  /** The real (non-unused) tagged 32-byte ABI words, in order. */
-  words: { kind: number; value: Uint8Array }[];
+  /** The real (used) 32-byte calldata words, in order. */
+  words: Uint8Array[];
 }
 
 /** A signing request read from a contract's standardized ledger fields. */

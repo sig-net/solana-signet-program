@@ -29,17 +29,16 @@ import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 // contract verifies against. Signing here with them is what makes an
 // attestation pass postRespondBidirectional's in-circuit check.
 import {
-  ABIWordKind,
   bytesToHex,
   readSignetRequestsLedgerFromState,
   signatureToSignatureRespondedEvent,
-  signBidirectionalEventToUnsignedEVMTransaction,
+  signBidirectionalRequestToUnsignedEVMTransaction,
   deriveJubjubKeypair,
   hashJubjubPoint,
   schnorrSign,
   pureCircuits as signetCircuits,
   SERIALIZED_OUTPUT_BYTES,
-  type SignBidirectionalEvent,
+  type SignBidirectionalRequest,
   type SignatureRespondedEvent,
   type RespondBidirectional,
 } from '@midnight-erc20-vault/signet-midnight';
@@ -77,7 +76,7 @@ export interface MidnightSigningRequest extends SigningRequest {
    * fields are the string-decoded/flattened view kept for key derivation,
    * signing, and logging.
    */
-  signetRequest: SignBidirectionalEvent;
+  signetRequest: SignBidirectionalRequest;
 }
 
 export interface SignedResponse {
@@ -446,7 +445,7 @@ export class MidnightMonitor {
     for (const contractAddress of this.config.contractAddresses) {
       try {
         console.debug(
-          `check midnight for SignBidirectionalEvents at contract address '${contractAddress}'...`
+          `check midnight for signature requests at contract address '${contractAddress}'...`
         );
 
         const contractState =
@@ -474,11 +473,12 @@ export class MidnightMonitor {
           console.log(`found request: ${requestId}`);
 
           const { txParams } = signetRequest;
-          // The flat logging view of the calldata: the real (non-unused)
-          // tagged words. Re-assembly itself happens in the shared builder.
+          // The flat logging view of the calldata: the real (used) words.
+          // Re-assembly itself happens in the shared builder.
           const words = txParams.calldata.is_some
-            ? txParams.calldata.value.words.filter(
-                (word) => word.kind !== ABIWordKind.unused
+            ? txParams.calldata.value.words.slice(
+                0,
+                Number(txParams.calldata.value.noWords)
               )
             : [];
 
@@ -519,7 +519,7 @@ export class MidnightMonitor {
           );
           console.log(`  Selector: ${request.calldata.selector ?? '(no calldata)'}`);
           console.log(
-            `  Words: ${request.calldata.words.map((word) => `${word.kind}:0x${bytesToHex(word.value)}`).join(', ')}`
+            `  Words: ${request.calldata.words.map((word) => `0x${bytesToHex(word)}`).join(', ')}`
           );
 
           try {
@@ -555,7 +555,7 @@ export class MidnightMonitor {
     // Reuse signet-midnight's canonical builder (the same package the request
     // reader comes from) rather than a vendored RLP re-implementation, so the
     // unsigned transaction is assembled exactly as clients verify it.
-    const unsignedTx = signBidirectionalEventToUnsignedEVMTransaction(
+    const unsignedTx = signBidirectionalRequestToUnsignedEVMTransaction(
       request.signetRequest
     );
     return ethers.getBytes(unsignedTx.unsignedSerialized);
