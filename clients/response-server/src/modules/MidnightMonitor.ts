@@ -30,7 +30,7 @@ import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 // attestation pass postRespondBidirectional's in-circuit check.
 import {
   bytesToHex,
-  readSignetRequestsLedgerFromState,
+  SignetRequestFeed,
   signatureToSignatureRespondedEvent,
   signBidirectionalRequestToUnsignedEVMTransaction,
   deriveJubjubKeypair,
@@ -38,6 +38,8 @@ import {
   schnorrSign,
   pureCircuits as signetCircuits,
   SERIALIZED_OUTPUT_BYTES,
+  type ResolvedSignetRequest,
+  type RequestIdHex,
   type SignBidirectionalRequest,
   type SignatureRespondedEvent,
   type RespondBidirectional,
@@ -94,9 +96,21 @@ export interface MidnightMonitorConfig {
   indexerWsUrl: string;
   nodeUrl: string;
   proofServerUrl: string;
-  contractAddresses: string[];
-  /** Address of the deployed signet contract the responder posts responses to. */
-  signetContractAddress?: string;
+  /**
+   * Address of the deployed central signet contract. The responder both WATCHES
+   * its `Misc` events to discover requests (via {@link SignetRequestFeed}) and
+   * posts its responses here — one contract for both directions.
+   */
+  signetContractAddress: string;
+  /**
+   * Optional policy allow-list of requester contract addresses to serve. NOT a
+   * security control (attribution comes from the resolver's authenticated read
+   * of the caller's own ledger); omit to serve every requester the feed can
+   * authenticate.
+   */
+  allowContracts?: string[];
+  /** Durable resume floor for the event feed (persist across restarts). */
+  fromEventId?: number;
   mpcRootKey: string;
   pollIntervalMs?: number;
   wsPort?: number;
@@ -137,10 +151,13 @@ export class MidnightMonitor {
   private config: MidnightMonitorConfig;
   private pollIntervalId: NodeJS.Timeout | null = null;
   private polling = false;
-  private lastNonces = new Map<string, bigint>();
-  private processedRequests = new Set<string>();
 
   private publicDataProvider: PublicDataProvider | null = null;
+
+  // The event-observation request feed: watches the ONE signet contract's
+  // events, resolves each to an authenticated request read from the caller's
+  // own ledger, and dedupes by request id. Built in initialize().
+  private feed: SignetRequestFeed | null = null;
 
   // The responder wallet and the joined signet contract are both
   // constructed lazily on first access and memoized (loaded once). The cached
@@ -187,6 +204,22 @@ export class MidnightMonitor {
       this.config.indexerWsUrl
     );
 
+    // One feed over the central signet contract's events — no requester list.
+    // The indexer provider is both the event source and the state source the
+    // resolver reads caller ledgers through.
+    this.feed = new SignetRequestFeed({
+      signetContractAddress: this.config.signetContractAddress,
+      source: this.publicDataProvider,
+      allowContracts: this.config.allowContracts,
+      fromEventId: this.config.fromEventId,
+    });
+
+    console.log(
+      `MidnightMonitor: watching signet contract events at ${this.config.signetContractAddress}` +
+        (this.config.allowContracts?.length
+          ? ` (allow-list: ${this.config.allowContracts.join(', ')})`
+          : ' (no allow-list — serving all authenticated requesters)')
+    );
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
   }
 
@@ -197,7 +230,7 @@ export class MidnightMonitor {
   }): Promise<void> {
     console.log('MidnightMonitor: Starting polling...');
     console.log(`  Indexer: ${this.config.indexerUrl}`);
-    console.log(`  Contracts: ${this.config.contractAddresses.join(', ')}`);
+    console.log(`  Signet contract (events): ${this.config.signetContractAddress}`);
 
     this.pollIntervalId = setInterval(async () => {
       // Non-re-entrant: wallet construction/sync and contract writes can take
@@ -437,116 +470,99 @@ export class MidnightMonitor {
   private async fetchAndProcessRequests(
     onSigningRequest: (request: MidnightSigningRequest) => Promise<void>
   ): Promise<void> {
-    if (!this.publicDataProvider) {
+    if (!this.feed) {
       console.error('MidnightMonitor: not initialized');
       return;
     }
 
-    for (const contractAddress of this.config.contractAddresses) {
+    // Discover by event: the feed reads the signet contract's notifications,
+    // resolves each to an AUTHENTICATED request from the named caller's own
+    // ledger (forged / not-yet-indexed / non-member events are dropped and
+    // retried), and dedupes by request id. No requester contract list.
+    let resolved: ResolvedSignetRequest[];
+    try {
+      resolved = await this.feed.poll();
+    } catch (error) {
+      console.error('MidnightMonitor: Error polling signet events:', error);
+      return;
+    }
+
+    for (const { callerAddress, requestId, request: signetRequest } of resolved) {
+      console.log(
+        `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
+      );
+      const request = this.toSigningRequest(
+        callerAddress,
+        requestId,
+        signetRequest
+      );
+      console.log(`  Selector: ${request.calldata.selector ?? '(no calldata)'}`);
+      console.log(
+        `  Words: ${request.calldata.words.map((word) => `0x${bytesToHex(word)}`).join(', ')}`
+      );
+
       try {
-        console.debug(
-          `check midnight for signature requests at contract address '${contractAddress}'...`
-        );
-
-        const contractState =
-          await this.publicDataProvider.queryContractState(contractAddress);
-        if (!contractState?.data) {
-          console.warn(`no state data found for contract '${contractAddress}'`);
-          continue;
-        }
-        const { nonce, requestsIndex } = readSignetRequestsLedgerFromState(
-          contractState.data
-        );
-
-        // Cheap change detection: the signet nonce counts requests ever
-        // created, so an unchanged value means nothing new since the last
-        // fully-processed poll.
-        const lastNonce = this.lastNonces.get(contractAddress);
-        if (lastNonce !== undefined && nonce <= lastNonce) continue;
-        console.log(
-          `MidnightMonitor: nonce ${lastNonce ?? '(none)'} -> ${nonce} on ${contractAddress}`
-        );
-
-        let allProcessed = true;
-        for (const [requestId, signetRequest] of requestsIndex.entries()) {
-          if (this.processedRequests.has(requestId)) continue;
-          console.log(`found request: ${requestId}`);
-
-          const { txParams } = signetRequest;
-          // The flat logging view of the calldata: the real (used) words.
-          // Re-assembly itself happens in the shared builder.
-          const words = txParams.calldata.is_some
-            ? txParams.calldata.value.words.slice(
-                0,
-                Number(txParams.calldata.value.noWords)
-              )
-            : [];
-
-          const request: MidnightSigningRequest = {
-            predecessor: contractAddress,
-            requestId: new Uint8Array(Buffer.from(requestId, 'hex')),
-            nonce: signetRequest.requestNonce,
-            evmParams: {
-              evmTo: txParams.to,
-              evmChainId: txParams.chainId,
-              evmNonce: txParams.nonce,
-              evmGasLimit: txParams.gasLimit,
-              evmMaxFee: txParams.maxFeePerGas,
-              evmPriorityFee: txParams.maxPriorityFeePerGas,
-              evmValue: txParams.value,
-            },
-            calldata: {
-              selector: txParams.calldata.is_some
-                ? `0x${bytesToHex(txParams.calldata.value.selector)}`
-                : undefined,
-              words,
-            },
-            caip2Id: decodePaddedString(signetRequest.caip2Id),
-            keyVersion: Number(signetRequest.keyVersion),
-            path: signetRequest.path,
-            algo: decodePaddedString(signetRequest.algo),
-            dest: decodePaddedString(signetRequest.dest),
-            params: signetRequest.params,
-            outputDeserializationSchema: signetRequest.outputDeserializationSchema,
-            respondSerializationSchema: signetRequest.respondSerializationSchema,
-            signetRequest,
-          };
-
-          this.processedRequests.add(requestId);
-
-          console.log(
-            `MidnightMonitor: New request ${requestId} from contract ${contractAddress}`
-          );
-          console.log(`  Selector: ${request.calldata.selector ?? '(no calldata)'}`);
-          console.log(
-            `  Words: ${request.calldata.words.map((word) => `0x${bytesToHex(word)}`).join(', ')}`
-          );
-
-          try {
-            await onSigningRequest(request);
-          } catch (error) {
-            console.error(
-              `MidnightMonitor: Error processing ${requestId}:`,
-              error
-            );
-            this.processedRequests.delete(requestId);
-            allProcessed = false;
-          }
-        }
-
-        // Advance the watermark only when every pending request went through:
-        // a failed request stays unprocessed, keeps the nonce gate open, and
-        // is retried on the next poll.
-        if (allProcessed) {
-          this.lastNonces.set(contractAddress, nonce);
-        }
+        await onSigningRequest(request);
       } catch (error) {
-        console.error(
-          `MidnightMonitor: Error polling ${contractAddress}:`,
-          error
-        );
+        console.error(`MidnightMonitor: Error processing ${requestId}:`, error);
+        // Re-arm for redelivery on the next poll — mirrors the old
+        // delete-from-processed retry, now driven by the feed's dedupe set.
+        this.feed.forget(requestId);
       }
     }
+  }
+
+  /**
+   * Adapt an authenticated {@link SignBidirectionalRequest} (read from the
+   * requester contract `predecessor`'s ledger) into the flat
+   * {@link MidnightSigningRequest} the signing pipeline consumes. `predecessor`
+   * is the epsilon-derivation root — the contract whose authenticated state the
+   * feed actually read, never a value taken from the event on faith.
+   */
+  private toSigningRequest(
+    predecessor: string,
+    requestId: RequestIdHex,
+    signetRequest: SignBidirectionalRequest
+  ): MidnightSigningRequest {
+    const { txParams } = signetRequest;
+    // The flat logging view of the calldata: the real (used) words.
+    // Re-assembly itself happens in the shared builder.
+    const words = txParams.calldata.is_some
+      ? txParams.calldata.value.words.slice(
+          0,
+          Number(txParams.calldata.value.noWords)
+        )
+      : [];
+
+    return {
+      predecessor,
+      requestId: new Uint8Array(Buffer.from(requestId, 'hex')),
+      nonce: signetRequest.requestNonce,
+      evmParams: {
+        evmTo: txParams.to,
+        evmChainId: txParams.chainId,
+        evmNonce: txParams.nonce,
+        evmGasLimit: txParams.gasLimit,
+        evmMaxFee: txParams.maxFeePerGas,
+        evmPriorityFee: txParams.maxPriorityFeePerGas,
+        evmValue: txParams.value,
+      },
+      calldata: {
+        selector: txParams.calldata.is_some
+          ? `0x${bytesToHex(txParams.calldata.value.selector)}`
+          : undefined,
+        words,
+      },
+      caip2Id: decodePaddedString(signetRequest.caip2Id),
+      keyVersion: Number(signetRequest.keyVersion),
+      path: signetRequest.path,
+      algo: decodePaddedString(signetRequest.algo),
+      dest: decodePaddedString(signetRequest.dest),
+      params: signetRequest.params,
+      outputDeserializationSchema: signetRequest.outputDeserializationSchema,
+      respondSerializationSchema: signetRequest.respondSerializationSchema,
+      signetRequest,
+    };
   }
 
   // ---- Transaction building & signing ----
@@ -672,9 +688,12 @@ export class MidnightMonitor {
   }
 
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
+    // The signet contract address is now the sole requirement: the responder
+    // discovers requesters by watching its events, so no requester list is
+    // needed (or accepted).
     if (
       !config.midnightIndexerUrl ||
-      !config.midnightContractAddresses?.length
+      !config.midnightSignetContractAddress
     ) {
       return null;
     }
@@ -687,8 +706,8 @@ export class MidnightMonitor {
         config.midnightIndexerUrl.replace('http', 'ws'),
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
-      contractAddresses: config.midnightContractAddresses,
       signetContractAddress: config.midnightSignetContractAddress,
+      allowContracts: config.midnightAllowContracts,
       mpcRootKey: config.mpcRootKey,
       responderWalletSeed:
         config.midnightWalletSeed ||

@@ -18,10 +18,10 @@ async function main() {
     midnightIndexerWsUrl: envConfig.MIDNIGHT_INDEXER_WS_URL,
     midnightNodeUrl: envConfig.MIDNIGHT_NODE_URL,
     midnightProofServerUrl: envConfig.MIDNIGHT_PROOF_SERVER_URL,
-    midnightContractAddresses: envConfig.MIDNIGHT_CONTRACT_ADDRESSES
-      ? envConfig.MIDNIGHT_CONTRACT_ADDRESSES.split(',').map(s => s.trim()).filter(Boolean)
-      : undefined,
     midnightSignetContractAddress: envConfig.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
+    midnightAllowContracts: envConfig.MIDNIGHT_ALLOW_CONTRACTS
+      ? envConfig.MIDNIGHT_ALLOW_CONTRACTS.split(',').map(s => s.trim()).filter(Boolean)
+      : undefined,
     midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,
   };
 
