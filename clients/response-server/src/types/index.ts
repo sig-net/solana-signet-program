@@ -22,14 +22,6 @@ export interface ServerConfig {
   midnightNodeUrl?: string;
   midnightProofServerUrl?: string;
   midnightSignetContractAddress?: string;
-  /**
-   * Optional policy allow-list of requester contract addresses to serve. NOT a
-   * security control and NOT a discovery mechanism (the responder discovers
-   * requesters by watching the signet contract's events and authenticates each
-   * against the caller's own ledger); omit to serve every authenticated
-   * requester.
-   */
-  midnightAllowContracts?: string[];
   midnightWalletSeed?: string;
 }
 
@@ -64,7 +56,6 @@ export const serverConfigSchema = z.object({
   midnightNodeUrl: z.string().optional(),
   midnightProofServerUrl: z.string().optional(),
   midnightSignetContractAddress: z.string().optional(),
-  midnightAllowContracts: z.array(z.string()).optional(),
   midnightWalletSeed: z.string().optional(),
 });
 

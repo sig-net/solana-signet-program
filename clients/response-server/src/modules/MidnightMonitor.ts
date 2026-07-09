@@ -102,13 +102,6 @@ export interface MidnightMonitorConfig {
    * posts its responses here — one contract for both directions.
    */
   signetContractAddress: string;
-  /**
-   * Optional policy allow-list of requester contract addresses to serve. NOT a
-   * security control (attribution comes from the resolver's authenticated read
-   * of the caller's own ledger); omit to serve every requester the feed can
-   * authenticate.
-   */
-  allowContracts?: string[];
   /** Durable resume floor for the event feed (persist across restarts). */
   fromEventId?: number;
   mpcRootKey: string;
@@ -210,15 +203,11 @@ export class MidnightMonitor {
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
-      allowContracts: this.config.allowContracts,
       fromEventId: this.config.fromEventId,
     });
 
     console.log(
-      `MidnightMonitor: watching signet contract events at ${this.config.signetContractAddress}` +
-        (this.config.allowContracts?.length
-          ? ` (allow-list: ${this.config.allowContracts.join(', ')})`
-          : ' (no allow-list — serving all authenticated requesters)')
+      `MidnightMonitor: watching signet contract events at ${this.config.signetContractAddress}`
     );
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
   }
@@ -707,7 +696,6 @@ export class MidnightMonitor {
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
       signetContractAddress: config.midnightSignetContractAddress,
-      allowContracts: config.midnightAllowContracts,
       mpcRootKey: config.mpcRootKey,
       responderWalletSeed:
         config.midnightWalletSeed ||

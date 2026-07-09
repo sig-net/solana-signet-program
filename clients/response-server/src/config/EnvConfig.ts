@@ -29,10 +29,6 @@ const envSchema = z.object({
   MIDNIGHT_NODE_URL: z.string().url().optional(),
   MIDNIGHT_PROOF_SERVER_URL: z.string().url().optional(),
   MIDNIGHT_SIGNET_CONTRACT_ADDRESS: z.string().optional(),
-  // Optional policy allow-list (comma-separated requester addresses). NOT a
-  // security control — the responder authenticates every request against the
-  // caller's own ledger. Omit to serve all authenticated requesters.
-  MIDNIGHT_ALLOW_CONTRACTS: z.string().optional(),
   MIDNIGHT_WALLET_SEED: z.string().optional(),
   MIDNIGHT_ZK_CONFIG_PATH: z.string().optional(),
   MIDNIGHT_CONTRACT_MODULE_PATH: z.string().optional(),
@@ -57,7 +53,6 @@ function validateEnv(): EnvConfig {
       MIDNIGHT_NODE_URL: process.env.MIDNIGHT_NODE_URL,
       MIDNIGHT_PROOF_SERVER_URL: process.env.MIDNIGHT_PROOF_SERVER_URL,
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS: process.env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
-      MIDNIGHT_ALLOW_CONTRACTS: process.env.MIDNIGHT_ALLOW_CONTRACTS,
       MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,
       MIDNIGHT_ZK_CONFIG_PATH: process.env.MIDNIGHT_ZK_CONFIG_PATH,
       MIDNIGHT_CONTRACT_MODULE_PATH: process.env.MIDNIGHT_CONTRACT_MODULE_PATH,
