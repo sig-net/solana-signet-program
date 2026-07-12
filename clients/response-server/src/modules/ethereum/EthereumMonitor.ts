@@ -111,9 +111,11 @@ export class EthereumMonitor {
     let url: string;
     switch (namespace) {
       case 'eip155':
-        url = config.isDevnet
-          ? `https://sepolia.infura.io/v3/${config.infuraApiKey}`
-          : `https://mainnet.infura.io/v3/${config.infuraApiKey}`;
+        url =
+          config.evmRpcUrl ??
+          (config.isDevnet
+            ? `https://sepolia.infura.io/v3/${config.infuraApiKey}`
+            : `https://mainnet.infura.io/v3/${config.infuraApiKey}`);
         break;
       default:
         throw new Error(`Unsupported chain namespace: ${namespace}`);

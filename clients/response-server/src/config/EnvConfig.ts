@@ -15,6 +15,10 @@ const envSchema = z.object({
     .string()
     .regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a valid hex private key'),
   INFURA_API_KEY: z.string().min(1, 'Infura API key is required'),
+  // Overrides the Infura-derived EVM endpoint for ALL eip155 chains — point
+  // it at a local dev node (e.g. http://127.0.0.1:8545) to sign/verify
+  // against a local EVM instead of Sepolia/mainnet.
+  EVM_RPC_URL: z.string().url().optional(),
   PROGRAM_ID: z.string().min(1, 'Program ID is required'),
   VERBOSE: z
     .string()
@@ -43,6 +47,7 @@ function validateEnv(): EnvConfig {
       SOLANA_PRIVATE_KEY: process.env.SOLANA_PRIVATE_KEY,
       MPC_ROOT_KEY: process.env.MPC_ROOT_KEY,
       INFURA_API_KEY: process.env.INFURA_API_KEY,
+      EVM_RPC_URL: process.env.EVM_RPC_URL,
       PROGRAM_ID: process.env.PROGRAM_ID,
       VERBOSE: process.env.VERBOSE,
       BITCOIN_NETWORK: process.env.BITCOIN_NETWORK,

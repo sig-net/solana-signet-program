@@ -88,7 +88,9 @@ export class EthereumTransactionProcessor {
 
       try {
         if (!this.fundingProvider) {
-          const url = `https://sepolia.infura.io/v3/${config.infuraApiKey}`;
+          const url =
+            config.evmRpcUrl ??
+            `https://sepolia.infura.io/v3/${config.infuraApiKey}`;
           this.fundingProvider = new ethers.JsonRpcProvider(url);
           await this.fundingProvider.getNetwork();
         }

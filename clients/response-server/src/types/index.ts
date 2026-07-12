@@ -8,6 +8,8 @@ export interface ServerConfig {
   solanaPrivateKey: string;
   mpcRootKey: string;
   infuraApiKey: string;
+  /** Overrides the Infura-derived endpoint for all eip155 chains (local dev node support). */
+  evmRpcUrl?: string;
   programId: string;
   isDevnet: boolean;
   signatureDeposit?: string;
@@ -35,6 +37,7 @@ export const serverConfigSchema = z.object({
       'MPC root key must be a valid hex private key'
     ),
   infuraApiKey: z.string().min(1, 'Infura API key is required'),
+  evmRpcUrl: z.string().optional(),
   programId: z.string().refine((val) => {
     try {
       new PublicKey(val);
