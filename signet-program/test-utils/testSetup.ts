@@ -44,7 +44,7 @@ export function testSetup() {
     programId: program.programId.toString(),
     isDevnet: provider.connection.rpcEndpoint.includes('devnet'),
     signatureDeposit: '100000',
-    chainId: 'solana:localnet',
+    chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
     verbose: false,
     bitcoinNetwork: 'regtest',
   };

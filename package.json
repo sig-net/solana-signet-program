@@ -4,7 +4,7 @@
   "private": true,
   "workspaces": [
     "signet-program",
-    "clients/response-server"
+    "fakenet-signer"
   ],
   "scripts": {
     "lint": "eslint . --max-warnings 0",

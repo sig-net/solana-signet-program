@@ -28,7 +28,7 @@ jobs:
         run: yarn install
 
       - name: Build fakenet-signer
-        working-directory: clients/response-server
+        working-directory: fakenet-signer
         run: yarn build
 
       - name: Run lint

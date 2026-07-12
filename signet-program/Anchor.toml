@@ -2,16 +2,19 @@
 seeds = false
 
 [programs.localnet]
-chain_signatures = "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS"
+chain_signatures = "SigMcRMjKfnC7RDG5q4yUMZM1s5KJ9oYTPP4NmJRDRw"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.devnet]
-chain_signatures = "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS"
+chain_signatures = "SigDuEPNeDjh3oJv7MUraPN7zaTFomS6ZWfpXwjUg4B"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.testnet]
-chain_signatures = "H5tHfpYoEnarrrzcV7sWBcZhiKMvL2aRpUYvb1ydWkwS"
+chain_signatures = "SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
+
+[programs.mainnet]
+chain_signatures = "SigMcRMjKfnC7RDG5q4yUMZM1s5KJ9oYTPP4NmJRDRw"
 
 [registry]
 url = "https://anchor.projectserum.com"

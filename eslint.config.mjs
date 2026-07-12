@@ -7,6 +7,36 @@ import { dirname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const nodeGlobals = {
+  Buffer: 'readonly',
+  console: 'readonly',
+  process: 'readonly',
+  module: 'readonly',
+  __dirname: 'readonly',
+  __filename: 'readonly',
+  setTimeout: 'readonly',
+  clearTimeout: 'readonly',
+  setInterval: 'readonly',
+  clearInterval: 'readonly',
+  NodeJS: 'readonly',
+  fetch: 'readonly',
+  AbortSignal: 'readonly',
+  TextDecoder: 'readonly',
+  TextEncoder: 'readonly',
+  WebSocket: 'readonly',
+  performance: 'readonly',
+  URL: 'readonly',
+};
+
+const testGlobals = {
+  describe: 'readonly',
+  it: 'readonly',
+  before: 'readonly',
+  after: 'readonly',
+  beforeEach: 'readonly',
+  afterEach: 'readonly',
+};
+
 export default [
   eslint.configs.recommended,
   {
@@ -18,20 +48,8 @@ export default [
         tsconfigRootDir: __dirname,
       },
       globals: {
-        Buffer: 'readonly',
-        console: 'readonly',
-        process: 'readonly',
-        module: 'readonly',
-        __dirname: 'readonly',
-        __filename: 'readonly',
-        setTimeout: 'readonly',
-        clearTimeout: 'readonly',
-        describe: 'readonly',
-        it: 'readonly',
-        before: 'readonly',
-        after: 'readonly',
-        beforeEach: 'readonly',
-        afterEach: 'readonly',
+        ...nodeGlobals,
+        ...testGlobals,
       },
     },
     plugins: {
@@ -48,6 +66,30 @@ export default [
     },
   },
   {
+    files: ['fakenet-signer/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        project: './fakenet-signer/tsconfig.json',
+        tsconfigRootDir: __dirname,
+      },
+      globals: nodeGlobals,
+    },
+    plugins: {
+      '@typescript-eslint': tseslint,
+    },
+    rules: {
+      ...tseslint.configs.recommended.rules,
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      'no-console': 'off',
+    },
+  },
+  {
     files: ['**/*.spec.ts', '**/*.test.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
@@ -60,7 +102,8 @@ export default [
       '**/node_modules/**',
       '**/dist/**',
       '**/*.d.ts',
-      'clients/**',
+      // Compact compiler output (generated)
+      'fakenet-signer/src/managed/**',
     ],
   },
 ];

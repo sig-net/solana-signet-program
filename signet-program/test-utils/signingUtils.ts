@@ -106,6 +106,7 @@ export async function callDirectSign(
 export async function waitForSignatureResponse(
   signArgs: SignArgs,
   signetSolContract: contracts.solana.ChainSignatureContract,
+  programId: anchor.web3.PublicKey,
   afterSignature?: string
 ): Promise<{
   isValid: boolean;
@@ -128,24 +129,14 @@ export async function waitForSignatureResponse(
     }
   );
 
-  const result = await signetSolContract.pollForRequestId({
+  const result = await signetSolContract.waitForEvent({
+    eventName: 'signatureRespondedEvent',
     requestId,
-    payload: signArgs.payload,
-    path: signArgs.path,
-    afterSignature: afterSignature || '',
-    options: {
-      retryCount: 30,
-      delay: 1000,
-    },
+    signer: programId,
+    afterSignature: afterSignature || undefined,
+    timeoutMs: 30000,
+    backfillIntervalMs: 1000,
   });
-
-  if (!result) {
-    throw new Error(`No signature response found for request ${requestId}`);
-  }
-
-  if ('error' in result) {
-    throw new Error(`Signature error: ${result.error}`);
-  }
 
   return {
     isValid: true,
