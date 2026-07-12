@@ -15,7 +15,7 @@ export class CryptoUtils {
     path: string,
     chainId: string
   ): bigint {
-    const derivationPath = `${CONFIG.EPSILON_DERIVATION_PREFIX},${chainId},${requester},${path}`;
+    const derivationPath = `${CONFIG.EPSILON_DERIVATION_PREFIX_V1},${chainId},${requester},${path}`;
     const hash = ethers.keccak256(ethers.toUtf8Bytes(derivationPath));
     return BigInt(hash);
   }

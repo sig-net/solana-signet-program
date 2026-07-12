@@ -6,7 +6,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
+// Repo-root .env (fakenet-signer/src/config → three levels up)
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 const envSchema = z.object({
   SOLANA_RPC_URL: z.string().url().default('https://api.devnet.solana.com'),
