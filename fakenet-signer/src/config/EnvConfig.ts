@@ -35,8 +35,6 @@ const envSchema = z.object({
   MIDNIGHT_PROOF_SERVER_URL: z.string().url().optional(),
   MIDNIGHT_SIGNET_CONTRACT_ADDRESS: z.string().optional(),
   MIDNIGHT_WALLET_SEED: z.string().optional(),
-  MIDNIGHT_ZK_CONFIG_PATH: z.string().optional(),
-  MIDNIGHT_CONTRACT_MODULE_PATH: z.string().optional(),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -61,8 +59,6 @@ function validateEnv(): EnvConfig {
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS:
         process.env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
       MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,
-      MIDNIGHT_ZK_CONFIG_PATH: process.env.MIDNIGHT_ZK_CONFIG_PATH,
-      MIDNIGHT_CONTRACT_MODULE_PATH: process.env.MIDNIGHT_CONTRACT_MODULE_PATH,
     });
 
     return env;

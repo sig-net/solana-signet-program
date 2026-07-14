@@ -118,13 +118,6 @@ export interface MidnightMonitorConfig {
    * Defaults to genesis account seed.
    */
   responderWalletSeed?: string;
-
-  /**
-   * Zk-config root with the signet contract's FULL compiled output (prover
-   * keys included) — required to post responses; the npm package's bundled
-   * assets (the default) hold verifier keys only.
-   */
-  zkConfigPath?: string;
 }
 
 /** The responder's live wallet: its key material plus a started-and-synced facade. */
@@ -353,31 +346,17 @@ export class MidnightMonitor {
     // midnight-js reads a process-global network id — set it before building
     // providers / joining the contract.
     setNetworkId(this.config.networkId);
-    // Posting responses PROVES postRespondBidirectional, which needs the
-    // contract's prover keys — the npm package ships verifier keys only, so
-    // without zkConfigPath (MIDNIGHT_ZK_CONFIG_PATH) joining/reading works
-    // but posting will fail at proof time.
-    const zkConfigPath = this.config.zkConfigPath ?? packagedManagedPath;
-    if (!this.config.zkConfigPath) {
-      console.warn(
-        'MidnightMonitor: MIDNIGHT_ZK_CONFIG_PATH is not set — using the npm ' +
-          "package's bundled assets, which lack prover keys; posting responses " +
-          'will fail at proof time. Point it at a full `compact compile` ' +
-          'output dir for the signet contract.'
-      );
-    }
     const providers = buildSignetContractProviders(
       walletFacade,
       keys,
-      this.nodeConfig,
-      zkConfigPath
+      this.nodeConfig
     );
     console.log(
       `MidnightMonitor: joining signet contract at ${contractAddress}...`
     );
     return findDeployedContract(providers, {
       contractAddress,
-      compiledContract: makeSignetContractCompiledContract(zkConfigPath),
+      compiledContract: makeSignetContractCompiledContract(packagedManagedPath),
       privateStateId: SIGNET_CONTRACT_PRIVATE_STATE_ID,
       initialPrivateState: createSignetContractPrivateState(),
     });
@@ -738,7 +717,6 @@ export class MidnightMonitor {
       responderWalletSeed:
         config.midnightWalletSeed ||
         '0000000000000000000000000000000000000000000000000000000000000001',
-      zkConfigPath: config.midnightZkConfigPath,
     });
   }
 }

@@ -28,12 +28,6 @@ export interface ServerConfig {
   midnightProofServerUrl?: string;
   midnightSignetContractAddress?: string;
   midnightWalletSeed?: string;
-  /**
-   * Zk-config root with the signet contract's FULL compiled output (prover
-   * keys included) — required to post responses; the npm package's bundled
-   * assets hold verifier keys only.
-   */
-  midnightZkConfigPath?: string;
 }
 
 export const serverConfigSchema = z.object({
@@ -72,7 +66,6 @@ export const serverConfigSchema = z.object({
   midnightProofServerUrl: z.string().optional(),
   midnightSignetContractAddress: z.string().optional(),
   midnightWalletSeed: z.string().optional(),
-  midnightZkConfigPath: z.string().optional(),
 });
 
 export interface SignBidirectionalEvent {

@@ -41,15 +41,8 @@ import type { MidnightNodeConfig } from './midnight-node-config';
 import type { AccountKeys } from './wallet';
 
 /**
- * The npm package's bundled compiler output (contract module, zkir, VERIFIER
- * keys). Resolved through the package's `./managed/*` subpath export, so it
- * tracks wherever the package manager puts it.
- *
- * NOTE: the published package does NOT ship prover keys (hundreds of MB), so
- * this default can join/read the contract but cannot PROVE a call
- * transaction. Posting responses requires `zkConfigPath` pointing at a full
- * `compact compile` output dir for the signet contract — see
- * MIDNIGHT_ZK_CONFIG_PATH.
+ * The npm package's bundled compiler output (contract module, zkir, prover +
+ * verifier keys). Resolved through the package's `./managed/*` subpath export.
  */
 export const packagedManagedPath = path.dirname(
   path.dirname(
@@ -165,21 +158,16 @@ function createProofServerProvider<K extends string>(
  * @param facade - A started (and synced) wallet facade — see ./wallet.
  * @param keys - The key material of the same wallet, for balancing and signing.
  * @param config - The Midnight network endpoints to run against.
- * @param zkConfigPath - The zk-config root holding this contract's FULL
- *   compiled output, prover keys included (posting responses proves
- *   `postRespondBidirectional`). Defaults to the npm package's bundled assets,
- *   which can read/join but NOT prove — set MIDNIGHT_ZK_CONFIG_PATH.
  * @returns The provider set to hand to `findDeployedContract`.
  */
 export function buildSignetContractProviders(
   facade: WalletFacade,
   keys: AccountKeys,
-  config: MidnightNodeConfig,
-  zkConfigPath: string = packagedManagedPath
+  config: MidnightNodeConfig
 ): SignetContractProviders {
   // Retrieves the ZK artifacts of the contract needed to create proofs.
   const zkConfigProvider = new NodeZkConfigProvider<SignetContractCircuitId>(
-    zkConfigPath
+    packagedManagedPath
   );
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
