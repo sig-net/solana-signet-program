@@ -103,13 +103,12 @@ export interface MidnightMonitorConfig {
   nodeUrl: string;
   proofServerUrl: string;
   /**
-   * Address of the deployed central signet contract. The responder both WATCHES
-   * its `Misc` events to discover requests (via {@link SignetRequestFeed}) and
-   * posts its responses here — one contract for both directions.
+   * Address of the deployed central signet contract. The responder both POLLS
+   * its notification registry to discover requests (via
+   * {@link SignetRequestFeed}) and posts its responses here — one contract for
+   * both directions.
    */
   signetContractAddress: string;
-  /** Durable resume floor for the event feed (persist across restarts). */
-  fromEventId?: number;
   mpcRootKey: string;
   pollIntervalMs?: number;
   wsPort?: number;
@@ -163,9 +162,10 @@ export class MidnightMonitor {
 
   private publicDataProvider: PublicDataProvider | null = null;
 
-  // The event-observation request feed: watches the ONE signet contract's
-  // events, resolves each to an authenticated request read from the caller's
-  // own ledger, and dedupes by request id. Built in initialize().
+  // The registry-polling request feed: polls the ONE signet contract's
+  // notification registry, resolves each entry to an authenticated request
+  // read from the caller's own ledger, and dedupes by request id. Built in
+  // initialize().
   private feed: SignetRequestFeed | null = null;
 
   // The responder wallet and the joined signet contract are both
@@ -213,17 +213,16 @@ export class MidnightMonitor {
       subscriptionURL: this.config.indexerWsUrl,
     });
 
-    // One feed over the central signet contract's events — no requester list.
-    // The indexer provider is both the event source and the state source the
-    // resolver reads caller ledgers through.
+    // One feed over the central signet contract's notification registry — no
+    // requester list. The indexer provider is the state source for both the
+    // registry poll and the caller-ledger reads the resolver does.
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
-      fromEventId: this.config.fromEventId,
     });
 
     console.log(
-      `MidnightMonitor: watching signet contract events at ${this.config.signetContractAddress}`
+      `MidnightMonitor: polling signet contract registry at ${this.config.signetContractAddress}`
     );
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
   }
@@ -236,7 +235,7 @@ export class MidnightMonitor {
     console.log('MidnightMonitor: Starting polling...');
     console.log(`  Indexer: ${this.config.indexerUrl}`);
     console.log(
-      `  Signet contract (events): ${this.config.signetContractAddress}`
+      `  Signet contract (notification registry): ${this.config.signetContractAddress}`
     );
 
     this.pollIntervalId = setInterval(async () => {
@@ -496,15 +495,15 @@ export class MidnightMonitor {
       return;
     }
 
-    // Discover by event: the feed reads the signet contract's notifications,
+    // Discover by registry poll: the feed reads the signet contract's notifications,
     // resolves each to an AUTHENTICATED request from the named caller's own
-    // ledger (forged / not-yet-indexed / non-member events are dropped and
+    // ledger (forged / not-yet-indexed / non-member notifications are dropped and
     // retried), and dedupes by request id. No requester contract list.
     let resolved: ResolvedSignetRequest[];
     try {
       resolved = await this.feed.poll();
     } catch (error) {
-      console.error('MidnightMonitor: Error polling signet events:', error);
+      console.error('MidnightMonitor: Error polling signet registry:', error);
       return;
     }
 
@@ -544,7 +543,7 @@ export class MidnightMonitor {
    * requester contract `predecessor`'s ledger) into the flat
    * {@link MidnightSigningRequest} the signing pipeline consumes. `predecessor`
    * is the epsilon-derivation root — the contract whose authenticated state the
-   * feed actually read, never a value taken from the event on faith.
+   * feed actually read, never a value taken from the notification on faith.
    */
   private toSigningRequest(
     predecessor: string,
@@ -720,7 +719,7 @@ export class MidnightMonitor {
 
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
     // The signet contract address is now the sole requirement: the responder
-    // discovers requesters by watching its events, so no requester list is
+    // discovers requesters by polling its notification registry, so no requester list is
     // needed (or accepted).
     if (!config.midnightIndexerUrl || !config.midnightSignetContractAddress) {
       return null;
