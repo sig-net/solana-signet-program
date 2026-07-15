@@ -62,8 +62,9 @@ This is a multi-chain signature orchestrator for Solana. It listens for signatur
 
 Environment variables loaded from `.env` (4 levels up):
 
-- `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `MPC_ROOT_KEY`, `INFURA_API_KEY`, `PROGRAM_ID` (required)
-- `VERBOSE`, `BITCOIN_NETWORK` (optional)
+- `EVM_RPC_URL` (required — any EVM endpoint; hosted providers carry their credential in the URL, e.g. for Infura: `https://sepolia.infura.io/v3/<api-key-here>`)
+- `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `MPC_ROOT_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
+- `DISABLE_SOLANA`, `VERBOSE`, `BITCOIN_NETWORK` (optional)
 
 Runtime config in `src/config/Config.ts` includes polling intervals, timeouts, and key derivation settings.
 

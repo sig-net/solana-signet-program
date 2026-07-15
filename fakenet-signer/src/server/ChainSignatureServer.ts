@@ -59,10 +59,11 @@ const WS_RECONNECT_COOLDOWN_MS = 30_000;
 const BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY = 6;
 
 export class ChainSignatureServer {
-  private connection: Connection;
-  private wallet: anchor.Wallet;
-  private provider: anchor.AnchorProvider;
-  private program: ChainSignaturesProgram;
+  // Null when config.disableSolana — the Solana leg is never constructed.
+  private connection: Connection | null = null;
+  private wallet: anchor.Wallet | null = null;
+  private provider: anchor.AnchorProvider | null = null;
+  private program: ChainSignaturesProgram | null = null;
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
@@ -115,8 +116,20 @@ export class ChainSignatureServer {
       this.resolveReady = resolve;
     });
 
+    if (!this.config.disableSolana) {
+      this.setupSolana();
+    }
+
+    if (this.config.substrateWsUrl) {
+      this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
+    }
+    this.midnightMonitor = MidnightMonitor.fromServerConfig(this.config);
+  }
+
+  private setupSolana() {
+    // Presence is enforced by serverConfigSchema when disableSolana is unset.
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
-      new Uint8Array(JSON.parse(this.config.solanaPrivateKey))
+      new Uint8Array(JSON.parse(this.config.solanaPrivateKey!))
     );
 
     this.connection = new Connection(this.config.solanaRpcUrl, {
@@ -148,21 +161,35 @@ export class ChainSignatureServer {
     anchor.setProvider(this.provider);
 
     const idl = ChainSignaturesIDL as anchor.Idl;
-    idl.address = this.config.programId;
+    idl.address = this.config.programId!;
     this.program = asChainSignaturesProgram(new Program(idl, this.provider));
+  }
 
-    if (this.config.substrateWsUrl) {
-      this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
+  /** Solana members, guaranteed non-null. Throws on Solana-sourced code paths when DISABLE_SOLANA is set. */
+  private requireSolana() {
+    if (!this.connection || !this.wallet || !this.program) {
+      throw new Error(
+        'Solana is disabled (DISABLE_SOLANA) — a Solana-sourced code path was reached unexpectedly'
+      );
     }
-    this.midnightMonitor = MidnightMonitor.fromServerConfig(this.config);
+    return {
+      connection: this.connection,
+      wallet: this.wallet,
+      program: this.program,
+    };
   }
 
   async start() {
     console.log('🚀 Response Server');
-    console.log(`Wallet: ${this.wallet.publicKey.toString()}`);
-    console.log(`Program: ${this.program.programId.toString()}`);
+    if (this.config.disableSolana) {
+      console.log('Solana: disabled (DISABLE_SOLANA)');
+    } else {
+      const { wallet, program } = this.requireSolana();
+      console.log(`Wallet: ${wallet.publicKey.toString()}`);
+      console.log(`Program: ${program.programId.toString()}`);
 
-    await this.ensureInitialized();
+      await this.ensureInitialized();
+    }
 
     if (this.substrateMonitor) {
       await this.connectToSubstrate();
@@ -172,9 +199,13 @@ export class ChainSignatureServer {
       await this.connectToMidnight();
     }
 
+    // Chain-agnostic: tracks pending destination-chain txs (EVM/Bitcoin) for
+    // Midnight/Substrate sources too — must run even with Solana disabled.
     this.startTransactionMonitor();
-    this.setupEventListeners();
-    this.startBackfillMonitor();
+    if (!this.config.disableSolana) {
+      this.setupEventListeners();
+      this.startBackfillMonitor();
+    }
 
     // Resolve readiness so callers can await server.waitUntilReady()
     this.resolveReady?.();
@@ -356,15 +387,16 @@ export class ChainSignatureServer {
   }
 
   private async ensureInitialized() {
+    const { connection, wallet, program } = this.requireSolana();
     const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from('program-state')],
-      this.program.programId
+      program.programId
     );
 
     try {
       this.log(`🔗 Solana RPC: getAccountInfo for program state PDA...`);
       const accountInfo = await this.withTimeout(
-        this.connection.getAccountInfo(programStatePda),
+        connection.getAccountInfo(programStatePda),
         'getAccountInfo'
       );
       this.log(`✓ Solana RPC: getAccountInfo done (exists=${!!accountInfo})`);
@@ -389,10 +421,10 @@ export class ChainSignatureServer {
     try {
       this.log(`🔗 Solana RPC: program.initialize()...`);
       await this.withTimeout(
-        this.program.methods
+        program.methods
           .initialize(new BN(signatureDeposit), chainId)
           .accounts({
-            admin: this.wallet.publicKey,
+            admin: wallet.publicKey,
           })
           .rpc(),
         'program.initialize()'
@@ -604,16 +636,17 @@ export class ChainSignatureServer {
       return;
     }
 
+    const { wallet, program } = this.requireSolana();
     this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
     await this.withTimeout(
-      this.program.methods
+      program.methods
         .respondBidirectional(
           Array.from(requestIdBytes),
           Buffer.from(serializedOutput),
           signature
         )
         .accounts({
-          responder: this.wallet.publicKey,
+          responder: wallet.publicKey,
         })
         .rpc(),
       `respondBidirectional(${txHash})`
@@ -683,16 +716,17 @@ export class ChainSignatureServer {
       return;
     }
 
+    const { wallet, program } = this.requireSolana();
     this.log(`🔗 Solana RPC: respondBidirectional() error for ${txHash}...`);
     await this.withTimeout(
-      this.program.methods
+      program.methods
         .respondBidirectional(
           Array.from(requestIdBytes),
           Buffer.from(serializedOutput),
           signature
         )
         .accounts({
-          responder: this.wallet.publicKey,
+          responder: wallet.publicKey,
         })
         .rpc(),
       `respondBidirectional-error(${txHash})`
@@ -737,8 +771,9 @@ export class ChainSignatureServer {
   }
 
   private subscribeToLogs() {
-    this.cpiSubscriptionId = this.connection.onLogs(
-      this.program.programId,
+    const { connection, program } = this.requireSolana();
+    this.cpiSubscriptionId = connection.onLogs(
+      program.programId,
       async (logs, context) => {
         this.lastWebSocketEventTime = Date.now();
 
@@ -781,10 +816,11 @@ export class ChainSignatureServer {
   }
 
   private async reconnectWebSocket() {
+    const { connection } = this.requireSolana();
     if (this.cpiSubscriptionId !== null) {
       try {
         await this.withTimeout(
-          this.connection.removeOnLogsListener(this.cpiSubscriptionId),
+          connection.removeOnLogsListener(this.cpiSubscriptionId),
           'removeOnLogsListener',
           5_000
         );
@@ -819,12 +855,13 @@ export class ChainSignatureServer {
     slot: number
   ): Promise<void> {
     this.log(`🔎 Processing transaction: ${signature} (slot=${slot})`);
+    const { connection, program } = this.requireSolana();
     const events = await this.withTimeout(
       CpiEventParser.parseCpiEvents(
-        this.connection,
+        connection,
         signature,
-        this.program.programId.toString(),
-        this.program
+        program.programId.toString(),
+        program
       ),
       'parseCpiEvents'
     );
@@ -849,6 +886,7 @@ export class ChainSignatureServer {
   }
 
   private startBackfillMonitor() {
+    const { connection, program } = this.requireSolana();
     console.log(
       `🔄 Starting backfill monitor (interval=${BACKFILL_INTERVAL_MS}ms, batch=${this.backfillBatchSize}, max=${this.backfillMaxBatchSize})`
     );
@@ -874,8 +912,8 @@ export class ChainSignatureServer {
       );
       try {
         const signatures = await this.withTimeout(
-          this.connection.getSignaturesForAddress(
-            this.program.programId,
+          connection.getSignaturesForAddress(
+            program.programId,
             {
               ...(this.lastBackfillSignature
                 ? { until: this.lastBackfillSignature }
@@ -1108,12 +1146,13 @@ export class ChainSignatureServer {
     this.log(`✓ CryptoUtils: signMessage done`);
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
+    const { wallet, program } = this.requireSolana();
     this.log(`🔗 Solana RPC: respond()...`);
     const tx = await this.withTimeout(
-      this.program.methods
+      program.methods
         .respond([requestIdBytes], [signature])
         .accounts({
-          responder: this.wallet.publicKey,
+          responder: wallet.publicKey,
         })
         .rpc(),
       'respond()'
@@ -1122,6 +1161,7 @@ export class ChainSignatureServer {
   }
 
   private getBidirectionalContext(): BidirectionalHandlerContext {
+    const { wallet, program } = this.requireSolana();
     return {
       sendSignatures: async (
         requestIds: Uint8Array[],
@@ -1130,10 +1170,10 @@ export class ChainSignatureServer {
       ) => {
         const requestIdArrays = requestIds.map((id) => Array.from(id));
         return this.withTimeout(
-          this.program.methods
+          program.methods
             .respond(requestIdArrays, signatures)
             .accounts({
-              responder: this.wallet.publicKey,
+              responder: wallet.publicKey,
             })
             .rpc(),
           label
@@ -1312,7 +1352,7 @@ export class ChainSignatureServer {
       clearInterval(this.wsHealthCheckIntervalId);
       this.wsHealthCheckIntervalId = null;
     }
-    if (this.cpiSubscriptionId !== null) {
+    if (this.cpiSubscriptionId !== null && this.connection) {
       this.log(`🔗 Solana RPC: removeOnLogsListener...`);
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);
       this.log(`✓ Solana RPC: removeOnLogsListener done`);

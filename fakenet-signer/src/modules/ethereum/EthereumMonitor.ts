@@ -96,7 +96,7 @@ export class EthereumMonitor {
     config: ServerConfig
   ): ethers.JsonRpcProvider {
     const namespace = getNamespaceFromCaip2(caip2Id);
-    const cacheKey = `${caip2Id}-${config.isDevnet}`;
+    const cacheKey = caip2Id;
 
     const cachedProvider = this.providerCache.get(cacheKey);
     if (cachedProvider) {
@@ -106,11 +106,7 @@ export class EthereumMonitor {
     let url: string;
     switch (namespace) {
       case 'eip155':
-        url =
-          config.evmRpcUrl ??
-          (config.isDevnet
-            ? `https://sepolia.infura.io/v3/${config.infuraApiKey}`
-            : `https://mainnet.infura.io/v3/${config.infuraApiKey}`);
+        url = config.evmRpcUrl;
         break;
       default:
         throw new Error(`Unsupported chain namespace: ${namespace}`);

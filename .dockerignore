@@ -1,0 +1,17 @@
+.git
+node_modules
+**/node_modules
+**/dist
+**/midnight-level-db
+**/*.log
+**/.DS_Store
+.env
+.env.*
+!.env.example
+signet-program/*
+!signet-program/package.json
+clients
+target
+test-ledger
+.anchor
+.program-test-cache

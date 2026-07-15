@@ -1,0 +1,159 @@
+# Publishes the fakenet MPC responder runtime image (fakenet-signer workspace)
+# to ghcr.io/sig-net/fakenet on fakenet-v* tags, e.g.
+#   git tag fakenet-v1.8.0 && git push origin fakenet-v1.8.0
+# -> ghcr.io/sig-net/fakenet:1.8.0 + :latest (linux/amd64 + linux/arm64).
+# workflow_dispatch takes an explicit version input instead.
+#
+# Per-platform images build in parallel on NATIVE runners (no QEMU) and push
+# by digest; the merge job stitches them into one multi-arch manifest.
+#
+# NOTE: the first push auto-creates the ghcr package as PRIVATE — flip
+# ghcr.io/sig-net/fakenet to public in the org package settings afterwards,
+# or every consumer needs `docker login ghcr.io`.
+
+name: Publish fakenet Docker Image
+
+on:
+  push:
+    tags:
+      - 'fakenet-v*'
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.8.0)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: sig-net/fakenet
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Extract version once, share across jobs
+  # ---------------------------------------------------------------------------
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#fakenet-v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Extracted version: ${VERSION}"
+
+  # ---------------------------------------------------------------------------
+  # Build per-platform images in parallel (native runners, no QEMU)
+  # ---------------------------------------------------------------------------
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.runner }}
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: fakenet-signer/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Merge per-platform digests into a single multi-arch manifest
+  # ---------------------------------------------------------------------------
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          # Build the list of per-platform digest references
+          DIGEST_ARGS=$(printf "${IMAGE}@sha256:%s " *)
+
+          # Create manifest for versioned tag and latest
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:latest" \
+            ${DIGEST_ARGS}
+
+      - name: Inspect manifest
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"

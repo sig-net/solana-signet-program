@@ -4,10 +4,10 @@ import type { ServerConfig } from '../types/index.js';
 
 async function main() {
   const config: ServerConfig = {
+    disableSolana: envConfig.DISABLE_SOLANA,
     solanaRpcUrl: envConfig.SOLANA_RPC_URL,
     solanaPrivateKey: envConfig.SOLANA_PRIVATE_KEY,
     mpcRootKey: envConfig.MPC_ROOT_KEY,
-    infuraApiKey: envConfig.INFURA_API_KEY,
     evmRpcUrl: envConfig.EVM_RPC_URL,
     programId: envConfig.PROGRAM_ID,
     isDevnet: envConfig.SOLANA_RPC_URL.includes('devnet'),
