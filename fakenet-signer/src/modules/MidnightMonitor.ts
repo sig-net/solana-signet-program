@@ -1,21 +1,26 @@
 /**
  * MidnightMonitor - Generic signet monitor for any Midnight contract.
  *
- * The MPC needs ONLY a contract address. No compiled contract, no ZK keys,
- * no contract-info.json. State is read by the signet layout convention via
- * the shared reader: request index at ledger field 0, request counter at
- * field 1.
+ * The MPC needs ONLY the signet contract address. Requester contracts are
+ * discovered through the signet registry, and each notification names the
+ * ledger field position of the caller's SignBidirectionalEventMap, so no
+ * compiled caller contract, ZK keys or contract-info.json are needed to
+ * READ state (posting responses uses the published signet contract package).
  *
  * Flow:
- * 1. Polls the contract's raw state via the Midnight GraphQL indexer
- * 2. Reads the signet nonce counter (field 1) to detect new requests cheaply
- * 3. Decodes the request index (field 0) and skips already-processed ids
- * 4. Builds ABI calldata + RLP transaction off-chain
- * 5. Posts the MPC's ECDSA signature to the signet contract (postSignatureResponse)
- * 6. After the EVM tx confirms, Schnorr-signs
- *    (requestId, hash(serializedOutput, outputLen)) and posts the attestation
- *    on-chain (postRespondBidirectional) — verified in-circuit against the
- *    sealed MPC key. The USER polls and calls claimDeposit().
+ * 1. Polls the signet contract's notification registry via the Midnight
+ *    GraphQL indexer (SignetRequestFeed)
+ * 2. Resolves each notification to an authenticated SignBidirectionalEvent
+ *    read from the named caller's own ledger
+ * 3. Builds ABI calldata + RLP transaction off-chain
+ * 4. Posts the MPC's ECDSA signature to the signet contract (postSignatureResponse)
+ * 5. After the EVM tx confirms, ECDSA-signs the attestation digest of
+ *    (requestId, serializedOutput, outputLen) with the MPC RESPONSE key for
+ *    this signet deployment (root key + signet contract address + the fixed
+ *    "midnight response key" path) and posts the RespondBidirectionalEvent
+ *    on-chain (postRespondBidirectional). The signet contract stores it
+ *    unverified; clients verify against the response key their deploy
+ *    pinned. The USER polls and calls claimDeposit().
  */
 
 import { Buffer } from 'buffer';
@@ -24,26 +29,29 @@ import type { ServerConfig } from '../types';
 
 import type { SigningRequest } from '../managed/erc20-vault/signet/types';
 
-// Schnorr signing, the attestation-message circuit, and the Schnorr challenge
-// all come from signet-midnight — the SAME compiled circuits the signet
-// contract verifies against. Signing here with them is what makes an
-// attestation pass postRespondBidirectional's in-circuit check.
+// The attestation-digest circuit comes from signet-midnight compiled — the
+// SAME circuit client contracts verify against in-circuit
+// (verifyRespondBidirectionalEvent). Signing its output with the derived
+// response key is what makes a response verify at claim time.
 import {
   bytesToHex,
+  bigintToBytes32,
+  deriveMidnightResponseSecretKey,
+  formatSecp256k1PublicKey,
+  secp256k1PublicKeyOf,
+  signAttestationDigest,
   SignetRequestFeed,
-  signatureToSignatureResponse,
-  signBidirectionalRequestToUnsignedEVMTransaction,
-  deriveJubjubKeypair,
-  type JubjubKeypair,
-  hashJubjubPoint,
-  schnorrSign,
+  signatureToSignatureRespondedEvent,
+  signBidirectionalEventToUnsignedEVMTransaction,
   pureCircuits as signetCircuits,
+  MPCDestination,
+  MPCSignatureAlgorithm,
   SERIALIZED_OUTPUT_BYTES,
   type ResolvedSignetRequest,
   type RequestIdHex,
-  type SignBidirectionalRequest,
-  type SignatureResponse,
-  type RespondBidirectional,
+  type SignBidirectionalEvent,
+  type SignatureRespondedEvent,
+  type RespondBidirectionalEvent,
 } from '@sig-net/midnight';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
@@ -79,21 +87,24 @@ import {
 
 export interface MidnightSigningRequest extends SigningRequest {
   /**
-   * The nested on-ledger request record as read by signet-midnight — the
+   * The nested on-ledger event record as read by signet-midnight — the
    * canonical source the shared tx builder consumes. The flat `SigningRequest`
    * fields are the string-decoded/flattened view kept for key derivation,
    * signing, and logging.
    */
-  signetRequest: SignBidirectionalRequest;
+  signetRequest: SignBidirectionalEvent;
 }
 
 export interface SignedResponse {
   requestId: string;
   serializedOutput: string;
   outputLen: number;
-  pk: { x: string; y: string };
-  announcement: { x: string; y: string };
-  response: string;
+  /** ECDSA signature scalar r as hex (32 little-endian bytes, ledger form). */
+  r: string;
+  /** ECDSA signature scalar s as hex (32 little-endian bytes, ledger form). */
+  s: string;
+  /** Recovery id (parity of R.y). */
+  recoveryId: number;
 }
 
 export interface MidnightMonitorConfig {
@@ -137,9 +148,6 @@ type DeployedSignetContract = FoundContract<
 
 (globalThis as { WebSocket?: unknown }).WebSocket = WebSocket;
 
-/** Public half of the responder's Jubjub keypair (signet-midnight's schnorr). */
-type JubjubPoint = JubjubKeypair['pk'];
-
 /**
  * Upper bound on a single signet contract write (proof + submit + finalize).
  * Long by design — a real attestation legitimately takes tens of seconds; this
@@ -167,8 +175,10 @@ export class MidnightMonitor {
   private responderWalletPromise?: Promise<ResponderWallet>;
   private responderContractPromise?: Promise<DeployedSignetContract>;
 
-  private jubjubSk: bigint = 0n;
-  private jubjubPk: JubjubPoint | null = null;
+  // The MPC RESPONSE secret key for this signet deployment, derived in
+  // initialize() from (root key, signet contract address, the fixed
+  // "midnight response key" path). Signs every RespondBidirectionalEvent.
+  private responseSecretKey: Uint8Array | null = null;
 
   // Single-writer serialization for ALL signet contract writes. The joined
   // contract shares one wallet + single-writer LevelDB private-state store, and
@@ -193,12 +203,17 @@ export class MidnightMonitor {
     const rootKeyBytes = new Uint8Array(
       Buffer.from(this.config.mpcRootKey.replace('0x', ''), 'hex')
     );
-    const { sk, pk } = deriveJubjubKeypair(rootKeyBytes);
-    this.jubjubSk = sk;
-    this.jubjubPk = pk;
-    console.log('MidnightMonitor: Jubjub keypair derived');
+    this.responseSecretKey = deriveMidnightResponseSecretKey(
+      rootKeyBytes,
+      this.config.signetContractAddress
+    );
     console.log(
-      `MidnightMonitor: Jubjub pk hash = ${Buffer.from(hashJubjubPoint(pk)).toString('hex')}`
+      'MidnightMonitor: respond-bidirectional response key derived for this signet deployment'
+    );
+    console.log(
+      `MidnightMonitor: response public key = ${formatSecp256k1PublicKey(
+        secp256k1PublicKeyOf(this.responseSecretKey)
+      )}`
     );
 
     this.publicDataProvider = indexerPublicDataProvider({
@@ -427,7 +442,7 @@ export class MidnightMonitor {
    */
   async postSignatureResponse(
     requestId: Uint8Array,
-    signatureResponse: SignatureResponse
+    signatureResponse: SignatureRespondedEvent
   ) {
     // Resolve the contract OUTSIDE the timer: the first call builds the
     // wallet + joins the contract (separately logged), and that one-off cost
@@ -443,15 +458,15 @@ export class MidnightMonitor {
   }
 
   /**
-   * Post the MPC's respond-bidirectional attestation on-chain via the joined
-   * signet contract. The Schnorr signature over
-   * (requestId, hash(serializedOutput, outputLen)) is verified in-circuit
-   * against the contract's sealed MPC key at post time, so only a genuine
-   * attestation lands. Lazily constructs the wallet + contract on first call.
+   * Post the MPC's respond-bidirectional response on-chain via the joined
+   * signet contract. Stored UNVERIFIED (the signet contract is an append-only
+   * log): clients verify the ECDSA signature over the attestation digest of
+   * (requestId, serializedOutput, outputLen) against the response key their
+   * deploy pinned. Lazily constructs the wallet + contract on first call.
    */
   async postRespondBidirectional(
     requestId: Uint8Array,
-    respondBidirectional: RespondBidirectional
+    respondBidirectional: RespondBidirectionalEvent
   ) {
     const contract = await this.responderContract();
     return this.serializeWrite(() =>
@@ -518,7 +533,7 @@ export class MidnightMonitor {
   }
 
   /**
-   * Adapt an authenticated {@link SignBidirectionalRequest} (read from the
+   * Adapt an authenticated {@link SignBidirectionalEvent} (read from the
    * requester contract `predecessor`'s ledger) into the flat
    * {@link MidnightSigningRequest} the signing pipeline consumes. `predecessor`
    * is the epsilon-derivation root — the contract whose authenticated state the
@@ -527,7 +542,7 @@ export class MidnightMonitor {
   private toSigningRequest(
     predecessor: string,
     requestId: RequestIdHex,
-    signetRequest: SignBidirectionalRequest
+    signetRequest: SignBidirectionalEvent
   ): MidnightSigningRequest {
     const { txParams } = signetRequest;
     // The flat logging view of the calldata: the real (used) words.
@@ -561,8 +576,16 @@ export class MidnightMonitor {
       caip2Id: decodePaddedString(signetRequest.caip2Id),
       keyVersion: Number(signetRequest.keyVersion),
       path: signetRequest.path,
-      algo: decodePaddedString(signetRequest.algo),
-      dest: decodePaddedString(signetRequest.dest),
+      // algo/dest are Compact enums (0-based variant indices) on the wire;
+      // the flat view keeps the historical string labels.
+      algo:
+        signetRequest.algo === MPCSignatureAlgorithm.ecdsa
+          ? 'ecdsa'
+          : `unknown(${signetRequest.algo})`,
+      dest:
+        signetRequest.dest === MPCDestination.unused
+          ? 'unused'
+          : `unknown(${signetRequest.dest})`,
       params: signetRequest.params,
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
       respondSerializationSchema: signetRequest.respondSerializationSchema,
@@ -576,7 +599,7 @@ export class MidnightMonitor {
     // Reuse signet-midnight's canonical builder (the same package the request
     // reader comes from) rather than a vendored RLP re-implementation, so the
     // unsigned transaction is assembled exactly as clients verify it.
-    const unsignedTx = signBidirectionalRequestToUnsignedEVMTransaction(
+    const unsignedTx = signBidirectionalEventToUnsignedEVMTransaction(
       request.signetRequest
     );
     return ethers.getBytes(unsignedTx.unsignedSerialized);
@@ -586,13 +609,13 @@ export class MidnightMonitor {
     requestId: Uint8Array,
     evmReturnData: Uint8Array
   ): Promise<SignedResponse> {
-    const jubjubPk = this.jubjubPk;
-    if (!jubjubPk) {
-      throw new Error('MidnightMonitor: not initialized (no Jubjub keypair)');
+    const responseSecretKey = this.responseSecretKey;
+    if (!responseSecretKey) {
+      throw new Error('MidnightMonitor: not initialized (no response key)');
     }
     const requestIdHex = Buffer.from(requestId).toString('hex');
     console.log(
-      `MidnightMonitor: Signing respond-bidirectional attestation for ${requestIdHex}`
+      `MidnightMonitor: Signing respond-bidirectional response for ${requestIdHex}`
     );
 
     if (evmReturnData.length > SERIALIZED_OUTPUT_BYTES) {
@@ -605,44 +628,41 @@ export class MidnightMonitor {
     serializedOutput.set(evmReturnData);
     const outputLen = BigInt(evmReturnData.length);
 
-    // Sign (requestId, hash(serializedOutput, outputLen)) with the same
-    // compiled circuits the signet contract verifies against —
-    // signetAttestationMessage + the Schnorr challenge — so the attestation
-    // passes postRespondBidirectional's in-circuit check.
-    const msg = signetCircuits.signetAttestationMessage(
+    // ECDSA-sign the attestation digest of (requestId, serializedOutput,
+    // outputLen) with the derived response key. The digest comes from the
+    // same compiled circuit client contracts verify against
+    // (verifyRespondBidirectionalEvent), so the response verifies at claim
+    // time. Signature scalars land as 32 little-endian bytes, the ledger form.
+    const digest = signetCircuits.signetAttestationDigest(
       requestId,
       serializedOutput,
       outputLen
     );
-    const sig = schnorrSign(this.jubjubSk, msg, (ax, ay, px, py, m) =>
-      signetCircuits.schnorrChallenge(ax, ay, px, py, m)
-    );
+    const sig = signAttestationDigest(digest, responseSecretKey);
+    const respondBidirectionalEvent: RespondBidirectionalEvent = {
+      serializedOutput,
+      outputLen,
+      r: bigintToBytes32(sig.r),
+      s: bigintToBytes32(sig.s),
+      recoveryId: BigInt(sig.recoveryId),
+    };
 
     const response: SignedResponse = {
       requestId: requestIdHex,
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
       outputLen: evmReturnData.length,
-      pk: { x: jubjubPk.x.toString(), y: jubjubPk.y.toString() },
-      announcement: {
-        x: sig.announcement.x.toString(),
-        y: sig.announcement.y.toString(),
-      },
-      response: sig.response.toString(),
+      r: Buffer.from(respondBidirectionalEvent.r).toString('hex'),
+      s: Buffer.from(respondBidirectionalEvent.s).toString('hex'),
+      recoveryId: sig.recoveryId,
     };
 
-    // Post the attestation on-chain to the signet contract. There is no
-    // push/websocket channel — the contract's respondBidirectionalIndex is
-    // the delivery surface; the client polls it and presents the record to
-    // claimDeposit().
-    await this.postRespondBidirectional(requestId, {
-      serializedOutput,
-      outputLen,
-      pk: jubjubPk,
-      announcement: sig.announcement,
-      response: sig.response,
-    });
+    // Post the response on-chain to the signet contract. There is no
+    // push/websocket channel — the contract's respondBidirectionalMap is
+    // the delivery surface; the client polls it, verifies it, and presents
+    // the record to claimDeposit().
+    await this.postRespondBidirectional(requestId, respondBidirectionalEvent);
     console.log(
-      `MidnightMonitor: posted respond-bidirectional attestation for ${requestIdHex}`
+      `MidnightMonitor: posted respond-bidirectional response for ${requestIdHex}`
     );
 
     return response;
@@ -671,7 +691,7 @@ export class MidnightMonitor {
         `broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`
       );
     }
-    const signatureResponse = signatureToSignatureResponse(sig);
+    const signatureResponse = signatureToSignatureRespondedEvent(sig);
 
     const requestId = ethers.getBytes(data.requestId);
 
@@ -684,8 +704,14 @@ export class MidnightMonitor {
     );
   }
 
-  getJubjubPk(): JubjubPoint | null {
-    return this.jubjubPk;
+  /**
+   * The respond-bidirectional response public key for this signet
+   * deployment, as uncompressed SEC1 hex (null before initialize()).
+   */
+  getResponsePublicKey(): string | null {
+    return this.responseSecretKey
+      ? formatSecp256k1PublicKey(secp256k1PublicKeyOf(this.responseSecretKey))
+      : null;
   }
 
   getPathHex(request: MidnightSigningRequest): string {

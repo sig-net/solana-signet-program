@@ -327,11 +327,12 @@ export class ChainSignatureServer {
     const unsignedTxBytes =
       this.midnightMonitor.buildSerializedTransaction(request);
 
-    // Derive the signing key using the contract's path field as the derivation path.
-    // Path is the userCommitment stored as Field → Bytes<256> (raw bytes, not UTF-8).
-    const pathHex = this.midnightMonitor.getPath(request);
+    // Derive the signing key using the contract's path field as the derivation
+    // path. The path is 32 opaque bytes of the client contract's choosing;
+    // the derivation-string rendering strips the zero padding (getPath).
+    const pathString = this.midnightMonitor.getPath(request);
     const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
-      pathHex,
+      pathString,
       request.predecessor,
       this.config.mpcRootKey,
       'midnight:testnet'
@@ -592,7 +593,7 @@ export class ChainSignatureServer {
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
 
     if (txInfo.source === 'midnight' && this.midnightMonitor) {
-      // Midnight: Schnorr-attest the serialized output on-chain; the user
+      // Midnight: ECDSA-sign the serialized output on-chain; the user
       // polls the signet contract and claims.
       const serializedOutput = await OutputSerializer.serialize(
         result.output,
