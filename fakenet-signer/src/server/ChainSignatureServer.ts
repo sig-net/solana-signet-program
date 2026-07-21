@@ -602,7 +602,8 @@ export class ChainSignatureServer {
       );
       await this.midnightMonitor.signAndBroadcastResponse(
         requestIdBytes,
-        serializedOutput
+        serializedOutput,
+        txInfo.sender
       );
       console.log(`✓ Midnight: response posted for ${txHash}`);
       return;
@@ -686,7 +687,8 @@ export class ChainSignatureServer {
       outputData.set(serializedError, MAGIC_ERROR_PREFIX.length);
       await this.midnightMonitor.signAndBroadcastResponse(
         requestIdBytes,
-        outputData
+        outputData,
+        txInfo.sender
       );
       console.log(`✓ Midnight: error response posted for ${txHash}`);
       return;

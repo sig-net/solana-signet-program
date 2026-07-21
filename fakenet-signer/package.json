@@ -91,8 +91,8 @@
     "tsx": "^4.19.2",
     "ws": "^8.18.2",
     "zod": "^4.1.11",
-    "@sig-net/midnight": "0.0.7",
-    "@sig-net/midnight-contract": "0.0.7"
+    "@sig-net/midnight": "0.0.8",
+    "@sig-net/midnight-contract": "0.0.8"
   },
   "devDependencies": {
     "tsdown": "^0.15.6",

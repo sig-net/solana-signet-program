@@ -16,11 +16,13 @@
  * 4. Posts the MPC's ECDSA signature to the signet contract (postSignatureResponse)
  * 5. After the EVM tx confirms, ECDSA-signs the attestation digest of
  *    (requestId, serializedOutput, outputLen) with the MPC RESPONSE key for
- *    this signet deployment (root key + signet contract address + the fixed
- *    "midnight response key" path) and posts the RespondBidirectionalEvent
- *    on-chain (postRespondBidirectional). The signet contract stores it
- *    unverified; clients verify against the response key their deploy
- *    pinned. The USER polls and calls claimDeposit().
+ *    the requesting contract (root key + the request's SENDER address + the
+ *    fixed "midnight response key" path — the same sender-scoped derivation
+ *    the real MPC uses, sig-net/mpc respond_bidirectional.rs) and posts the
+ *    RespondBidirectionalEvent on-chain (postRespondBidirectional). The
+ *    signet contract stores it unverified; clients verify against the
+ *    response key they pinned via initialise after their deploy. The USER
+ *    polls and calls claimDeposit().
  */
 
 import { Buffer } from 'buffer';
@@ -175,10 +177,10 @@ export class MidnightMonitor {
   private responderWalletPromise?: Promise<ResponderWallet>;
   private responderContractPromise?: Promise<DeployedSignetContract>;
 
-  // The MPC RESPONSE secret key for this signet deployment, derived in
-  // initialize() from (root key, signet contract address, the fixed
-  // "midnight response key" path). Signs every RespondBidirectionalEvent.
-  private responseSecretKey: Uint8Array | null = null;
+  // The MPC root key bytes; each RespondBidirectionalEvent is signed with
+  // the RESPONSE key derived per requesting contract from (root key, the
+  // request's sender address, the fixed "midnight response key" path).
+  private mpcRootKeyBytes: Uint8Array | null = null;
 
   // Single-writer serialization for ALL signet contract writes. The joined
   // contract shares one wallet + single-writer LevelDB private-state store, and
@@ -200,20 +202,12 @@ export class MidnightMonitor {
   async initialize(): Promise<void> {
     console.log('MidnightMonitor: Initializing (generic signet monitor)...');
 
-    const rootKeyBytes = new Uint8Array(
+    this.mpcRootKeyBytes = new Uint8Array(
       Buffer.from(this.config.mpcRootKey.replace('0x', ''), 'hex')
     );
-    this.responseSecretKey = deriveMidnightResponseSecretKey(
-      rootKeyBytes,
-      this.config.signetContractAddress
-    );
     console.log(
-      'MidnightMonitor: respond-bidirectional response key derived for this signet deployment'
-    );
-    console.log(
-      `MidnightMonitor: response public key = ${formatSecp256k1PublicKey(
-        secp256k1PublicKeyOf(this.responseSecretKey)
-      )}`
+      'MidnightMonitor: respond-bidirectional response keys are derived per' +
+        ' requesting contract (sender-scoped, "midnight response key" path)'
     );
 
     this.publicDataProvider = indexerPublicDataProvider({
@@ -605,17 +599,32 @@ export class MidnightMonitor {
     return ethers.getBytes(unsignedTx.unsignedSerialized);
   }
 
+  /**
+   * Sign and post the respond-bidirectional response for a completed (or
+   * failed) remote execution. `senderContractAddress` is the requesting
+   * contract (the request's sender field / the resolver's predecessor): the
+   * response key is derived from it, mirroring the real MPC's sender-scoped
+   * `tx.epsilon(path)` derivation.
+   */
   async signAndBroadcastResponse(
     requestId: Uint8Array,
-    evmReturnData: Uint8Array
+    evmReturnData: Uint8Array,
+    senderContractAddress: string
   ): Promise<SignedResponse> {
-    const responseSecretKey = this.responseSecretKey;
-    if (!responseSecretKey) {
-      throw new Error('MidnightMonitor: not initialized (no response key)');
+    const mpcRootKeyBytes = this.mpcRootKeyBytes;
+    if (!mpcRootKeyBytes) {
+      throw new Error('MidnightMonitor: not initialized (no root key)');
     }
+    const responseSecretKey = deriveMidnightResponseSecretKey(
+      mpcRootKeyBytes,
+      senderContractAddress
+    );
     const requestIdHex = Buffer.from(requestId).toString('hex');
     console.log(
-      `MidnightMonitor: Signing respond-bidirectional response for ${requestIdHex}`
+      `MidnightMonitor: Signing respond-bidirectional response for ${requestIdHex}` +
+        ` (sender ${senderContractAddress}, response key ${formatSecp256k1PublicKey(
+          secp256k1PublicKeyOf(responseSecretKey)
+        )})`
     );
 
     if (evmReturnData.length > SERIALIZED_OUTPUT_BYTES) {
@@ -705,12 +714,20 @@ export class MidnightMonitor {
   }
 
   /**
-   * The respond-bidirectional response public key for this signet
-   * deployment, as uncompressed SEC1 hex (null before initialize()).
+   * The respond-bidirectional response public key for one requesting
+   * contract, as uncompressed SEC1 hex (null before initialize()). What the
+   * contract should pin via its initialise circuit.
    */
-  getResponsePublicKey(): string | null {
-    return this.responseSecretKey
-      ? formatSecp256k1PublicKey(secp256k1PublicKeyOf(this.responseSecretKey))
+  getResponsePublicKey(senderContractAddress: string): string | null {
+    return this.mpcRootKeyBytes
+      ? formatSecp256k1PublicKey(
+          secp256k1PublicKeyOf(
+            deriveMidnightResponseSecretKey(
+              this.mpcRootKeyBytes,
+              senderContractAddress
+            )
+          )
+        )
       : null;
   }
 

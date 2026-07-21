@@ -1626,18 +1626,18 @@
     "@noble/curves" "~1.9.2"
     "@noble/hashes" "~1.8.0"
 
-"@sig-net/midnight-contract@0.0.7":
-  version "0.0.7"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.0.7.tgz#300e2037794a1210852db09f5166b538ceb6e6e6"
-  integrity sha512-V2fa+GWdPskCerzD24muBV2yg7rm6kuFcSA5pnvHBzgjlF7/OmQ9D6BLLYbJ+4vltMg9NSvzKQ3AzK2PARc6Rg==
+"@sig-net/midnight-contract@0.0.8":
+  version "0.0.8"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.0.8.tgz#c83098fb149b4cb5c9432bf93ea3fe47f445c1af"
+  integrity sha512-2YGea3ZaaaN/Few3ZM2GKAowDXemizElx7bllwri+9eSslcgPqqGQY10t+ND2Nz9XKjFNUxOccYLPqjyGPX9Ng==
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js" "5.0.0-beta.4"
 
-"@sig-net/midnight@0.0.7":
-  version "0.0.7"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.0.7.tgz#30a20a4329ed4ee0ccd7cbce8d6525fcf682e699"
-  integrity sha512-XhksvJdzUy6Q8wmC097IWOAxDGWjLBXMdoYBjtI7pWL6oIl4esZ4cy2SIgS14e7sWSq9H6oO5mKIaP2zGUBcaQ==
+"@sig-net/midnight@0.0.8":
+  version "0.0.8"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.0.8.tgz#9c84873b9d5d78d758e3a16d74b237d3a9e358cd"
+  integrity sha512-aKedlUAHrs4q6ncX3GCFK+dZn6uMQlpQn4MLTm02dW/j0StoNEVwbJ3dzYILEk4rSmAo/iMFEP1lxaXDNZ04Cw==
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js-types" "5.0.0-beta.4"
