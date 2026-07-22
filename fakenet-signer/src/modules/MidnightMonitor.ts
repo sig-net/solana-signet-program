@@ -29,7 +29,7 @@ import { Buffer } from 'buffer';
 import { ethers } from 'ethers';
 import type { ServerConfig } from '../types';
 
-import type { SigningRequest } from '../managed/erc20-vault/signet/types';
+import type { SigningRequest } from './midnight/signet-request-types';
 
 // The attestation-digest circuit comes from signet-midnight compiled — the
 // SAME circuit client contracts verify against in-circuit

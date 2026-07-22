@@ -18,9 +18,9 @@ COPY fakenet-signer/package.json fakenet-signer/
 COPY signet-program/package.json signet-program/
 RUN yarn install --frozen-lockfile --production && yarn cache clean
 
-# Source + committed runtime assets (idl/, src/managed/**). The signet
-# contract's zk artifacts (incl. prover keys) come from the
-# @sig-net/midnight-contract npm package installed above.
+# Source + committed runtime assets (idl/). The signet contract's zk
+# artifacts (incl. prover keys) come from the @sig-net/midnight-contract
+# npm package installed above.
 COPY fakenet-signer/ fakenet-signer/
 
 # cwd matters: the LevelDB private state is created at ./midnight-level-db
