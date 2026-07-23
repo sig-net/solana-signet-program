@@ -131,7 +131,7 @@ export interface PrevoutRef {
  * Each entry is added immediately after the server hands signatures back to the
  * requester, and removed once the monitor emits either a success/failure
  * response. Fields mirror the data needed by `BitcoinMonitor`/`EthereumMonitor`
- * plus the serialization schemas required to format the final callback payload.
+ * plus the schemas required to decode the output and format the respond payload.
  */
 export interface PendingTransaction {
   /** Canonical transaction hash on the destination chain (txid for Bitcoin). */
@@ -143,11 +143,24 @@ export interface PendingTransaction {
   /** CAIP-2 chain identifier (e.g. `eip155:1`, `bip122:000000...`). */
   caip2Id: string;
 
-  /** Schema emitted on-chain describing how to decode explorer outputs. */
-  explorerDeserializationSchema: Buffer | number[];
+  /**
+   * Schema for decoding the executed transaction's output, carried verbatim
+   * from `SignBidirectionalEvent.outputDeserializationSchema` (the MPC's
+   * `BidirectionalTx.output_deserialization_schema`). Only the schema is
+   * carried, never a format: the format follows from the destination chain
+   * the signed transaction is submitted to (ABI for EVM).
+   */
+  outputDeserializationSchema: Buffer | number[];
 
-  /** Schema to re-encode the callback payload for `respondBidirectional`. */
-  callbackSerializationSchema: Buffer | number[];
+  /**
+   * Schema for re-encoding the decoded output into the respond payload,
+   * carried verbatim from `SignBidirectionalEvent.respondSerializationSchema`
+   * (the MPC's `BidirectionalTx.respond_serialization_schema`). Only the
+   * schema is carried, never a format: the format follows from the source
+   * chain the request came from, which is where the response is posted
+   * (Borsh for Solana and Substrate, Midnight format for Midnight).
+   */
+  respondSerializationSchema: Buffer | number[];
 
   /** Address that broadcast the transaction (EVM sender or `bitcoin`). */
   fromAddress: string;
@@ -174,7 +187,7 @@ export interface PendingTransaction {
   submittedInputs?: Set<number>;
 
   /** Chain the request originated from; responses are routed back to it. */
-  source?: 'solana' | 'polkadot' | 'midnight';
+  source: 'solana' | 'polkadot' | 'midnight';
 }
 
 // Borsh schema types

@@ -367,10 +367,10 @@ export class ChainSignatureServer {
       txHash: signedTxHash,
       requestId: requestIdHex,
       caip2Id: request.caip2Id,
-      explorerDeserializationSchema: Buffer.from(
+      outputDeserializationSchema: Buffer.from(
         request.outputDeserializationSchema
       ),
-      callbackSerializationSchema: Buffer.from(
+      respondSerializationSchema: Buffer.from(
         request.respondSerializationSchema
       ),
       fromAddress: wallet.address,
@@ -515,7 +515,7 @@ export class ChainSignatureServer {
             : await EthereumMonitor.waitForTransactionAndGetOutput(
                 txHash,
                 txInfo.caip2Id,
-                txInfo.explorerDeserializationSchema,
+                txInfo.outputDeserializationSchema,
                 txInfo.fromAddress,
                 txInfo.nonce,
                 this.config
@@ -584,6 +584,16 @@ export class ChainSignatureServer {
     txInfo: PendingTransaction,
     result: TransactionOutput
   ) {
+    // Checkpoint 3 (still deserialised, serialisation happens below):
+    // 'result.output' is the decoded field map from Checkpoint 2, i.e. the MPC's
+    // 'transaction_output' right before it is re-encoded by Output::serialize in
+    // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:132.
+    // Structural difference: the MPC decodes AND re-encodes inside the ethereum
+    // crate, so by its equivalent of this handoff (process_execution_confirmed,
+    // node/src/stream/ops.rs:301) it already carries serialized bytes. Fakenet
+    // hands the decoded map to this server and serializes here instead: the
+    // OutputSerializer.serialize calls below must byte-match Output::serialize
+    // (encode_borsh/encode_abi, respond_bidirectional.rs:38).
     console.log(`✅ Transaction completed: ${txHash}`);
 
     const requestId = txInfo.requestId;
@@ -592,28 +602,91 @@ export class ChainSignatureServer {
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
 
-    if (txInfo.source === 'midnight' && this.midnightMonitor) {
-      // Midnight: ECDSA-sign the serialized output on-chain; the user
-      // polls the signet contract and claims.
-      const serializedOutput = await OutputSerializer.serialize(
-        result.output,
-        SerializationFormat.Midnight,
-        txInfo.callbackSerializationSchema
-      );
-      await this.midnightMonitor.signAndBroadcastResponse(
-        requestIdBytes,
-        serializedOutput,
-        txInfo.sender
-      );
-      console.log(`✓ Midnight: response posted for ${txHash}`);
-      return;
-    }
+    switch (txInfo.source) {
+      case 'midnight': {
+        if (!this.midnightMonitor) {
+          throw new Error(`Midnight monitor unavailable for tx ${txHash}`);
+        }
 
+        // Midnight: ECDSA-sign the serialized output on-chain; the user
+        // polls the signet contract and claims.
+        const serializedOutput = await OutputSerializer.serialize(
+          result.output,
+          SerializationFormat.Midnight,
+          txInfo.respondSerializationSchema
+        );
+        await this.midnightMonitor.signAndBroadcastResponse(
+          requestIdBytes,
+          serializedOutput,
+          txInfo.sender
+        );
+        console.log(`✓ Midnight: response posted for ${txHash}`);
+        return;
+      }
+
+      case 'polkadot': {
+        if (!this.substrateMonitor) {
+          throw new Error(`Substrate monitor unavailable for tx ${txHash}`);
+        }
+        const { serializedOutput, signature } =
+          await this.serializeAndSignBorshResponse(
+            requestIdBytes,
+            txInfo,
+            result
+          );
+        await this.substrateMonitor.sendRespondBidirectional(
+          requestIdBytes,
+          serializedOutput,
+          signature
+        );
+        console.log('✅ Response sent to Substrate');
+        return;
+      }
+
+      case 'solana': {
+        const { serializedOutput, signature } =
+          await this.serializeAndSignBorshResponse(
+            requestIdBytes,
+            txInfo,
+            result
+          );
+        const { wallet, program } = this.requireSolana();
+        this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
+        await this.withTimeout(
+          program.methods
+            .respondBidirectional(
+              Array.from(requestIdBytes),
+              Buffer.from(serializedOutput),
+              signature
+            )
+            .accounts({
+              responder: wallet.publicKey,
+            })
+            .rpc(),
+          `respondBidirectional(${txHash})`
+        );
+        console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
+        return;
+      }
+
+      default:
+        throw new Error(
+          `Unsupported transaction source '${txInfo.source}' for tx ${txHash}`
+        );
+    }
+  }
+
+  /** Borsh-serialize the output and MPC-sign it for Solana/Substrate responses. */
+  private async serializeAndSignBorshResponse(
+    requestIdBytes: Buffer,
+    txInfo: PendingTransaction,
+    result: TransactionOutput
+  ) {
     this.log(`🔗 OutputSerializer: serialize...`);
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
       SerializationFormat.Borsh,
-      txInfo.callbackSerializationSchema
+      txInfo.respondSerializationSchema
     );
     this.log(
       `✓ OutputSerializer: serialize done (${serializedOutput.length} bytes)`
@@ -628,32 +701,7 @@ export class ChainSignatureServer {
     );
     this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
-    if (txInfo.source === 'polkadot' && this.substrateMonitor) {
-      await this.substrateMonitor.sendRespondBidirectional(
-        requestIdBytes,
-        serializedOutput,
-        signature
-      );
-      console.log('✅ Response sent to Substrate');
-      return;
-    }
-
-    const { wallet, program } = this.requireSolana();
-    this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
-    await this.withTimeout(
-      program.methods
-        .respondBidirectional(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
-          signature
-        )
-        .accounts({
-          responder: wallet.publicKey,
-        })
-        .rpc(),
-      `respondBidirectional(${txHash})`
-    );
-    console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
+    return { serializedOutput, signature };
   }
 
   private async handleFailedTransaction(
@@ -678,7 +726,7 @@ export class ChainSignatureServer {
       const serializedError = await OutputSerializer.serialize(
         errorOutput,
         SerializationFormat.Midnight,
-        txInfo.callbackSerializationSchema
+        txInfo.respondSerializationSchema
       );
       const outputData = new Uint8Array(
         MAGIC_ERROR_PREFIX.length + serializedError.length

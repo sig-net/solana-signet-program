@@ -8,24 +8,26 @@ import {
   MidnightSchemaField,
   SerializableValue,
 } from '../types';
+import { SerializationFormat } from './ChainUtils';
 
 export class OutputSerializer {
   static async serialize(
     output: TransactionOutputData,
-    format: number,
+    format: SerializationFormat,
     schema: Buffer | number[]
   ): Promise<Uint8Array> {
     this.validateSchema(schema);
 
-    if (format === 0) {
-      return this.serializeBorsh(output, schema);
-    } else if (format === 1) {
-      return this.serializeAbi(output, schema);
-    } else if (format === 3) {
-      return this.serializeMidnight(output, schema);
+    switch (format) {
+      case SerializationFormat.Borsh:
+        return this.serializeBorsh(output, schema);
+      case SerializationFormat.ABI:
+        return this.serializeAbi(output, schema);
+      case SerializationFormat.Midnight:
+        return this.serializeMidnight(output, schema);
+      default:
+        throw new Error(`Unsupported serialization format: ${format}`);
     }
-
-    throw new Error(`Unsupported serialization format: ${format}`);
   }
 
   private static validateSchema(schema: Buffer | number[]): void {
@@ -330,6 +332,10 @@ export class OutputSerializer {
         continue;
       }
 
+      // Only bool and string defaults exist, matching
+      // default_output_for_non_contract_call in
+      // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:261
+      // which bails on every other type.
       switch (type) {
         case 'bool':
           obj[key] = true;
@@ -337,21 +343,10 @@ export class OutputSerializer {
         case 'string':
           obj[key] = 'non_function_call_success';
           break;
-        case 'u8':
-        case 'u16':
-        case 'u32':
-        case 'u64':
-        case 'u128':
-        case 'i8':
-        case 'i16':
-        case 'i32':
-        case 'i64':
-        case 'i128':
-          obj[key] = 0;
-          break;
         default:
-          // Default seed with null for unrecognized types; caller should override.
-          obj[key] = null;
+          throw new Error(
+            `Cannot serialize non-function call success as type ${type}`
+          );
       }
     }
     return obj;
