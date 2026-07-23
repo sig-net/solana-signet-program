@@ -4,11 +4,16 @@ import { z } from 'zod';
 export type BitcoinNetwork = 'regtest' | 'testnet';
 
 export interface ServerConfig {
+  /** Skip the entire Solana leg (no connection, listeners, or backfill). */
+  disableSolana?: boolean;
   solanaRpcUrl: string;
-  solanaPrivateKey: string;
+  solanaPrivateKey?: string;
   mpcRootKey: string;
-  infuraApiKey: string;
-  programId: string;
+  // The EVM endpoint e.g.:
+  // - a local dev node: http://127.0.0.1:8545
+  // - sepolia via infura: https://sepolia.infura.io/v3/<api-key-here>
+  evmRpcUrl: string;
+  programId?: string;
   isDevnet: boolean;
   signatureDeposit?: string;
   chainId?: string;
@@ -17,48 +22,89 @@ export interface ServerConfig {
   backfillBatchSize?: number;
   backfillMaxBatchSize?: number;
   lastBackfillSignature?: string;
+  substrateWsUrl?: string;
+  // Midnight config
+  midnightNetworkId?: string;
+  midnightIndexerUrl?: string;
+  midnightIndexerWsUrl?: string;
+  midnightNodeUrl?: string;
+  midnightProofServerUrl?: string;
+  midnightSignetContractAddress?: string;
+  midnightWalletSeed?: string;
 }
 
-export const serverConfigSchema = z.object({
-  solanaRpcUrl: z.string().min(1, 'Solana RPC URL is required'),
-  solanaPrivateKey: z.string().min(1, 'Solana private key is required'),
-  mpcRootKey: z
-    .string()
-    .regex(
-      /^0x[a-fA-F0-9]{64}$/,
-      'MPC root key must be a valid hex private key'
-    ),
-  infuraApiKey: z.string().min(1, 'Infura API key is required'),
-  programId: z.string().refine((val) => {
-    try {
-      new PublicKey(val);
-      return true;
-    } catch {
-      return false;
+export const serverConfigSchema = z
+  .object({
+    disableSolana: z.boolean().optional(),
+    solanaRpcUrl: z.string().min(1, 'Solana RPC URL is required'),
+    solanaPrivateKey: z.string().optional(),
+    mpcRootKey: z
+      .string()
+      .regex(
+        /^0x[a-fA-F0-9]{64}$/,
+        'MPC root key must be a valid hex private key'
+      ),
+    evmRpcUrl: z.string().min(1, 'EVM RPC URL is required'),
+    programId: z
+      .string()
+      .refine((val) => {
+        try {
+          new PublicKey(val);
+          return true;
+        } catch {
+          return false;
+        }
+      }, 'Must be a valid Solana public key')
+      .optional(),
+    isDevnet: z.boolean(),
+    signatureDeposit: z.string().optional(),
+    chainId: z.string().optional(),
+    verbose: z.boolean().optional(),
+    bitcoinNetwork: z.enum(['regtest', 'testnet']),
+    backfillBatchSize: z.number().int().positive().optional(),
+    backfillMaxBatchSize: z.number().int().positive().optional(),
+    lastBackfillSignature: z.string().optional(),
+    substrateWsUrl: z.string().optional(),
+    // Midnight config
+    midnightNetworkId: z.string().optional(),
+    midnightIndexerUrl: z.string().optional(),
+    midnightIndexerWsUrl: z.string().optional(),
+    midnightNodeUrl: z.string().optional(),
+    midnightProofServerUrl: z.string().optional(),
+    midnightSignetContractAddress: z.string().optional(),
+    midnightWalletSeed: z.string().optional(),
+  })
+  .superRefine((config, ctx) => {
+    if (!config.disableSolana) {
+      if (!config.solanaPrivateKey) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['solanaPrivateKey'],
+          message: 'Solana private key is required',
+        });
+      }
+      if (!config.programId) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['programId'],
+          message: 'Program ID is required',
+        });
+      }
     }
-  }, 'Must be a valid Solana public key'),
-  isDevnet: z.boolean(),
-  signatureDeposit: z.string().optional(),
-  chainId: z.string().optional(),
-  verbose: z.boolean().optional(),
-  bitcoinNetwork: z.enum(['regtest', 'testnet']),
-  backfillBatchSize: z.number().int().positive().optional(),
-  backfillMaxBatchSize: z.number().int().positive().optional(),
-  lastBackfillSignature: z.string().optional(),
-});
+  });
 
 export interface SignBidirectionalEvent {
-  sender: PublicKey;
-  serializedTransaction: Buffer;
+  sender: PublicKey | string;
+  serializedTransaction: Buffer | Uint8Array;
   caip2Id: string;
   keyVersion: number;
-  deposit: bigint;
+  deposit?: bigint | string;
   path: string;
   algo: string;
   dest: string;
   params: string;
-  outputDeserializationSchema: Buffer;
-  respondSerializationSchema: Buffer;
+  outputDeserializationSchema: Buffer | Uint8Array;
+  respondSerializationSchema: Buffer | Uint8Array;
 }
 
 export interface SignatureRequestedEvent {
@@ -126,6 +172,9 @@ export interface PendingTransaction {
 
   /** Input indices already submitted to Solana (Bitcoin PSBT only). */
   submittedInputs?: Set<number>;
+
+  /** Chain the request originated from; responses are routed back to it. */
+  source?: 'solana' | 'polkadot' | 'midnight';
 }
 
 // Borsh schema types
@@ -142,6 +191,14 @@ export interface BorshSchema {
 export interface AbiSchemaField {
   name: string;
   type: string;
+}
+
+// Midnight schema field — extends ABI field with size hints for dynamic types
+export interface MidnightSchemaField {
+  name: string;
+  type: string;
+  maxBytes?: number;
+  maxItems?: number;
 }
 
 // Serialization output types

@@ -55,8 +55,8 @@ export async function handleBitcoinBidirectional(
  *  - For each PSBT input, derives a deterministic request ID by hashing the
  *    explorer-facing txid bytes concatenated with the input index (u32 LE) and
  *    signs the corresponding sighash with the single MPC-derived private key.
- *  - Streams every signature back to the Solana program individually via
- *    `respond`, logging `{ txid, inputIndex, requestId }` for traceability.
+ *  - Streams every signature back via the signature sender (Solana or Substrate),
+ *    logging `{ txid, inputIndex, requestId }` for traceability.
  *  - The external client finalizes/broadcasts the PSBT; the server only signs
  *    and monitors until {@link handleCompletedTransaction} /
  *    {@link handleFailedTransaction} respond bidirectionally.
@@ -64,7 +64,7 @@ export async function handleBitcoinBidirectional(
  * @param event Solana-emitted bidirectional event containing PSBT bytes and metadata.
  * @param plan Parsed Bitcoin signing plan (txid + per-input sighashes).
  * @param derivedPrivateKey MPC-derived private key for this request.
- * @param context Shared server context (Anchor program, wallet, config, pending map).
+ * @param context Shared server context (signature sender, config, pending map).
  */
 async function handleBitcoinSigningPlan(
   event: SignBidirectionalEvent,
@@ -76,7 +76,7 @@ async function handleBitcoinSigningPlan(
     throw new Error('Bitcoin PSBT must contain at least one input');
   }
 
-  const { program, wallet, config, pendingTransactions, withTimeout } = context;
+  const { config, pendingTransactions, sendSignatures, source } = context;
 
   // Use the explorer-facing txid (big-endian) for all aggregated request IDs;
   // never flip the byte order here.
@@ -106,8 +106,12 @@ async function handleBitcoinSigningPlan(
       txHash: plan.explorerTxid,
       requestId: aggregateRequestId,
       caip2Id: event.caip2Id,
-      explorerDeserializationSchema: event.outputDeserializationSchema,
-      callbackSerializationSchema: event.respondSerializationSchema,
+      explorerDeserializationSchema: Buffer.from(
+        event.outputDeserializationSchema
+      ),
+      callbackSerializationSchema: Buffer.from(
+        event.respondSerializationSchema
+      ),
       fromAddress: 'bitcoin',
       nonce: 0,
       checkCount: 0,
@@ -115,6 +119,7 @@ async function handleBitcoinSigningPlan(
       prevouts,
       sender: event.sender.toString(),
       submittedInputs,
+      source,
     });
   }
 
@@ -155,29 +160,26 @@ async function handleBitcoinSigningPlan(
       params: event.params,
     });
 
-    const perInputRequestIdBytes = Array.from(
-      Buffer.from(perInputRequestId.slice(2), 'hex')
+    const perInputRequestIdBytes = Buffer.from(
+      perInputRequestId.slice(2),
+      'hex'
     );
 
-    const signature = await CryptoUtils.signMessage(
-      Array.from(inputPlan.sighash),
+    const signature = await CryptoUtils.signDigestDirectly(
+      inputPlan.sighash,
       derivedPrivateKey
     );
 
-    const tx = await withTimeout(
-      program.methods
-        .respond([perInputRequestIdBytes], [signature])
-        .accounts({
-          responder: wallet.publicKey,
-        })
-        .rpc(),
+    const tx = await sendSignatures(
+      [perInputRequestIdBytes],
+      [signature],
       `respond-bip122-input-${inputPlan.inputIndex}`
     );
 
     submittedInputs.add(inputPlan.inputIndex);
 
     console.log(
-      `✅ bip122: signed input ${inputPlan.inputIndex}/${plan.inputs.length} for ${plan.explorerTxid} (solana tx=${tx})`
+      `✅ bip122: signed input ${inputPlan.inputIndex}/${plan.inputs.length} for ${plan.explorerTxid} (${source} tx=${tx ?? 'n/a'})`
     );
   }
 
