@@ -1,5 +1,10 @@
 export const CONFIG = {
   EPSILON_DERIVATION_PREFIX: 'sig.network v2.0.0 epsilon derivation',
+  // The Midnight/Substrate chainId-derivation paths still speak the v1 comma
+  // scheme: their clients (signet-midnight's epsilon port, the signet pallet)
+  // derive counterparty addresses with this exact prefix. Bump only together
+  // with those clients.
+  EPSILON_DERIVATION_PREFIX_V1: 'sig.network v1.0.0 epsilon derivation',
   SOLANA_CAIP2_ID: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
   SOLANA_RESPOND_BIDIRECTIONAL_PATH: 'solana response key',
   SECP256K1_N:

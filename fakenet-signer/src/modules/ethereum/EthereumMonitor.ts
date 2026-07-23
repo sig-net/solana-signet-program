@@ -96,7 +96,7 @@ export class EthereumMonitor {
     config: ServerConfig
   ): ethers.JsonRpcProvider {
     const namespace = getNamespaceFromCaip2(caip2Id);
-    const cacheKey = `${caip2Id}-${config.isDevnet}`;
+    const cacheKey = caip2Id;
 
     const cachedProvider = this.providerCache.get(cacheKey);
     if (cachedProvider) {
@@ -106,9 +106,7 @@ export class EthereumMonitor {
     let url: string;
     switch (namespace) {
       case 'eip155':
-        url = config.isDevnet
-          ? `https://sepolia.infura.io/v3/${config.infuraApiKey}`
-          : `https://mainnet.infura.io/v3/${config.infuraApiKey}`;
+        url = config.evmRpcUrl;
         break;
       default:
         throw new Error(`Unsupported chain namespace: ${namespace}`);
@@ -141,12 +139,13 @@ export class EthereumMonitor {
           blockTag: receipt.blockNumber - 1,
         });
 
-        const schemaStr =
-          typeof explorerDeserializationSchema === 'string'
-            ? explorerDeserializationSchema
-            : new TextDecoder().decode(
-                new Uint8Array(explorerDeserializationSchema)
-              );
+        const schemaStr = decodePaddedSchema(explorerDeserializationSchema);
+
+        if (!schemaStr.trim()) {
+          throw new Error(
+            'Empty output deserialization schema — cannot decode EVM return value'
+          );
+        }
 
         const schema = JSON.parse(schemaStr) as AbiSchemaField[];
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
@@ -173,4 +172,17 @@ export class EthereumMonitor {
       };
     }
   }
+}
+
+/**
+ * Decode an on-chain schema byte array to its JSON string. Schemas are stored
+ * as fixed-size, NUL-padded buffers, so cut at the first NUL — trailing \0
+ * bytes are not whitespace and would make JSON.parse reject an otherwise-valid
+ * schema.
+ */
+function decodePaddedSchema(schema: Buffer | number[] | string): string {
+  if (typeof schema === 'string') return schema;
+  const raw = new TextDecoder().decode(new Uint8Array(schema));
+  const nul = raw.indexOf('\0');
+  return nul === -1 ? raw : raw.slice(0, nul);
 }

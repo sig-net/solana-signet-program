@@ -38,7 +38,10 @@ Create a `.env` file with required configuration:
 SOLANA_RPC_URL=https://api.devnet.solana.com
 SOLANA_PRIVATE_KEY='[1,2,3,...]'  # Keypair array format
 MPC_ROOT_KEY=0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-INFURA_API_KEY=your_infura_api_key_here
+# The EVM RPC endpoint e.g.:
+# - for a local dev node: http://127.0.0.1:8545
+# - for sepolia via infura: https://sepolia.infura.io/v3/<api-key-here>
+EVM_RPC_URL=http://127.0.0.1:8545
 PROGRAM_ID=YourProgramIdHere11111111111111111111111
 VERBOSE=true  # Optional: enable detailed logging
 
@@ -55,7 +58,7 @@ const config = {
   solanaRpcUrl: process.env.SOLANA_RPC_URL,
   solanaPrivateKey: process.env.SOLANA_PRIVATE_KEY,
   mpcRootKey: process.env.MPC_ROOT_KEY,
-  infuraApiKey: process.env.INFURA_API_KEY,
+  evmRpcUrl: process.env.EVM_RPC_URL,
   programId: process.env.PROGRAM_ID,
   isDevnet: true,
   verbose: true,
@@ -448,7 +451,7 @@ interface ServerConfig {
   solanaRpcUrl: string; // Solana RPC endpoint
   solanaPrivateKey: string; // Server keypair (JSON array format)
   mpcRootKey: string; // Hex private key for MPC derivations
-  infuraApiKey: string; // Infura API key for Ethereum RPC
+  evmRpcUrl: string; // EVM JSON-RPC endpoint (credential in the URL if hosted)
   programId: string; // Solana program ID
   isDevnet: boolean; // Network flag
   signatureDeposit?: string; // Optional deposit amount

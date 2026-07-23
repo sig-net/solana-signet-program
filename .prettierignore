@@ -26,3 +26,5 @@ test-ledger/
 
 # Rust files
 **/*.rs
+# Compact compiler output (generated)
+fakenet-signer/src/managed/
