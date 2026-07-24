@@ -27,6 +27,7 @@
     "typescript": "^5.8.2"
   },
   "resolutions": {
+    "@sig-net/midnight-serde": "link:../midnight-integration/packages/midnight-serde",
     "bn.js": "5.2.3",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3",

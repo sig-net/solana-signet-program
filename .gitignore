@@ -56,7 +56,7 @@ test-ledger/
 .program-test-cache/
 
 # Midnight (LevelDB private-state store written at runtime)
-midnight-level-db/
+*midnight-level-db*
 
 # Temporary files
 *.tmp

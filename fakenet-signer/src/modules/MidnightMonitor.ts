@@ -31,13 +31,15 @@ import type { ServerConfig } from '../types';
 
 import type { SigningRequest } from './midnight/signet-request-types';
 
-// The attestation-digest circuit comes from signet-midnight compiled — the
-// SAME circuit client contracts verify against in-circuit
-// (verifyRespondBidirectionalEvent). Signing its output with the derived
+// The attestation digest is the library's TS twin of the size-generic
+// Compact circuit client contracts verify against in-circuit
+// (verifyRespondBidirectionalEvent) — keccak256(requestId || output), the
+// output at its exact unpadded length. Signing its output with the derived
 // response key is what makes a response verify at claim time.
 import {
   bytesToHex,
   bigintToBytes32,
+  calculateSignetAttestationDigest,
   deriveMidnightResponseSecretKey,
   formatSecp256k1PublicKey,
   secp256k1PublicKeyOf,
@@ -45,10 +47,8 @@ import {
   SignetRequestFeed,
   signatureToSignatureRespondedEvent,
   signBidirectionalEventToUnsignedEVMTransaction,
-  pureCircuits as signetCircuits,
   MPCDestination,
   MPCSignatureAlgorithm,
-  SERIALIZED_OUTPUT_BYTES,
   type ResolvedSignetRequest,
   type RequestIdHex,
   type SignBidirectionalEvent,
@@ -99,8 +99,10 @@ export interface MidnightSigningRequest extends SigningRequest {
 
 export interface SignedResponse {
   requestId: string;
+  /** The exact unpadded serialised output the attestation commits to, as hex. */
   serializedOutput: string;
-  outputLen: number;
+  /** The signed attestation digest keccak256(requestId || output), as hex. */
+  attestationDigest: string;
   /** ECDSA signature scalar r as hex (32 little-endian bytes, ledger form). */
   r: string;
   /** ECDSA signature scalar s as hex (32 little-endian bytes, ledger form). */
@@ -454,8 +456,8 @@ export class MidnightMonitor {
   /**
    * Post the MPC's respond-bidirectional response on-chain via the joined
    * signet contract. Stored UNVERIFIED (the signet contract is an append-only
-   * log): clients verify the ECDSA signature over the attestation digest of
-   * (requestId, serializedOutput, outputLen) against the response key their
+   * log): clients verify the ECDSA signature over the attestation digest
+   * keccak256(requestId || serializedOutput) against the response key their
    * deploy pinned. Lazily constructs the wallet + contract on first call.
    */
   async postRespondBidirectional(
@@ -627,30 +629,23 @@ export class MidnightMonitor {
         )})`
     );
 
-    if (evmReturnData.length > SERIALIZED_OUTPUT_BYTES) {
-      throw new Error(
-        `MidnightMonitor: execution output is ${evmReturnData.length} bytes — ` +
-          `does not fit the ${SERIALIZED_OUTPUT_BYTES}-byte serializedOutput field`
-      );
-    }
-    const serializedOutput = new Uint8Array(SERIALIZED_OUTPUT_BYTES);
-    serializedOutput.set(evmReturnData);
-    const outputLen = BigInt(evmReturnData.length);
+    // The attestation commits to the output AS IS, at its exact unpadded
+    // length — no padding and no fixed field width (the event carries only
+    // the digest, the output itself travels off chain).
+    const serializedOutput = evmReturnData;
 
-    // ECDSA-sign the attestation digest of (requestId, serializedOutput,
-    // outputLen) with the derived response key. The digest comes from the
-    // same compiled circuit client contracts verify against
-    // (verifyRespondBidirectionalEvent), so the response verifies at claim
-    // time. Signature scalars land as 32 little-endian bytes, the ledger form.
-    const digest = signetCircuits.signetAttestationDigest(
+    // ECDSA-sign the attestation digest keccak256(requestId || output) with
+    // the derived response key — the TS twin of the circuit client contracts
+    // verify against (verifyRespondBidirectionalEvent), so the response
+    // verifies at claim time. Signature scalars land as 32 little-endian
+    // bytes, the ledger form.
+    const attestationDigest = calculateSignetAttestationDigest(
       requestId,
-      serializedOutput,
-      outputLen
+      serializedOutput
     );
-    const sig = signAttestationDigest(digest, responseSecretKey);
+    const sig = signAttestationDigest(attestationDigest, responseSecretKey);
     const respondBidirectionalEvent: RespondBidirectionalEvent = {
-      serializedOutput,
-      outputLen,
+      attestationDigest,
       r: bigintToBytes32(sig.r),
       s: bigintToBytes32(sig.s),
       recoveryId: BigInt(sig.recoveryId),
@@ -659,7 +654,7 @@ export class MidnightMonitor {
     const response: SignedResponse = {
       requestId: requestIdHex,
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
-      outputLen: evmReturnData.length,
+      attestationDigest: Buffer.from(attestationDigest).toString('hex'),
       r: Buffer.from(respondBidirectionalEvent.r).toString('hex'),
       s: Buffer.from(respondBidirectionalEvent.s).toString('hex'),
       recoveryId: sig.recoveryId,

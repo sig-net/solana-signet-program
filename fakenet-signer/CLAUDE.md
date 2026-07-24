@@ -44,7 +44,7 @@ This is a multi-chain signature orchestrator for Solana. It listens for signatur
 | CpiEventParser               | `src/events/`           | Parses Anchor CPI events from Solana logs                                   |
 | EthereumTransactionProcessor | `src/modules/ethereum/` | Signs EIP-1559 and Legacy transactions                                      |
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`  | Builds PSBT signing plans                                                   |
-| OutputSerializer             | `src/modules/`          | Multi-format serialization (Borsh for Solana, ABI for EVM)                  |
+| Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde) |
 | Bitcoin Adapters             | `src/adapters/`         | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet) |
 
 ### Two Workflows

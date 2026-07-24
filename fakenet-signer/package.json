@@ -91,11 +91,10 @@
     "tsx": "^4.19.2",
     "ws": "^8.18.2",
     "zod": "^4.1.11",
-    "@sig-net/midnight": "0.10.0",
-    "@sig-net/midnight-contract": "0.10.0"
+    "@sig-net/midnight": "link:../../midnight-integration/packages/signet-midnight",
+    "@sig-net/midnight-contract": "link:../../midnight-integration/packages/signet-contract"
   },
   "devDependencies": {
-    "tsdown": "^0.15.6",
-    "vitest": "^4.1.8"
+    "tsdown": "^0.15.6"
   }
 }

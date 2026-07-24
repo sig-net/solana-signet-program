@@ -200,19 +200,10 @@ export interface BorshSchema {
   enum?: Array<{ [key: string]: BorshStructField | string }>;
 }
 
-// ABI schema types
-export interface AbiSchemaField {
-  name: string;
-  type: string;
-}
-
-// Midnight schema field — extends ABI field with size hints for dynamic types
-export interface MidnightSchemaField {
-  name: string;
-  type: string;
-  maxBytes?: number;
-  maxItems?: number;
-}
+// ABI schemas need no local types: both the EVM output decode
+// (deserializeEvmOutput) and the schema-driven packed respond encoding
+// (serializeRespondOutput) come from @sig-net/midnight's abi-serde, backed
+// by @sig-net/midnight-serde.
 
 // Serialization output types
 export type SerializableValue =
@@ -221,6 +212,7 @@ export type SerializableValue =
   | boolean
   | bigint
   | null
+  | Uint8Array
   | SerializableValue[]
   | { [key: string]: SerializableValue };
 

@@ -1,10 +1,11 @@
 import { ethers } from 'ethers';
+// The EVM output decoding comes from the signet protocol library — the same
+// schema-driven ABI decode clients run to recompute the respond bytes.
+import { deserializeEvmOutput } from '@sig-net/midnight';
 import {
   TransactionOutput,
   TransactionStatus,
   ServerConfig,
-  TransactionOutputData,
-  AbiSchemaField,
 } from '../../types';
 import { getNamespaceFromCaip2 } from '../ChainUtils';
 
@@ -162,24 +163,14 @@ export class EthereumMonitor {
       // previous block's state, so the two can diverge when earlier txs in
       // the same block change state the call depends on.
 
-      const schemaStr = decodePaddedSchema(outputDeserializationSchema);
-
-      if (!schemaStr.trim()) {
-        throw new Error(
-          'Empty output deserialization schema — cannot decode EVM return value'
-        );
-      }
-
-      const schema = JSON.parse(schemaStr) as AbiSchemaField[];
-      const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-        schema.map((s) => s.type),
+      // Schema-driven ABI decode via the signet library (mirrors the MPC's
+      // delegation to alloy). Accepts the raw NUL-padded on-chain schema
+      // bytes and throws on an empty/malformed schema, which the caller
+      // reports as pending so the poll loop retries.
+      const decodedOutput = deserializeEvmOutput(
+        Uint8Array.from(outputDeserializationSchema),
         callResult
       );
-
-      const decodedOutput: TransactionOutputData = {};
-      schema.forEach((field, index) => {
-        decodedOutput[field.name] = decoded[index];
-      });
 
       return { success: true, output: decodedOutput };
     } else {
@@ -192,17 +183,4 @@ export class EthereumMonitor {
       };
     }
   }
-}
-
-/**
- * Decode an on-chain schema byte array to its JSON string. Schemas are stored
- * as fixed-size, NUL-padded buffers, so cut at the first NUL — trailing \0
- * bytes are not whitespace and would make JSON.parse reject an otherwise-valid
- * schema.
- */
-function decodePaddedSchema(schema: Buffer | number[] | string): string {
-  if (typeof schema === 'string') return schema;
-  const raw = new TextDecoder().decode(new Uint8Array(schema));
-  const nul = raw.indexOf('\0');
-  return nul === -1 ? raw : raw.slice(0, nul);
 }

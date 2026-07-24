@@ -8,6 +8,9 @@ import type {
   SignatureRequestedEvent,
   PendingTransaction,
   TransactionOutput,
+  TransactionOutputData,
+  BorshSchema,
+  SerializableValue,
   ServerConfig,
   CpiEventData,
   SignatureResponse,
@@ -25,13 +28,14 @@ import { contracts } from 'signet.js';
 const { getRequestIdRespond } = contracts.solana;
 import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
 import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
-import { OutputSerializer } from '../modules/OutputSerializer';
+// The Midnight respond payload encoding comes from the signet protocol
+// library (abi-serde, backed by @sig-net/midnight-serde) — the exact
+// schema-driven packed bytes clients recompute at claim time.
+import { serializeRespondOutput, type AbiDecodedOutput } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
-import {
-  SerializationFormat,
-  getNamespaceFromCaip2,
-} from '../modules/ChainUtils';
+import type { Schema } from 'borsh';
+import { getNamespaceFromCaip2 } from '../modules/ChainUtils';
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
@@ -128,8 +132,14 @@ export class ChainSignatureServer {
 
   private setupSolana() {
     // Presence is enforced by serverConfigSchema when disableSolana is unset.
+    const { solanaPrivateKey, programId } = this.config;
+    if (!solanaPrivateKey || !programId) {
+      throw new Error(
+        'setupSolana called without solanaPrivateKey/programId — serverConfigSchema should have rejected this config'
+      );
+    }
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
-      new Uint8Array(JSON.parse(this.config.solanaPrivateKey!))
+      new Uint8Array(JSON.parse(solanaPrivateKey))
     );
 
     this.connection = new Connection(this.config.solanaRpcUrl, {
@@ -161,7 +171,7 @@ export class ChainSignatureServer {
     anchor.setProvider(this.provider);
 
     const idl = ChainSignaturesIDL as anchor.Idl;
-    idl.address = this.config.programId!;
+    idl.address = programId;
     this.program = asChainSignaturesProgram(new Program(idl, this.provider));
   }
 
@@ -592,8 +602,9 @@ export class ChainSignatureServer {
     // crate, so by its equivalent of this handoff (process_execution_confirmed,
     // node/src/stream/ops.rs:301) it already carries serialized bytes. Fakenet
     // hands the decoded map to this server and serializes here instead: the
-    // OutputSerializer.serialize calls below must byte-match Output::serialize
-    // (encode_borsh/encode_abi, respond_bidirectional.rs:38).
+    // serializeBorshOutput/serializeMidnightRespondOutput calls below must
+    // byte-match Output::serialize (encode_borsh/encode_abi,
+    // respond_bidirectional.rs:38).
     console.log(`✅ Transaction completed: ${txHash}`);
 
     const requestId = txInfo.requestId;
@@ -610,10 +621,9 @@ export class ChainSignatureServer {
 
         // Midnight: ECDSA-sign the serialized output on-chain; the user
         // polls the signet contract and claims.
-        const serializedOutput = await OutputSerializer.serialize(
-          result.output,
-          SerializationFormat.Midnight,
-          txInfo.respondSerializationSchema
+        const serializedOutput = this.serializeMidnightRespondOutput(
+          txInfo.respondSerializationSchema,
+          result.output
         );
         await this.midnightMonitor.signAndBroadcastResponse(
           requestIdBytes,
@@ -676,20 +686,67 @@ export class ChainSignatureServer {
     }
   }
 
+  /**
+   * Serialize a Midnight respond payload with the signet library's
+   * schema-driven packed encoding (`serializeRespondOutput`, abi-serde,
+   * backed by @sig-net/midnight-serde) — the exact unpadded bytes clients
+   * recompute and the attestation digest commits to. Non-function-call
+   * executions (plain transfers) have no decoded output, so schema-typed
+   * success defaults are filled in first, mirroring the MPC's
+   * default_output_for_non_contract_call.
+   */
+  private serializeMidnightRespondOutput(
+    schema: Buffer | number[],
+    output: TransactionOutputData
+  ): Uint8Array {
+    const schemaBytes = Uint8Array.from(schema);
+    const values =
+      output.isFunctionCall === false
+        ? this.midnightDefaultOutput(schemaBytes, output)
+        : output;
+    return serializeRespondOutput(schemaBytes, values as AbiDecodedOutput);
+  }
+
+  /**
+   * Schema-typed success defaults for a non-function-call execution, with
+   * any fields the caller did decode passing through unchanged.
+   */
+  private midnightDefaultOutput(
+    schemaBytes: Uint8Array,
+    fallback: TransactionOutputData
+  ): TransactionOutputData {
+    const raw = new TextDecoder().decode(schemaBytes);
+    const nul = raw.indexOf('\0');
+    const fields = JSON.parse(nul === -1 ? raw : raw.slice(0, nul)) as Array<{
+      name: string;
+      type: string;
+    }>;
+    const data: TransactionOutputData = {};
+    for (const field of fields) {
+      const fallbackValue = fallback[field.name];
+      if (fallbackValue !== undefined) data[field.name] = fallbackValue;
+      else if (field.type === 'bool') data[field.name] = true;
+      else if (field.type === 'string') data[field.name] = '';
+      else if (field.type === 'bytes') data[field.name] = '0x';
+      else if (field.type.endsWith('[]')) data[field.name] = [];
+      else data[field.name] = 0n;
+    }
+    return data;
+  }
+
   /** Borsh-serialize the output and MPC-sign it for Solana/Substrate responses. */
   private async serializeAndSignBorshResponse(
     requestIdBytes: Buffer,
     txInfo: PendingTransaction,
     result: TransactionOutput
   ) {
-    this.log(`🔗 OutputSerializer: serialize...`);
-    const serializedOutput = await OutputSerializer.serialize(
+    this.log(`🔗 serializeBorshOutput...`);
+    const serializedOutput = this.serializeBorshOutput(
       result.output,
-      SerializationFormat.Borsh,
       txInfo.respondSerializationSchema
     );
     this.log(
-      `✓ OutputSerializer: serialize done (${serializedOutput.length} bytes)`
+      `✓ serializeBorshOutput done (${serializedOutput.length} bytes)`
     );
 
     this.log(`🔗 CryptoUtils: signBidirectionalResponse...`);
@@ -702,6 +759,130 @@ export class ChainSignatureServer {
     this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
     return { serializedOutput, signature };
+  }
+
+  /**
+   * Borsh-encode the output against the request's respond schema — must
+   * byte-match the MPC's Output::serialize (encode_borsh,
+   * respond_bidirectional.rs:38).
+   */
+  private serializeBorshOutput(
+    output: TransactionOutputData,
+    schema: Buffer | number[]
+  ): Uint8Array {
+    const schemaStr = this.borshSchemaString(schema);
+    if (!schemaStr.trim()) {
+      throw new Error(
+        'Empty serialization schema — cannot serialize without a valid schema'
+      );
+    }
+    let parsedSchema: unknown;
+    try {
+      parsedSchema = JSON.parse(schemaStr);
+    } catch {
+      throw new Error(
+        `Invalid serialization schema — not valid JSON: ${schemaStr.slice(0, 100)}`
+      );
+    }
+
+    // Handle scalar bool schema (schema is literally "bool")
+    if (typeof parsedSchema === 'string' && parsedSchema === 'bool') {
+      const outputRecord = output as Record<string, unknown>;
+      const boolValue =
+        typeof output === 'boolean'
+          ? output
+          : 'error' in outputRecord
+            ? Boolean(outputRecord.error)
+            : 'success' in outputRecord
+              ? Boolean(outputRecord.success)
+              : true;
+      return borsh.serialize('bool' as unknown as Schema, boolValue);
+    }
+
+    const borshSchema = parsedSchema as BorshSchema;
+
+    let dataToSerialize: SerializableValue = output;
+    if (output.isFunctionCall === false) {
+      dataToSerialize = this.createBorshData(borshSchema, output);
+    }
+
+    // Handle single-field objects with empty key
+    if (typeof dataToSerialize === 'object' && dataToSerialize !== null) {
+      const keys = Object.keys(dataToSerialize as TransactionOutputData);
+      if (keys.length === 1 && keys[0] === '') {
+        dataToSerialize =
+          (dataToSerialize as TransactionOutputData)[''] ?? dataToSerialize;
+      }
+    }
+
+    // Wrap common boolean error struct when payload is an object with `error`
+    if (
+      borshSchema.struct &&
+      Object.keys(borshSchema.struct).length === 1 &&
+      borshSchema.struct.error === 'bool' &&
+      typeof dataToSerialize === 'object' &&
+      dataToSerialize !== null &&
+      'error' in (dataToSerialize as Record<string, unknown>)
+    ) {
+      const data = dataToSerialize as Record<string, unknown>;
+      dataToSerialize = { error: Boolean(data.error) };
+    }
+
+    try {
+      return borsh.serialize(borshSchema as Schema, dataToSerialize);
+    } catch (error) {
+      // Emit schema/payload for debugging serialization issues
+      console.error(
+        '[serializeBorshOutput] Borsh serialization failed',
+        { schema: borshSchema, payload: dataToSerialize },
+        error
+      );
+      throw error;
+    }
+  }
+
+  /** Cut a NUL-padded on-chain schema at the first NUL and decode to text. */
+  private borshSchemaString(schema: Buffer | number[]): string {
+    if (typeof schema === 'string') return schema;
+    const raw = new TextDecoder().decode(new Uint8Array(schema));
+    const nul = raw.indexOf('\0');
+    return nul === -1 ? raw : raw.slice(0, nul);
+  }
+
+  private createBorshData(
+    borshSchema: BorshSchema,
+    fallback?: TransactionOutputData
+  ): TransactionOutputData {
+    const struct = borshSchema.struct;
+    if (!struct) {
+      return { success: true };
+    }
+
+    const obj: TransactionOutputData = {};
+    for (const [key, type] of Object.entries(struct)) {
+      if (fallback && key in fallback && fallback[key] !== undefined) {
+        obj[key] = fallback[key];
+        continue;
+      }
+
+      // Only bool and string defaults exist, matching
+      // default_output_for_non_contract_call in
+      // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:261
+      // which bails on every other type.
+      switch (type) {
+        case 'bool':
+          obj[key] = true;
+          break;
+        case 'string':
+          obj[key] = 'non_function_call_success';
+          break;
+        default:
+          throw new Error(
+            `Cannot serialize non-function call success as type ${type}`
+          );
+      }
+    }
+    return obj;
   }
 
   private async handleFailedTransaction(
@@ -723,10 +904,9 @@ export class ChainSignatureServer {
       // deadbeef in first 4 bytes makes claim() fail (byte 0 = 0xde != 0x01),
       // and a future refund() circuit can detect it via slice<4>(outputData, 0).
       const errorOutput = { success: false };
-      const serializedError = await OutputSerializer.serialize(
-        errorOutput,
-        SerializationFormat.Midnight,
-        txInfo.respondSerializationSchema
+      const serializedError = this.serializeMidnightRespondOutput(
+        txInfo.respondSerializationSchema,
+        errorOutput
       );
       const outputData = new Uint8Array(
         MAGIC_ERROR_PREFIX.length + serializedError.length
