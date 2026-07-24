@@ -31,7 +31,11 @@ import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 // The Midnight respond payload encoding comes from the signet protocol
 // library (abi-serde, backed by @sig-net/midnight-serde) — the exact
 // schema-driven packed bytes clients recompute at claim time.
-import { serializeRespondOutput, type AbiDecodedOutput } from '@sig-net/midnight';
+import {
+  MPC_FAILURE_OUTPUT,
+  serializeRespondOutput,
+  type AbiDecodedOutput,
+} from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
 import type { Schema } from 'borsh';
@@ -900,22 +904,13 @@ export class ChainSignatureServer {
     const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
     if (txInfo.source === 'midnight' && this.midnightMonitor) {
-      // Midnight: deadbeef prefix + serialized error using respond schema.
-      // deadbeef in first 4 bytes makes claim() fail (byte 0 = 0xde != 0x01),
-      // and a future refund() circuit can detect it via slice<4>(outputData, 0).
-      const errorOutput = { success: false };
-      const serializedError = this.serializeMidnightRespondOutput(
-        txInfo.respondSerializationSchema,
-        errorOutput
-      );
-      const outputData = new Uint8Array(
-        MAGIC_ERROR_PREFIX.length + serializedError.length
-      );
-      outputData.set(MAGIC_ERROR_PREFIX);
-      outputData.set(serializedError, MAGIC_ERROR_PREFIX.length);
+      // Midnight: the schema-independent 5-byte failure output (deadbeef
+      // sentinel + 0x01), one fixed width for every respond schema so client
+      // refund circuits can take it as a Bytes<5> argument and clients can
+      // recompute the failure candidate without the receipt.
       await this.midnightMonitor.signAndBroadcastResponse(
         requestIdBytes,
-        outputData,
+        MPC_FAILURE_OUTPUT,
         txInfo.sender
       );
       console.log(`✓ Midnight: error response posted for ${txHash}`);
