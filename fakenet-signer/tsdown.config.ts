@@ -6,7 +6,7 @@ export default defineConfig({
   format: ['esm', 'cjs'],
   sourcemap: true,
   clean: true,
-  dts: false,
+  dts: true,
   external: [
     ...Object.keys(pkg.dependencies ?? {}),
     ...Object.keys(pkg.devDependencies ?? {}),

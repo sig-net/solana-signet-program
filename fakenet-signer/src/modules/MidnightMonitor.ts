@@ -33,7 +33,7 @@ import type { SigningRequest } from './midnight/signet-request-types';
 
 // The attestation digest is the library's TS twin of the size-generic
 // Compact circuit client contracts verify against in-circuit
-// (verifyRespondBidirectionalEvent) — keccak256(requestId || output), the
+// (verifyRespondBidirectionalEvent): keccak256(requestId || output), the
 // output at its exact unpadded length. Signing its output with the derived
 // response key is what makes a response verify at claim time.
 import {
@@ -45,6 +45,7 @@ import {
   secp256k1PublicKeyOf,
   signAttestationDigest,
   SignetRequestFeed,
+  readSignetContractLedgerFromState,
   signatureToSignatureRespondedEvent,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
@@ -151,8 +152,6 @@ export interface ResponderWallet {
 type DeployedSignetContract = FoundContract<
   SignetContract<SignetContractPrivateState>
 >;
-
-(globalThis as { WebSocket?: unknown }).WebSocket = WebSocket;
 
 /**
  * Upper bound on a single signet contract write (proof + submit + finalize).
@@ -379,57 +378,80 @@ export class MidnightMonitor {
    * Serialize an on-chain write behind every prior one. The joined signet
    * contract shares a single wallet + LevelDB private-state store, so concurrent
    * `callTx.*` calls deadlock; chaining forces them to run one at a time.
+   *
+   * The chain advances on the RAW post promise, never on the timeout-raced
+   * result the caller sees: a timed-out write is still in flight against the
+   * single-writer store, so starting the next write early would recreate the
+   * very deadlock this chain exists to prevent. The caller still gets the
+   * bounded (raced) promise, so a wedged write is reported and retried.
    */
-  private serializeWrite<T>(post: () => Promise<T>): Promise<T> {
-    const result = this.writeChain.then(post, post);
+  private serializeWrite<T>(label: string, post: () => Promise<T>): Promise<T> {
+    const started = this.writeChain.then(
+      () => this.timedPost(label, post),
+      () => this.timedPost(label, post)
+    );
     // Keep the chain alive past a rejection so one failed write doesn't wedge
-    // every subsequent write, and swallow the tail rejection (the real error is
-    // still delivered to the caller via `result`).
-    this.writeChain = result.catch(() => {});
-    return result;
+    // every subsequent write, and swallow the tail rejection (the real error
+    // is still delivered to the caller via the raced result).
+    this.writeChain = started.then(({ raw }) => raw).catch(() => {});
+    return started.then(({ result }) => result);
   }
 
   /**
    * Run one on-chain post and log how long it took (proof generation +
-   * submission + finalization) — basic latency benchmarking of the signet
+   * submission + finalization): basic latency benchmarking of the signet
    * contract write paths. Logs on failure too, so timeouts are measurable.
    *
-   * Bounded by {@link WRITE_TIMEOUT_MS}: a genuinely wedged `callTx` (e.g. a
-   * submission that never lands) rejects instead of hanging forever, so the
-   * request is marked failed and retried on the next poll rather than silently
-   * blocking the write chain. The timeout is deliberately long — a real
-   * attestation proof + submit legitimately takes tens of seconds.
+   * `result` is bounded by {@link WRITE_TIMEOUT_MS}: a genuinely wedged
+   * `callTx` (e.g. a submission that never lands) rejects instead of hanging
+   * forever, so the request is marked failed and retried on the next poll.
+   * The timeout is deliberately long: a real attestation proof + submit
+   * legitimately takes tens of seconds. `raw` is the underlying post promise,
+   * untouched by the timeout: the write chain must advance on it (see
+   * {@link serializeWrite}), never on `result`.
    */
-  private async timedPost<T>(
+  private timedPost<T>(
     label: string,
     post: () => Promise<T>
-  ): Promise<T> {
+  ): { raw: Promise<T>; result: Promise<T> } {
     console.log(`MidnightMonitor: [timing] ${label} started...`);
     const startedAt = performance.now();
-    let timeoutId: NodeJS.Timeout | undefined;
-    try {
-      const timeout = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(
-          () =>
-            reject(
-              new Error(`${label} timed out after ${WRITE_TIMEOUT_MS / 1000}s`)
-            ),
-          WRITE_TIMEOUT_MS
+    const elapsedSeconds = () =>
+      ((performance.now() - startedAt) / 1000).toFixed(1);
+
+    const raw = post();
+    void raw.then(
+      () => {
+        console.log(
+          `MidnightMonitor: [timing] ${label} took ${elapsedSeconds()}s`
         );
-      });
-      const result = await Promise.race([post(), timeout]);
-      const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-      console.log(`MidnightMonitor: [timing] ${label} took ${seconds}s`);
-      return result;
-    } catch (error) {
-      const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-      console.log(
-        `MidnightMonitor: [timing] ${label} FAILED after ${seconds}s`
-      );
-      throw error;
-    } finally {
+      },
+      () => {
+        console.log(
+          `MidnightMonitor: [timing] ${label} FAILED after ${elapsedSeconds()}s`
+        );
+      }
+    );
+
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        console.log(
+          `MidnightMonitor: [timing] ${label} still running after ${elapsedSeconds()}s; ` +
+            'reporting a timeout to the caller while the write chain waits for it to settle'
+        );
+        reject(
+          new Error(`${label} timed out after ${WRITE_TIMEOUT_MS / 1000}s`)
+        );
+      }, WRITE_TIMEOUT_MS);
+    });
+    // The raced result can reject with the timeout while `raw` is still
+    // pending. `raw`'s eventual rejection is observed by the logging handler
+    // above and by the write chain, so it never becomes unhandled.
+    const result = Promise.race([raw, timeout]).finally(() => {
       if (timeoutId) clearTimeout(timeoutId);
-    }
+    });
+    return { raw, result };
   }
 
   /**
@@ -446,11 +468,9 @@ export class MidnightMonitor {
     // wallet + joins the contract (separately logged), and that one-off cost
     // would skew the post benchmark.
     const contract = await this.responderContract();
-    return this.serializeWrite(() =>
-      this.timedPost(
-        `respond(0x${Buffer.from(requestId).toString('hex')})`,
-        () => contract.callTx.respond(requestId, signatureResponse)
-      )
+    return this.serializeWrite(
+      `respond(0x${Buffer.from(requestId).toString('hex')})`,
+      () => contract.callTx.respond(requestId, signatureResponse)
     );
   }
 
@@ -466,12 +486,10 @@ export class MidnightMonitor {
     respondBidirectional: RespondBidirectionalEvent
   ) {
     const contract = await this.responderContract();
-    return this.serializeWrite(() =>
-      this.timedPost(
-        `respondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
-        () =>
-          contract.callTx.respondBidirectional(requestId, respondBidirectional)
-      )
+    return this.serializeWrite(
+      `respondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
+      () =>
+        contract.callTx.respondBidirectional(requestId, respondBidirectional)
     );
   }
 
@@ -500,6 +518,27 @@ export class MidnightMonitor {
       requestId,
       request: signetRequest,
     } of resolved) {
+      // Restart guard: a request whose respondBidirectional response is
+      // already on the signet contract was fully processed by a previous run
+      // of this responder (respondBidirectional is the pipeline's terminal
+      // stage). Skip it, leaving it marked yielded in the feed, so a restart
+      // does not re-sign and re-post every historical request. If the check
+      // itself fails, process the request anyway: reprocessing is acceptable,
+      // missing a request is not.
+      try {
+        if (await this.hasRespondBidirectionalResponse(requestId)) {
+          console.log(
+            `MidnightMonitor: request ${requestId} already has a respondBidirectional response on-chain, skipping (processed before a restart)`
+          );
+          continue;
+        }
+      } catch (error) {
+        console.warn(
+          `MidnightMonitor: could not check existing responses for ${requestId}, processing anyway:`,
+          error
+        );
+      }
+
       console.log(
         `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
       );
@@ -524,6 +563,39 @@ export class MidnightMonitor {
         this.feed.forget(requestId);
       }
     }
+  }
+
+  /**
+   * Whether the signet contract already holds at least one
+   * respondBidirectional post for `requestId` (read from the contract's
+   * respondBidirectional counter map). Used as the restart guard in
+   * {@link fetchAndProcessRequests}.
+   *
+   * Why THIS check and not the signature-response log: the pipeline runs
+   * discovery -> sign -> post SIGNATURE response -> monitor the EVM tx ->
+   * post respondBidirectional, and the EVM-tx monitor state lives only in
+   * memory. A request with a signature response but no respondBidirectional
+   * was interrupted mid-pipeline, and nothing would ever resume its EVM
+   * monitoring after a restart, so it MUST be reprocessed (re-posting a
+   * duplicate signature is acceptable, dropping the respondBidirectional is
+   * not). Only the terminal stage's presence proves no work remains.
+   */
+  private async hasRespondBidirectionalResponse(
+    requestId: RequestIdHex
+  ): Promise<boolean> {
+    if (!this.publicDataProvider) {
+      throw new Error('MidnightMonitor: not initialized (no data provider)');
+    }
+    const state = await this.publicDataProvider.queryContractState(
+      this.config.signetContractAddress
+    );
+    if (!state?.data) {
+      // No readable signet contract state means no responses recorded.
+      return false;
+    }
+    const { respondBidirectionalCounterMap } =
+      readSignetContractLedgerFromState(state.data);
+    return (respondBidirectionalCounterMap.get(requestId) ?? 0n) > 0n;
   }
 
   /**
@@ -628,12 +700,12 @@ export class MidnightMonitor {
     );
 
     // The attestation commits to the output AS IS, at its exact unpadded
-    // length — no padding and no fixed field width (the event carries only
+    // length: no padding and no fixed field width (the event carries only
     // the digest, the output itself travels off chain).
     const serializedOutput = evmReturnData;
 
     // ECDSA-sign the attestation digest keccak256(requestId || output) with
-    // the derived response key — the TS twin of the circuit client contracts
+    // the derived response key, the TS twin of the circuit client contracts
     // verify against (verifyRespondBidirectionalEvent), so the response
     // verifies at claim time. The signature lands in stored form (full R
     // point, big-endian bytes), the ledger shape.
@@ -737,6 +809,24 @@ export class MidnightMonitor {
     // discovers requesters by polling its notification registry, so no requester list is
     // needed (or accepted).
     if (!config.midnightIndexerUrl || !config.midnightSignetContractAddress) {
+      // A partially-set Midnight config is almost certainly a mistake: say
+      // which variable is missing instead of silently never starting the leg.
+      if (config.midnightSignetContractAddress && !config.midnightIndexerUrl) {
+        console.warn(
+          'MidnightMonitor: MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set but ' +
+            'MIDNIGHT_INDEXER_URL is missing. The Midnight leg will NOT start. ' +
+            'Set MIDNIGHT_INDEXER_URL to enable it.'
+        );
+      } else if (
+        config.midnightIndexerUrl &&
+        !config.midnightSignetContractAddress
+      ) {
+        console.warn(
+          'MidnightMonitor: MIDNIGHT_INDEXER_URL is set but ' +
+            'MIDNIGHT_SIGNET_CONTRACT_ADDRESS is missing. The Midnight leg ' +
+            'will NOT start. Set MIDNIGHT_SIGNET_CONTRACT_ADDRESS to enable it.'
+        );
+      }
       return null;
     }
 

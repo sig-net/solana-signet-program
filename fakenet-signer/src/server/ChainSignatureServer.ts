@@ -29,7 +29,7 @@ const { getRequestIdRespond } = contracts.solana;
 import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
 import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 // The Midnight respond payload encoding comes from the signet protocol
-// library (abi-serde, backed by @sig-net/midnight-serde) — the exact
+// library (abi-serde, backed by @sig-net/midnight-serde): the exact
 // schema-driven packed bytes clients recompute at claim time.
 import {
   deriveEpsilon,
@@ -147,7 +147,7 @@ export class ChainSignatureServer {
     const { solanaPrivateKey, programId } = this.config;
     if (!solanaPrivateKey || !programId) {
       throw new Error(
-        'setupSolana called without solanaPrivateKey/programId — serverConfigSchema should have rejected this config'
+        'setupSolana called without solanaPrivateKey/programId: serverConfigSchema should have rejected this config'
       );
     }
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
@@ -203,6 +203,12 @@ export class ChainSignatureServer {
 
   async start() {
     console.log('🚀 Response Server');
+
+    // Output extraction for confirmed EVM transactions depends on
+    // debug_traceTransaction: verify the configured RPC supports it and fail
+    // loudly at startup otherwise, instead of at the first confirmed tx.
+    await EthereumMonitor.assertDebugTraceSupport(this.config);
+
     if (this.config.disableSolana) {
       console.log('Solana: disabled (DISABLE_SOLANA)');
     } else {
@@ -731,7 +737,7 @@ export class ChainSignatureServer {
   /**
    * Serialize a Midnight respond payload with the signet library's
    * schema-driven packed encoding (`serializeRespondOutput`, abi-serde,
-   * backed by @sig-net/midnight-serde) — the exact unpadded bytes clients
+   * backed by @sig-net/midnight-serde): the exact unpadded bytes clients
    * recompute and the attestation digest commits to. Non-function-call
    * executions (plain transfers) have no decoded output, so schema-typed
    * success defaults are filled in first, mirroring the MPC's
@@ -744,34 +750,54 @@ export class ChainSignatureServer {
     const schemaBytes = Uint8Array.from(schema);
     const values =
       output.isFunctionCall === false
-        ? this.midnightDefaultOutput(schemaBytes, output)
+        ? this.midnightDefaultOutput(schemaBytes)
         : output;
     return serializeRespondOutput(schemaBytes, values as AbiDecodedOutput);
   }
 
   /**
-   * Schema-typed success defaults for a non-function-call execution, with
-   * any fields the caller did decode passing through unchanged.
+   * Schema-typed success defaults for a non-function-call execution
+   * (a plain transfer): the exact synthesis the MPC's
+   * default_output_for_non_contract_call performs
+   * (chain-ethereum/src/respond_bidirectional.rs): string fields get
+   * 'non_function_call_success', bool fields get true, and every other
+   * type is an error, matching the MPC's bail. No decoded fields are
+   * merged in: on this path nothing was decoded (the MPC builds the
+   * output from the schema alone), so passing anything through would
+   * diverge from the bytes the MPC would attest.
    */
-  private midnightDefaultOutput(
-    schemaBytes: Uint8Array,
-    fallback: TransactionOutputData
-  ): TransactionOutputData {
-    const raw = new TextDecoder().decode(schemaBytes);
-    const nul = raw.indexOf('\0');
-    const fields = JSON.parse(nul === -1 ? raw : raw.slice(0, nul)) as Array<{
-      name: string;
-      type: string;
-    }>;
+  private midnightDefaultOutput(schemaBytes: Uint8Array): TransactionOutputData {
+    const schemaStr = this.borshSchemaString(schemaBytes);
+    if (!schemaStr.trim()) {
+      throw new Error(
+        'Empty respond serialization schema: cannot synthesize a non-function-call output without a valid schema'
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(schemaStr);
+    } catch {
+      throw new Error(
+        `Invalid respond serialization schema, not valid JSON: ${schemaStr.slice(0, 100)}`
+      );
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(
+        `Respond serialization schema must be a JSON array of {name, type} fields, got: ${schemaStr.slice(0, 100)}`
+      );
+    }
+    const fields = parsed as Array<{ name: string; type: string }>;
     const data: TransactionOutputData = {};
     for (const field of fields) {
-      const fallbackValue = fallback[field.name];
-      if (fallbackValue !== undefined) data[field.name] = fallbackValue;
-      else if (field.type === 'bool') data[field.name] = true;
-      else if (field.type === 'string') data[field.name] = '';
-      else if (field.type === 'bytes') data[field.name] = '0x';
-      else if (field.type.endsWith('[]')) data[field.name] = [];
-      else data[field.name] = 0n;
+      if (field.type === 'string') {
+        data[field.name] = 'non_function_call_success';
+      } else if (field.type === 'bool') {
+        data[field.name] = true;
+      } else {
+        throw new Error(
+          `Cannot synthesize a non-function-call default for field '${field.name}' of type ${field.type}`
+        );
+      }
     }
     return data;
   }
@@ -802,7 +828,7 @@ export class ChainSignatureServer {
   }
 
   /**
-   * Borsh-encode the output against the request's respond schema — must
+   * Borsh-encode the output against the request's respond schema. Must
    * byte-match the MPC's Output::serialize (encode_borsh,
    * respond_bidirectional.rs:38).
    */
@@ -813,7 +839,7 @@ export class ChainSignatureServer {
     const schemaStr = this.borshSchemaString(schema);
     if (!schemaStr.trim()) {
       throw new Error(
-        'Empty serialization schema — cannot serialize without a valid schema'
+        'Empty serialization schema: cannot serialize without a valid schema'
       );
     }
     let parsedSchema: unknown;
@@ -821,7 +847,7 @@ export class ChainSignatureServer {
       parsedSchema = JSON.parse(schemaStr);
     } catch {
       throw new Error(
-        `Invalid serialization schema — not valid JSON: ${schemaStr.slice(0, 100)}`
+        `Invalid serialization schema, not valid JSON: ${schemaStr.slice(0, 100)}`
       );
     }
 
@@ -882,7 +908,7 @@ export class ChainSignatureServer {
   }
 
   /** Cut a NUL-padded on-chain schema at the first NUL and decode to text. */
-  private borshSchemaString(schema: Buffer | number[]): string {
+  private borshSchemaString(schema: Buffer | number[] | Uint8Array): string {
     if (typeof schema === 'string') return schema;
     const raw = new TextDecoder().decode(new Uint8Array(schema));
     const nul = raw.indexOf('\0');
@@ -947,7 +973,10 @@ export class ChainSignatureServer {
 
     const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
-    if (txInfo.source === 'midnight' && this.midnightMonitor) {
+    if (txInfo.source === 'midnight') {
+      if (!this.midnightMonitor) {
+        throw new Error(`Midnight monitor unavailable for tx ${txHash}`);
+      }
       // Midnight: the schema-independent 5-byte failure output (deadbeef
       // sentinel + 0x01), one fixed width for every respond schema so client
       // refund circuits can take it as a Bytes<5> argument and clients can
@@ -1637,8 +1666,13 @@ export class ChainSignatureServer {
       this.midnightMonitor = null;
     }
     if (this.responsesApiServer) {
-      this.responsesApiServer.close();
+      const responsesApiServer = this.responsesApiServer;
       this.responsesApiServer = null;
+      // Resolve regardless of the close error: a server that never started
+      // listening reports one, and shutdown should not fail over it.
+      await new Promise<void>((resolve) => {
+        responsesApiServer.close(() => resolve());
+      });
     }
   }
 }

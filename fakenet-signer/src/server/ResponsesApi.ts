@@ -111,6 +111,24 @@ export function startResponsesApi(
     respond(200, entry);
   });
 
+  // Without this handler a listen failure (most commonly a port conflict)
+  // surfaces as an unhandled 'error' event and an opaque crash. Log what went
+  // wrong, name the knob that fixes it, and shut down cleanly.
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(
+        `ResponsesApi: port ${port} is already in use. Set RESPONSES_API_PORT ` +
+          `to a free port (or stop the process holding port ${port}) and restart.`
+      );
+    } else {
+      console.error(
+        `ResponsesApi: server error on port ${port} (RESPONSES_API_PORT):`,
+        error
+      );
+    }
+    process.exit(1);
+  });
+
   server.listen(port, () => {
     console.log(
       `ResponsesApi: serving GET /responses/{requestId} on port ${port}`

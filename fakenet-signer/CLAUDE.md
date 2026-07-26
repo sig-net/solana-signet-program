@@ -64,7 +64,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 
 Environment variables loaded from the repo-root `.env`:
 
-- `EVM_RPC_URL` (required — any EVM endpoint; hosted providers carry their credential in the URL, e.g. for Infura: `https://sepolia.infura.io/v3/<api-key-here>`)
+- `EVM_RPC_URL` (required, any EVM endpoint; hosted providers carry their credential in the URL, e.g. for Infura: `https://sepolia.infura.io/v3/<api-key-here>`)
 - `MPC_ROOT_KEY` (required)
 - `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
 - `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_WALLET_SEED` plus the `MIDNIGHT_*` endpoint overrides (`MIDNIGHT_NETWORK_ID`, `MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_INDEXER_WS_URL`, `MIDNIGHT_PROOF_SERVER_URL`) enable the Midnight leg (optional)

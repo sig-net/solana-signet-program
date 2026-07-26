@@ -6,7 +6,6 @@ export enum SerializationFormat {
   Borsh = 0,
   ABI = 1,
   BitcoinSimple = 2,
-  Midnight = 3,
 }
 
 /**

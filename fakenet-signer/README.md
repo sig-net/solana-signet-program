@@ -3,20 +3,22 @@
 [![npm version](https://img.shields.io/npm/v/fakenet-signer.svg)](https://www.npmjs.com/package/fakenet-signer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Multi-chain signature orchestrator for Solana that bridges blockchain networks through MPC-based chain signatures. Listens for signature requests on Solana, executes transactions on target chains (Ethereum, Bitcoin, etc.), monitors their completion, and returns results back to Solana.
+Multi-chain signature orchestrator that bridges blockchain networks through MPC-based chain signatures. Listens for signature requests on a source chain (Solana CPI events, the Midnight signet contract's notification registry, or a Substrate signet pallet), executes transactions on target chains (Ethereum, Bitcoin), monitors their completion, and returns results back to the source chain.
 
 ## Features
 
 - 🔐 **MPC-Based Key Derivation** - Hierarchical deterministic key derivation from a single root key
 - 🌉 **Multi-Chain Support** - Execute transactions on Ethereum (EIP-1559 & Legacy) and Bitcoin (PSBT), with extensible architecture for more chains
+- 🌙 **Midnight Support**: Polls the signet contract's notification registry, signs requests with per-contract derived keys, and posts hash-only respond-bidirectional attestations
 - ₿ **Bitcoin Adapters** - Unified interface for Bitcoin operations with mempool.space API and Bitcoin Core RPC support
 - 📡 **Event-Driven Architecture** - Subscribes to Solana CPI events for real-time request processing
 - ⚡ **Transaction Monitoring** - Intelligent polling with exponential backoff for transaction confirmation
-- 🔄 **Bidirectional Responses** - Sign transactions, execute them, and return structured outputs to Solana
+- 🔄 **Bidirectional Responses** - Sign transactions, execute them, and return structured outputs to the source chain
 - 💰 **Automatic Gas Funding** - Funds derived addresses from root key when needed (Ethereum)
 - 🧪 **Bitcoin Regtest Support** - Docker-based local Bitcoin development with auto-mining and web explorer
 - 🛡️ **Type-Safe** - Full TypeScript support with comprehensive type definitions
 - 📦 **Dual Package** - Supports both ESM and CommonJS
+- 🐳 **Docker Image**: Published to ghcr.io/sig-net/fakenet for containerised deployments
 
 ## Installation
 
@@ -48,6 +50,8 @@ VERBOSE=true  # Optional: enable detailed logging
 # Bitcoin Configuration
 BITCOIN_NETWORK=testnet  # Options: regtest, testnet
 ```
+
+This is the minimal Solana-sourced setup. The full reference, including the `DISABLE_SOLANA`, `SUBSTRATE_WS_URL`, `MIDNIGHT_*`, and `RESPONSES_API_PORT` variables, is under [Configuration](#configuration).
 
 ### 2. Basic Usage
 
@@ -359,6 +363,45 @@ BITCOIN_NETWORK=regtest
 
 See [GitHub](https://github.com/Pessina/bitcoin-regtest) for detailed documentation.
 
+## Midnight
+
+The server can act as the MPC responder for Midnight signet contracts. The leg starts when both `MIDNIGHT_INDEXER_URL` and `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` are set (see the environment variable reference below), and it can run alone by setting `DISABLE_SOLANA=true`.
+
+### Request discovery
+
+The responder needs only the central signet contract's address. It polls that contract's notification registry through the Midnight GraphQL indexer (the `SignetRequestFeed` from `@sig-net/midnight`): every requester contract registers a notification naming the ledger field where its request map lives, and the feed resolves each notification to an authenticated `SignBidirectionalEvent` read from the requester's own ledger. Forged or not-yet-indexed notifications are dropped and retried, so no requester contract list, compiled caller contract, or ZK keys are needed to read state. On restart, requests that already have a respond-bidirectional response on the signet contract are skipped rather than re-signed.
+
+### Request signing
+
+For each discovered request the responder rebuilds the unsigned EVM transaction from the on-ledger, contract-controlled parameters, derives the signing key from the MPC root key using the requesting contract's address and the request's 32-byte path (the signet library's v2 epsilon derivation, so clients derive the same expected signer), signs it, and posts the ECDSA signature record on-chain via the signet contract's `respond` circuit. The client polls the contract for the signature and broadcasts the EVM transaction itself.
+
+### Hash-only respond path
+
+Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond is hash-only:
+
+1. After the EVM transaction confirms, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled; the server probes for support at startup and fails loudly without it).
+2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
+3. The responder computes the attestation digest `keccak256(requestId || serializedOutput)` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signed digest is posted on-chain via `respondBidirectional`, and the output itself never travels on-chain.
+4. A failed execution (revert or replacement) is attested the same way over the fixed 5-byte failure output (the `0xDEADBEEF` sentinel plus `0x01`), one width for every respond schema, so client refund circuits can verify it without the receipt.
+
+Clients fetch the raw output off-chain (for example from the `/responses/{requestId}` helper API below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
+
+### The `/responses/{requestId}` helper API
+
+The server exposes a small public HTTP API, `GET /responses/{requestId}` (request id as 64 hex chars, `0x` prefix optional), on `RESPONSES_API_PORT` (default 3040). It serves each request's raw traced EVM output exactly as `debug_traceTransaction` reported it, so clients need no debug-capable RPC access of their own:
+
+```json
+{
+  "requestId": "abc1...64 hex chars",
+  "success": true,
+  "output": "0x0000...",
+  "txHash": "0x...",
+  "observedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+It answers 404 while no execution result has been observed yet, and `output` is `null` for a failed execution (which has no attested output: the MPC posts the fixed failure output instead). The API is a CONVENIENCE, never an authority: the data is unauthenticated, and a client must recompute the attestation digest from it and verify the MPC's posted signature before trusting it.
+
 ## Architecture
 
 ### Core Components
@@ -424,13 +467,25 @@ Monitors Bitcoin transaction lifecycle:
 - Drops pending jobs if any prevout is spent elsewhere
 - Caches adapters for efficiency
 
-#### `OutputSerializer`
+#### `MidnightMonitor`
 
-Multi-format output serialization:
+Runs the Midnight leg end to end:
 
-- **Borsh** (format 0) - For Solana chains
-- **ABI** (format 1) - For EVM chains
-- Schema-driven encoding/decoding
+- Polls the signet contract's notification registry via the GraphQL indexer
+- Resolves notifications to authenticated requests from each requester's ledger
+- Posts signature responses and hash-only respond-bidirectional attestations
+- Serialises all contract writes behind a single queue (the private-state store is single-writer)
+
+#### `ResponsesApi`
+
+Public `GET /responses/{requestId}` helper serving each request's raw traced EVM output (a convenience, never an authority: clients digest-match and signature-verify).
+
+#### Output serialization
+
+Handled inside `ChainSignatureServer`, per source chain:
+
+- **Borsh**: Solana and Substrate responses, encoded against the request's respond schema
+- **Packed respond bytes**: Midnight responses, schema-driven encoding via `@sig-net/midnight` (abi-serde)
 
 ## API Reference
 
@@ -448,15 +503,29 @@ class ChainSignatureServer {
 
 ```typescript
 interface ServerConfig {
+  disableSolana?: boolean; // Skip the entire Solana leg (Midnight-only runs)
   solanaRpcUrl: string; // Solana RPC endpoint
-  solanaPrivateKey: string; // Server keypair (JSON array format)
+  solanaPrivateKey?: string; // Server keypair (JSON array format), required unless disableSolana
   mpcRootKey: string; // Hex private key for MPC derivations
   evmRpcUrl: string; // EVM JSON-RPC endpoint (credential in the URL if hosted)
-  programId: string; // Solana program ID
+  programId?: string; // Solana program ID, required unless disableSolana
   isDevnet: boolean; // Network flag
   signatureDeposit?: string; // Optional deposit amount
   chainId?: string; // Optional chain identifier
   verbose?: boolean; // Enable detailed logging
+  bitcoinNetwork: 'regtest' | 'testnet'; // Bitcoin adapter selection
+  backfillBatchSize?: number; // Solana backfill batch size
+  backfillMaxBatchSize?: number; // Solana backfill batch cap
+  lastBackfillSignature?: string; // Solana backfill cursor
+  substrateWsUrl?: string; // Substrate node WS URL, enables the Substrate leg
+  midnightNetworkId?: string; // Midnight network id (default 'undeployed')
+  midnightIndexerUrl?: string; // Midnight indexer GraphQL URL (required for the Midnight leg)
+  midnightIndexerWsUrl?: string; // Indexer WS URL (derived from midnightIndexerUrl when unset)
+  midnightNodeUrl?: string; // Midnight node RPC URL (default http://localhost:9944)
+  midnightProofServerUrl?: string; // Proof server URL (default http://localhost:6300)
+  midnightSignetContractAddress?: string; // Deployed signet contract (required for the Midnight leg)
+  midnightWalletSeed?: string; // Responder wallet seed (defaults to the genesis account seed)
+  responsesApiPort?: number; // /responses/{requestId} helper API port (default 3040)
 }
 ```
 
@@ -513,10 +582,6 @@ await BitcoinMonitor.waitForTransactionAndGetOutput(
   plan.inputs.map(({ prevTxid, vout }) => ({ txid: prevTxid, vout })),
   config
 );
-
-// Output serialization
-import { OutputSerializer } from 'fakenet-signer';
-await OutputSerializer.serialize(output, format, schema);
 
 // Request ID generation
 import { RequestIdGenerator } from 'fakenet-signer';
@@ -627,6 +692,26 @@ interface SignatureRequestedEvent {
 
 **Key Difference:** Bitcoin uses txid (canonical, 32 bytes) for request ID generation, while Ethereum uses full transaction data. This ensures deterministic request IDs that work across different PSBT representations of the same transaction.
 
+### Bidirectional Sign & Respond (Midnight)
+
+```
+1. Discover the request via the signet contract's notification registry (indexer poll)
+2. Resolve it to an authenticated SignBidirectionalEvent from the requester's ledger
+3. Derive the signing key from the requesting contract + path (v2 epsilon derivation)
+4. Sign the EVM transaction, post the signature record on-chain (respond circuit)
+5. Client broadcasts the EVM transaction, and the server monitors it
+6. On success:
+   - Extract the mined call's return data (debug_traceTransaction)
+   - Decode per outputDeserializationSchema, re-pack per respondSerializationSchema
+   - Sign the attestation digest keccak256(request_id + serialized_output)
+     with the per-caller response key
+   - Post the hash-only respondBidirectional record on-chain
+7. On error:
+   - Attest the fixed 5-byte failure output (0xDEADBEEF + 0x01) the same way
+```
+
+See the [Midnight](#midnight) section for the full detail.
+
 ### Simple Signature Request
 
 ```
@@ -659,6 +744,30 @@ Supported chain identifiers:
 - `solana:localnet` - Solana Localnet (Borsh serialization)
 
 ## Configuration
+
+### Environment Variables
+
+Loaded from the repo-root `.env` (or the process environment) and validated at startup:
+
+| Variable                           | Required                       | Description                                                                                                                                     |
+| ---------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MPC_ROOT_KEY`                     | yes                            | Hex private key (`0x` + 64 hex chars) all chain keys derive from                                                                                 |
+| `EVM_RPC_URL`                      | yes                            | EVM JSON-RPC endpoint (credential in the URL if hosted). Must support `debug_traceTransaction`, probed at startup                                |
+| `SOLANA_RPC_URL`                   | no (default devnet)            | Solana RPC endpoint (default `https://api.devnet.solana.com`)                                                                                    |
+| `SOLANA_PRIVATE_KEY`               | unless `DISABLE_SOLANA`        | Server keypair in JSON array format                                                                                                              |
+| `PROGRAM_ID`                       | unless `DISABLE_SOLANA`        | Solana program ID of the chain signatures contract                                                                                               |
+| `DISABLE_SOLANA`                   | no                             | `true` or `1` skips the entire Solana leg, for Midnight-only runs                                                                                |
+| `VERBOSE`                          | no                             | `true` enables detailed logging                                                                                                                  |
+| `BITCOIN_NETWORK`                  | no (default `testnet`)         | `regtest` (Bitcoin Core RPC) or `testnet` (mempool.space testnet4 API)                                                                           |
+| `SUBSTRATE_WS_URL`                 | no                             | Substrate node WebSocket URL, enables the Substrate (signet pallet) leg                                                                          |
+| `MIDNIGHT_NETWORK_ID`              | no (default `undeployed`)      | Midnight network id                                                                                                                              |
+| `MIDNIGHT_INDEXER_URL`             | for the Midnight leg           | Midnight indexer GraphQL URL. The Midnight leg starts only when this and `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` are both set                         |
+| `MIDNIGHT_INDEXER_WS_URL`          | no                             | Indexer GraphQL WebSocket URL, derived from `MIDNIGHT_INDEXER_URL` (http to ws) when unset                                                       |
+| `MIDNIGHT_NODE_URL`                | no (default `localhost:9944`)  | Midnight node RPC URL                                                                                                                            |
+| `MIDNIGHT_PROOF_SERVER_URL`        | no (default `localhost:6300`)  | Midnight proof server URL                                                                                                                        |
+| `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` | for the Midnight leg           | Address of the deployed central signet contract the responder polls and posts to                                                                 |
+| `MIDNIGHT_WALLET_SEED`             | no (default genesis seed)      | Seed of the Midnight wallet the responder posts responses from                                                                                   |
+| `RESPONSES_API_PORT`               | no (default `3040`)            | TCP port of the public `/responses/{requestId}` helper API                                                                                       |
 
 ### Transaction Monitoring
 
@@ -709,6 +818,45 @@ import type {
   SignatureResponse,
   ProcessedTransaction,
 } from 'fakenet-signer';
+```
+
+## Docker
+
+The server is published as a container image at `ghcr.io/sig-net/fakenet` (tagged per release plus `latest`, linux/amd64 and linux/arm64, pushed by the repository's `fakenet-v*` tag workflow). The image is based on `node:24-bookworm-slim`: a glibc base is required by the Midnight SDKs' native artifacts, and the Node version satisfies the midnight-js SDKs' Node 22 floor. Configuration comes entirely from the environment (there is no `.env` file inside the image).
+
+Run it directly:
+
+```bash
+docker run --rm \
+  -e MPC_ROOT_KEY=0x... \
+  -e EVM_RPC_URL=http://host.docker.internal:8545 \
+  -e DISABLE_SOLANA=true \
+  -e MIDNIGHT_INDEXER_URL=http://host.docker.internal:8088/api/v3/graphql \
+  -e MIDNIGHT_SIGNET_CONTRACT_ADDRESS=0200... \
+  -p 3040:3040 \
+  ghcr.io/sig-net/fakenet:latest
+```
+
+Or from a compose file:
+
+```yaml
+services:
+  fakenet:
+    image: ghcr.io/sig-net/fakenet:latest
+    environment:
+      MPC_ROOT_KEY: '0x...'
+      EVM_RPC_URL: 'http://anvil:8545'
+      DISABLE_SOLANA: 'true'
+      MIDNIGHT_INDEXER_URL: 'http://indexer:8088/api/v3/graphql'
+      MIDNIGHT_SIGNET_CONTRACT_ADDRESS: '0200...'
+    ports:
+      - '3040:3040'
+```
+
+To build locally, run from the repository root (the build needs the workspace lockfile):
+
+```bash
+docker build -f fakenet-signer/Dockerfile -t ghcr.io/sig-net/fakenet:dev .
 ```
 
 ## Publishing

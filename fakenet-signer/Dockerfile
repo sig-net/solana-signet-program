@@ -24,8 +24,8 @@ RUN yarn install --frozen-lockfile --production && yarn cache clean
 COPY fakenet-signer/ fakenet-signer/
 
 # cwd matters: the LevelDB private state is created at ./midnight-level-db
-# (fresh per container recreate — intentional, it is a single-writer store
+# (fresh per container recreate, intentional: it is a single-writer store
 # tied to the deployed contract), and EnvConfig's optional dotenv file
-# resolves to /app/.env, which is absent — config comes from the environment.
+# resolves to /app/.env, which is absent: config comes from the environment.
 WORKDIR /app/fakenet-signer
 CMD ["/app/node_modules/.bin/tsx", "src/cli/Run.ts"]

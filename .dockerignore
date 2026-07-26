@@ -5,8 +5,8 @@ node_modules
 **/midnight-level-db
 **/*.log
 **/.DS_Store
-.env
-.env.*
+**/.env
+**/.env.*
 !.env.example
 signet-program/*
 !signet-program/package.json
