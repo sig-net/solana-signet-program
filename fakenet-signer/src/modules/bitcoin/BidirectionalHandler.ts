@@ -109,9 +109,7 @@ async function handleBitcoinSigningPlan(
       outputDeserializationSchema: Buffer.from(
         event.outputDeserializationSchema
       ),
-      respondSerializationSchema: Buffer.from(
-        event.respondSerializationSchema
-      ),
+      respondSerializationSchema: Buffer.from(event.respondSerializationSchema),
       fromAddress: 'bitcoin',
       nonce: 0,
       checkCount: 0,

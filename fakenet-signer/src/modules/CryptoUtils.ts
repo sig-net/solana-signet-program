@@ -39,6 +39,19 @@ export class CryptoUtils {
     chainId: string
   ): Promise<string> {
     const epsilon = this.deriveEpsilonWithChainId(predecessor, path, chainId);
+    return this.deriveSigningKeyFromEpsilon(epsilon, basePrivateKey);
+  }
+
+  /**
+   * Child secret key from an externally derived epsilon scalar:
+   * `(root + epsilon) mod n`, 0x-hex. For callers whose epsilon scheme
+   * lives in a protocol library (e.g. the signet Midnight library's v2
+   * derivation) rather than in this class.
+   */
+  static deriveSigningKeyFromEpsilon(
+    epsilon: bigint,
+    basePrivateKey: string
+  ): string {
     const privateKeyBigInt = BigInt(basePrivateKey);
     const derivedPrivateKey =
       (privateKeyBigInt + epsilon) % BigInt(CONFIG.SECP256K1_N);

@@ -13,14 +13,14 @@
  * 2. Resolves each notification to an authenticated SignBidirectionalEvent
  *    read from the named caller's own ledger
  * 3. Builds ABI calldata + RLP transaction off-chain
- * 4. Posts the MPC's ECDSA signature to the signet contract (postSignatureResponse)
+ * 4. Posts the MPC's ECDSA signature to the signet contract (respond)
  * 5. After the EVM tx confirms, ECDSA-signs the attestation digest of
- *    (requestId, serializedOutput, outputLen) with the MPC RESPONSE key for
+ *    (requestId, serializedOutput) with the MPC RESPONSE key for
  *    the requesting contract (root key + the request's SENDER address + the
- *    fixed "midnight response key" path — the same sender-scoped derivation
+ *    fixed "midnight response key" path, the same sender-scoped derivation
  *    the real MPC uses, sig-net/mpc respond_bidirectional.rs) and posts the
- *    RespondBidirectionalEvent on-chain (postRespondBidirectional). The
- *    signet contract stores it unverified; clients verify against the
+ *    RespondBidirectionalEvent on-chain (respondBidirectional). The
+ *    signet contract stores it unverified, and clients verify against the
  *    response key they pinned via initialise after their deploy. The USER
  *    polls and calls claimDeposit().
  */
@@ -38,15 +38,15 @@ import type { SigningRequest } from './midnight/signet-request-types';
 // response key is what makes a response verify at claim time.
 import {
   bytesToHex,
-  bigintToBytes32,
   calculateSignetAttestationDigest,
   deriveMidnightResponseSecretKey,
+  ecdsaSignatureToMpcSignature,
   formatSecp256k1PublicKey,
   secp256k1PublicKeyOf,
   signAttestationDigest,
   SignetRequestFeed,
   signatureToSignatureRespondedEvent,
-  signBidirectionalEventToUnsignedEVMTransaction,
+  signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
   MPCSignatureAlgorithm,
   type ResolvedSignetRequest,
@@ -103,9 +103,11 @@ export interface SignedResponse {
   serializedOutput: string;
   /** The signed attestation digest keccak256(requestId || output), as hex. */
   attestationDigest: string;
-  /** ECDSA signature scalar r as hex (32 little-endian bytes, ledger form). */
-  r: string;
-  /** ECDSA signature scalar s as hex (32 little-endian bytes, ledger form). */
+  /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
+  bigRx: string;
+  /** Signature nonce point R.y as hex (32 big-endian bytes, ledger form). */
+  bigRy: string;
+  /** ECDSA signature scalar s as hex (32 big-endian bytes, ledger form). */
   s: string;
   /** Recovery id (parity of R.y). */
   recoveryId: number;
@@ -143,8 +145,8 @@ export interface ResponderWallet {
 
 /**
  * The joined signet contract handle — midnight-js's found-contract shape typed
- * to the generated contract, so `callTx.postSignatureResponse(...)` and
- * `callTx.postRespondBidirectional(...)` carry the real circuit signatures.
+ * to the generated contract, so `callTx.respond(...)` and
+ * `callTx.respondBidirectional(...)` carry the real circuit signatures.
  */
 type DeployedSignetContract = FoundContract<
   SignetContract<SignetContractPrivateState>
@@ -446,9 +448,8 @@ export class MidnightMonitor {
     const contract = await this.responderContract();
     return this.serializeWrite(() =>
       this.timedPost(
-        `postSignatureResponse(0x${Buffer.from(requestId).toString('hex')})`,
-        () =>
-          contract.callTx.postSignatureResponse(requestId, signatureResponse)
+        `respond(0x${Buffer.from(requestId).toString('hex')})`,
+        () => contract.callTx.respond(requestId, signatureResponse)
       )
     );
   }
@@ -467,12 +468,9 @@ export class MidnightMonitor {
     const contract = await this.responderContract();
     return this.serializeWrite(() =>
       this.timedPost(
-        `postRespondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
+        `respondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
         () =>
-          contract.callTx.postRespondBidirectional(
-            requestId,
-            respondBidirectional
-          )
+          contract.callTx.respondBidirectional(requestId, respondBidirectional)
       )
     );
   }
@@ -595,7 +593,7 @@ export class MidnightMonitor {
     // Reuse signet-midnight's canonical builder (the same package the request
     // reader comes from) rather than a vendored RLP re-implementation, so the
     // unsigned transaction is assembled exactly as clients verify it.
-    const unsignedTx = signBidirectionalEventToUnsignedEVMTransaction(
+    const unsignedTx = signBidirectionalEventToUnsignedEvmTransaction(
       request.signetRequest
     );
     return ethers.getBytes(unsignedTx.unsignedSerialized);
@@ -637,26 +635,26 @@ export class MidnightMonitor {
     // ECDSA-sign the attestation digest keccak256(requestId || output) with
     // the derived response key — the TS twin of the circuit client contracts
     // verify against (verifyRespondBidirectionalEvent), so the response
-    // verifies at claim time. Signature scalars land as 32 little-endian
-    // bytes, the ledger form.
+    // verifies at claim time. The signature lands in stored form (full R
+    // point, big-endian bytes), the ledger shape.
     const attestationDigest = calculateSignetAttestationDigest(
       requestId,
       serializedOutput
     );
     const sig = signAttestationDigest(attestationDigest, responseSecretKey);
+    const signature = ecdsaSignatureToMpcSignature(sig);
     const respondBidirectionalEvent: RespondBidirectionalEvent = {
       attestationDigest,
-      r: bigintToBytes32(sig.r),
-      s: bigintToBytes32(sig.s),
-      recoveryId: BigInt(sig.recoveryId),
+      signature,
     };
 
     const response: SignedResponse = {
       requestId: requestIdHex,
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
       attestationDigest: Buffer.from(attestationDigest).toString('hex'),
-      r: Buffer.from(respondBidirectionalEvent.r).toString('hex'),
-      s: Buffer.from(respondBidirectionalEvent.s).toString('hex'),
+      bigRx: Buffer.from(signature.bigR.x).toString('hex'),
+      bigRy: Buffer.from(signature.bigR.y).toString('hex'),
+      s: Buffer.from(signature.s).toString('hex'),
       recoveryId: sig.recoveryId,
     };
 

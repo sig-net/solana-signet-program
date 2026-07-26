@@ -44,12 +44,10 @@ export class EthereumMonitor {
         }
 
         try {
-          const output = await this.extractTransactionOutput(
+          const { output, rawOutput } = await this.extractTransactionOutput(
             tx,
-            receipt,
             provider,
-            outputDeserializationSchema,
-            fromAddress
+            outputDeserializationSchema
           );
           console.log(
             `✅ EthereumMonitor: tx ${txHash} confirmed (block=${receipt.blockNumber})`
@@ -66,6 +64,7 @@ export class EthereumMonitor {
             status: 'success',
             success: output.success,
             output: output.output,
+            rawOutput,
           };
         } catch (error) {
           // On extraction failure the MPC emits no event and the execution
@@ -131,16 +130,46 @@ export class EthereumMonitor {
     return provider;
   }
 
+  /**
+   * The top call frame of the mined transaction, read with the SAME RPC
+   * method the real MPC uses (debug_traceTransaction with the callTracer,
+   * top call only — github.com/sig-net/mpc
+   * chain-signatures/chain-ethereum/src/indexer.rs). The frame's `output`
+   * is the call's actual return data as mined (absent for a plain
+   * transfer).
+   */
+  private static async traceTopCallOutput(
+    txHash: string,
+    provider: ethers.JsonRpcProvider
+  ): Promise<string> {
+    const callFrame = (await provider.send('debug_traceTransaction', [
+      txHash,
+      {
+        tracer: 'callTracer',
+        tracerConfig: {
+          onlyTopCall: true,
+        },
+        timeout: '5s',
+      },
+    ])) as { output?: string };
+    return callFrame?.output ?? '0x';
+  }
+
   private static async extractTransactionOutput(
     tx: ethers.TransactionResponse,
-    receipt: ethers.TransactionReceipt,
     provider: ethers.JsonRpcProvider,
-    outputDeserializationSchema: Buffer | number[],
-    fromAddress: string
-  ): Promise<TransactionOutput> {
+    outputDeserializationSchema: Buffer | number[]
+  ): Promise<{ output: TransactionOutput; rawOutput: string }> {
     // Contract call = calldata longer than 2 bytes, matching is_contract_call
     // in github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/event_parsing.rs:19
     const isContractCall = ethers.dataLength(tx.data) > 2;
+
+    // Checkpoint 1 (pre-deserialisation): 'rawOutput' must match the raw
+    // 'trace_output' bytes in
+    // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/indexer.rs:280.
+    // Same method as the MPC (debug_traceTransaction, callTracer, top call
+    // only), so this is the mined call's ACTUAL return data.
+    const rawOutput = await this.traceTopCallOutput(tx.hash, provider);
 
     // This is the Ethereum monitor, so the output deserialisation format is
     // always ABI: the MPC hardcodes it as OUTPUT_DESERIALIZATION_FORMAT in
@@ -148,38 +177,26 @@ export class EthereumMonitor {
     // and its decode gate is `SerDeserFormat::Abi if is_contract_call`
     // (respond_bidirectional.rs:122), which reduces to just is_contract_call.
     if (isContractCall) {
-      const callResult = await provider.call({
-        to: tx.to,
-        data: tx.data,
-        from: fromAddress,
-        blockTag: receipt.blockNumber - 1,
-      });
-
-      // Checkpoint 1 (pre-deserialisation): 'callResult' must match the raw
-      // 'trace_output' bytes in
-      // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/indexer.rs:280.
-      // Caveat: the MPC reads the mined tx's actual return data via
-      // debug_traceTransaction, while we re-simulate via eth_call against the
-      // previous block's state, so the two can diverge when earlier txs in
-      // the same block change state the call depends on.
-
       // Schema-driven ABI decode via the signet library (mirrors the MPC's
       // delegation to alloy). Accepts the raw NUL-padded on-chain schema
       // bytes and throws on an empty/malformed schema, which the caller
       // reports as pending so the poll loop retries.
       const decodedOutput = deserializeEvmOutput(
         Uint8Array.from(outputDeserializationSchema),
-        callResult
+        rawOutput
       );
 
-      return { success: true, output: decodedOutput };
+      return { output: { success: true, output: decodedOutput }, rawOutput };
     } else {
       return {
-        success: true,
         output: {
           success: true,
-          isFunctionCall: false,
+          output: {
+            success: true,
+            isFunctionCall: false,
+          },
         },
+        rawOutput,
       };
     }
   }
