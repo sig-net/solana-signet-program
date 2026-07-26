@@ -333,8 +333,8 @@ export class MidnightMonitor {
 
   /**
    * The joined signet contract, built on first access and memoized (depends on
-   * {@link responderWallet}). Its `callTx.postSignatureResponse` /
-   * `callTx.postRespondBidirectional` are the responder's on-chain write paths.
+   * {@link responderWallet}). Its `callTx.respond` /
+   * `callTx.respondBidirectional` are the responder's on-chain write paths.
    */
   async responderContract(): Promise<DeployedSignetContract> {
     if (!this.responderContractPromise) {

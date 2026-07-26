@@ -1508,21 +1508,29 @@
     "@noble/curves" "~1.9.2"
     "@noble/hashes" "~1.8.0"
 
-"@sig-net/midnight-contract@link:../midnight-integration/packages/signet-contract":
-  version "0.0.0"
-  uid ""
+"@sig-net/midnight-contract@0.12.0":
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.12.0.tgz#8510a03e6dcaae32a4e7bcbbdfe12404f4876a3c"
+  integrity sha512-RarXpSijgVa60v0KXsV0p/AAubzsMx3IN+C3FGZygMBJyhz0Pp4B3dUYk1Q1LHgBiDliEQFQyX1hfx+elZ2nmg==
+  dependencies:
+    "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
+    "@midnight-ntwrk/midnight-js" "5.0.0-beta.4"
 
-"@sig-net/midnight-serde@*":
-  version "0.0.0"
-  uid ""
+"@sig-net/midnight-serde@^0.12.0":
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-serde/-/midnight-serde-0.12.0.tgz#57ed3a22ce4346b5ad8cf72d04cfd155b22624db"
+  integrity sha512-O6gcghie7AKOD2hj3emdmQbF2czQMIisXfzL94/lp2kFaRtXoTzfCXTuso5OcPnsrC3UNNsLY2IEoCycyrX/Gw==
 
-"@sig-net/midnight-serde@link:../midnight-integration/packages/midnight-serde":
-  version "0.0.0"
-  uid ""
-
-"@sig-net/midnight@link:../midnight-integration/packages/signet-midnight":
-  version "0.0.0"
-  uid ""
+"@sig-net/midnight@0.12.0":
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.12.0.tgz#a4eefbfe9f32d51e28f5c6b85a556dc5b8188689"
+  integrity sha512-lUKTgkZ8J3gFkQScxtX0UIwgxsDG93W/df2UlfvmMnBkTVZlA5AddDBqhcV3UOMm01pZRtIAaCkSbD6sxOQnJA==
+  dependencies:
+    "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
+    "@midnight-ntwrk/midnight-js-types" "5.0.0-beta.4"
+    "@noble/curves" "^2.2.0"
+    "@sig-net/midnight-serde" "^0.12.0"
+    ethers "^6.17.0"
 
 "@solana/buffer-layout@^4.0.1":
   version "4.0.1"
