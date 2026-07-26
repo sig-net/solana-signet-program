@@ -205,14 +205,6 @@ export interface BorshSchema {
 // (serializeRespondOutput) come from @sig-net/midnight's abi-serde, backed
 // by @sig-net/midnight-serde.
 
-// Midnight schema field — extends ABI field with size hints for dynamic types
-export interface MidnightSchemaField {
-  name: string;
-  type: string;
-  maxBytes?: number;
-  maxItems?: number;
-}
-
 // Serialization output types
 export type SerializableValue =
   | string

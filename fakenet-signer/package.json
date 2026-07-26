@@ -95,7 +95,6 @@
     "@sig-net/midnight-contract": "link:../../midnight-integration/packages/signet-contract"
   },
   "devDependencies": {
-    "tsdown": "^0.15.6",
-    "vitest": "^4.1.8"
+    "tsdown": "^0.15.6"
   }
 }
