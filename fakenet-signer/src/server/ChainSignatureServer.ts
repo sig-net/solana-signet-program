@@ -2,6 +2,7 @@ import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Connection } from '@solana/web3.js';
 import BN from 'bn.js';
+import { ethers } from 'ethers';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
@@ -9,6 +10,7 @@ import type {
   TransactionOutput,
   ServerConfig,
   CpiEventData,
+  SignatureResponse,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
 import { serverConfigSchema } from '../types';
@@ -33,6 +35,11 @@ import {
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
+import {
+  SubstrateBidirectionalRequest,
+  SubstrateMonitor,
+  SubstrateSignatureRequest,
+} from '../modules/SubstrateMonitor';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -48,14 +55,16 @@ const WS_RECONNECT_COOLDOWN_MS = 30_000;
 const BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY = 6;
 
 export class ChainSignatureServer {
-  private connection: Connection;
-  private wallet: anchor.Wallet;
-  private provider: anchor.AnchorProvider;
-  private program: ChainSignaturesProgram;
+  // Null when config.disableSolana — the Solana leg is never constructed.
+  private connection: Connection | null = null;
+  private wallet: anchor.Wallet | null = null;
+  private provider: anchor.AnchorProvider | null = null;
+  private program: ChainSignaturesProgram | null = null;
   private pollCounter = 0;
   private cpiSubscriptionId: number | null = null;
   private config: ServerConfig;
   private monitorIntervalId: NodeJS.Timeout | null = null;
+  private monitoring = false; // re-entrancy guard for the transaction monitor tick
   private backfillIntervalId: NodeJS.Timeout | null = null;
   private wsHealthCheckIntervalId: NodeJS.Timeout | null = null;
   private processedSignatures = new Set<string>();
@@ -73,6 +82,7 @@ export class ChainSignatureServer {
   private currentBackfillBatchSize: number;
   private backfillCycleCounter = 0;
   private lastBackfillSignature: string | undefined;
+  private substrateMonitor: SubstrateMonitor | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -101,8 +111,19 @@ export class ChainSignatureServer {
       this.resolveReady = resolve;
     });
 
+    if (!this.config.disableSolana) {
+      this.setupSolana();
+    }
+
+    if (this.config.substrateWsUrl) {
+      this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
+    }
+  }
+
+  private setupSolana() {
+    // Presence is enforced by serverConfigSchema when disableSolana is unset.
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
-      new Uint8Array(JSON.parse(this.config.solanaPrivateKey))
+      new Uint8Array(JSON.parse(this.config.solanaPrivateKey!))
     );
 
     this.connection = new Connection(this.config.solanaRpcUrl, {
@@ -134,20 +155,47 @@ export class ChainSignatureServer {
     anchor.setProvider(this.provider);
 
     const idl = ChainSignaturesIDL as anchor.Idl;
-    idl.address = this.config.programId;
+    idl.address = this.config.programId!;
     this.program = asChainSignaturesProgram(new Program(idl, this.provider));
+  }
+
+  /** Solana members, guaranteed non-null. Throws on Solana-sourced code paths when DISABLE_SOLANA is set. */
+  private requireSolana() {
+    if (!this.connection || !this.wallet || !this.program) {
+      throw new Error(
+        'Solana is disabled (DISABLE_SOLANA) — a Solana-sourced code path was reached unexpectedly'
+      );
+    }
+    return {
+      connection: this.connection,
+      wallet: this.wallet,
+      program: this.program,
+    };
   }
 
   async start() {
     console.log('🚀 Response Server');
-    console.log(`Wallet: ${this.wallet.publicKey.toString()}`);
-    console.log(`Program: ${this.program.programId.toString()}`);
+    if (this.config.disableSolana) {
+      console.log('Solana: disabled (DISABLE_SOLANA)');
+    } else {
+      const { wallet, program } = this.requireSolana();
+      console.log(`Wallet: ${wallet.publicKey.toString()}`);
+      console.log(`Program: ${program.programId.toString()}`);
 
-    await this.ensureInitialized();
+      await this.ensureInitialized();
+    }
 
+    if (this.substrateMonitor) {
+      await this.connectToSubstrate();
+    }
+
+    // Chain-agnostic: tracks pending destination-chain txs (EVM/Bitcoin) for
+    // Midnight/Substrate sources too — must run even with Solana disabled.
     this.startTransactionMonitor();
-    this.setupEventListeners();
-    this.startBackfillMonitor();
+    if (!this.config.disableSolana) {
+      this.setupEventListeners();
+      this.startBackfillMonitor();
+    }
 
     // Resolve readiness so callers can await server.waitUntilReady()
     this.resolveReady?.();
@@ -177,16 +225,70 @@ export class ChainSignatureServer {
     });
   }
 
+  private async connectToSubstrate() {
+    if (!this.substrateMonitor) return;
+
+    try {
+      await this.substrateMonitor.connect();
+      console.log('✅ Connected to Substrate node');
+
+      await this.substrateMonitor.subscribeToEvents({
+        onSignatureRequested: async (event: SubstrateSignatureRequest) => {
+          console.log(
+            { sender: event.sender },
+            '📝 Substrate SignatureRequested'
+          );
+          try {
+            await this.handleSubstrateSignatureRequest(event);
+          } catch (error) {
+            console.log(
+              { error },
+              'Error processing Substrate signature request'
+            );
+          }
+        },
+
+        onSignBidirectional: async (event: SubstrateBidirectionalRequest) => {
+          console.log(
+            { sender: event.sender, caip2Id: event.caip2Id },
+            '📨 Substrate SignBidirectionalRequested'
+          );
+          try {
+            await this.handleSubstrateBidirectional(event);
+          } catch (error) {
+            console.log(
+              { error },
+              'Error processing Substrate bidirectional request'
+            );
+          }
+        },
+
+        onRespondBidirectional: async (event: {
+          requestId?: unknown;
+          responder?: unknown;
+        }) => {
+          console.log(
+            { requestId: event.requestId, responder: event.responder },
+            '📖 Substrate RespondBidirectionalEvent'
+          );
+        },
+      });
+    } catch (error) {
+      console.log({ error }, 'Failed to connect to Substrate');
+    }
+  }
+
   private async ensureInitialized() {
+    const { connection, wallet, program } = this.requireSolana();
     const [programStatePda] = anchor.web3.PublicKey.findProgramAddressSync(
       [Buffer.from('program-state')],
-      this.program.programId
+      program.programId
     );
 
     try {
       this.log(`🔗 Solana RPC: getAccountInfo for program state PDA...`);
       const accountInfo = await this.withTimeout(
-        this.connection.getAccountInfo(programStatePda),
+        connection.getAccountInfo(programStatePda),
         'getAccountInfo'
       );
       this.log(`✓ Solana RPC: getAccountInfo done (exists=${!!accountInfo})`);
@@ -211,10 +313,10 @@ export class ChainSignatureServer {
     try {
       this.log(`🔗 Solana RPC: program.initialize()...`);
       await this.withTimeout(
-        this.program.methods
+        program.methods
           .initialize(new BN(signatureDeposit), chainId)
           .accounts({
-            admin: this.wallet.publicKey,
+            admin: wallet.publicKey,
           })
           .rpc(),
         'program.initialize()'
@@ -242,112 +344,130 @@ export class ChainSignatureServer {
       `⏱️ Starting transaction monitor (interval=${CONFIG.POLL_INTERVAL_MS}ms)`
     );
     this.monitorIntervalId = setInterval(async () => {
-      this.pollCounter++;
-
-      if (pendingTransactions.size === 0) {
-        return;
-      }
-
-      this.log(
-        `📊 Transaction monitor poll #${this.pollCounter} (pending=${pendingTransactions.size})`
-      );
-
-      for (const [txHash, txInfo] of pendingTransactions.entries()) {
-        if (txInfo.checkCount > 0) {
-          let skipFactor = 1;
-
-          if (txInfo.namespace === 'bip122') {
-            if (txInfo.checkCount > 10) skipFactor = 12;
-            else if (txInfo.checkCount > 5) skipFactor = 6;
-            else skipFactor = 2;
-          } else {
-            if (txInfo.checkCount > 20) skipFactor = 12;
-            else if (txInfo.checkCount > 10) skipFactor = 6;
-            else if (txInfo.checkCount > 5) skipFactor = 2;
-          }
-
-          if (this.pollCounter % skipFactor !== 0) {
-            continue;
-          }
-        }
-
-        try {
-          this.log(
-            `  🔍 Checking ${txInfo.namespace} tx: ${txHash} (attempt #${txInfo.checkCount + 1})`
-          );
-          const result =
-            txInfo.namespace === 'bip122'
-              ? await BitcoinMonitor.waitForTransactionAndGetOutput(
-                  txHash,
-                  txInfo.prevouts,
-                  this.config
-                )
-              : await EthereumMonitor.waitForTransactionAndGetOutput(
-                  txHash,
-                  txInfo.caip2Id,
-                  txInfo.explorerDeserializationSchema,
-                  txInfo.fromAddress,
-                  txInfo.nonce,
-                  this.config
-                );
-          this.log(`  📋 Result for ${txHash}: ${result.status}`);
-
-          txInfo.checkCount++;
-
-          switch (result.status) {
-            case 'pending':
-              break;
-
-            case 'success': {
-              const done = await this.executeWithRecovery(
-                txHash,
-                txInfo,
-                () =>
-                  this.handleCompletedTransaction(txHash, txInfo, {
-                    success: result.success,
-                    output: result.output,
-                  }),
-                'handleCompletedTransaction',
-                true
-              );
-              if (done) pendingTransactions.delete(txHash);
-              break;
-            }
-
-            case 'error': {
-              // Reverted/replaced — send signed error back to Solana
-              const done = await this.executeWithRecovery(
-                txHash,
-                txInfo,
-                () => this.handleFailedTransaction(txHash, txInfo),
-                'handleFailedTransaction',
-                false // circular — can't send error response for a failed error response
-              );
-              if (done) pendingTransactions.delete(txHash);
-              break;
-            }
-
-            case 'fatal_error':
-              console.error(
-                `Fatal error for transaction ${txHash}: ${result.reason}`
-              );
-              await this.sendErrorResponse(txHash, txInfo);
-              pendingTransactions.delete(txHash);
-              break;
-          }
-        } catch (error) {
-          txInfo.checkCount++;
-          const done = await this.executeWithRecovery(
-            txHash,
-            txInfo,
-            () => Promise.reject(error),
-            'monitorPoll',
-            true
-          );
-          if (done) pendingTransactions.delete(txHash);
-        }
+      // Non-re-entrant: handling a confirmed tx posts a response on-chain,
+      // which can take far longer than the poll interval (e.g. a Midnight
+      // attestation proof + submit). Without this guard, overlapping ticks
+      // re-check the same still-in-flight tx every interval — flooding the log
+      // with duplicate output and wasting RPC calls. Skip a tick while the
+      // previous one is still running (same reason MidnightMonitor.start does).
+      if (this.monitoring) return;
+      this.monitoring = true;
+      try {
+        await this.runTransactionMonitorTick();
+      } catch (error) {
+        console.error('Transaction monitor tick error:', error);
+      } finally {
+        this.monitoring = false;
       }
     }, CONFIG.POLL_INTERVAL_MS);
+  }
+
+  private async runTransactionMonitorTick(): Promise<void> {
+    this.pollCounter++;
+
+    if (pendingTransactions.size === 0) {
+      return;
+    }
+
+    this.log(
+      `📊 Transaction monitor poll #${this.pollCounter} (pending=${pendingTransactions.size})`
+    );
+
+    for (const [txHash, txInfo] of pendingTransactions.entries()) {
+      if (txInfo.checkCount > 0) {
+        let skipFactor = 1;
+
+        if (txInfo.namespace === 'bip122') {
+          if (txInfo.checkCount > 10) skipFactor = 12;
+          else if (txInfo.checkCount > 5) skipFactor = 6;
+          else skipFactor = 2;
+        } else {
+          if (txInfo.checkCount > 20) skipFactor = 12;
+          else if (txInfo.checkCount > 10) skipFactor = 6;
+          else if (txInfo.checkCount > 5) skipFactor = 2;
+        }
+
+        if (this.pollCounter % skipFactor !== 0) {
+          continue;
+        }
+      }
+
+      try {
+        this.log(
+          `  🔍 Checking ${txInfo.namespace} tx: ${txHash} (attempt #${txInfo.checkCount + 1})`
+        );
+        const result =
+          txInfo.namespace === 'bip122'
+            ? await BitcoinMonitor.waitForTransactionAndGetOutput(
+                txHash,
+                txInfo.prevouts,
+                this.config
+              )
+            : await EthereumMonitor.waitForTransactionAndGetOutput(
+                txHash,
+                txInfo.caip2Id,
+                txInfo.explorerDeserializationSchema,
+                txInfo.fromAddress,
+                txInfo.nonce,
+                this.config
+              );
+        this.log(`  📋 Result for ${txHash}: ${result.status}`);
+
+        txInfo.checkCount++;
+
+        switch (result.status) {
+          case 'pending':
+            break;
+
+          case 'success': {
+            const done = await this.executeWithRecovery(
+              txHash,
+              txInfo,
+              () =>
+                this.handleCompletedTransaction(txHash, txInfo, {
+                  success: result.success,
+                  output: result.output,
+                }),
+              'handleCompletedTransaction',
+              true
+            );
+            if (done) pendingTransactions.delete(txHash);
+            break;
+          }
+
+          case 'error': {
+            // Reverted/replaced — send signed error back to the source chain
+            const done = await this.executeWithRecovery(
+              txHash,
+              txInfo,
+              () => this.handleFailedTransaction(txHash, txInfo),
+              'handleFailedTransaction',
+              false // circular — can't send error response for a failed error response
+            );
+            if (done) pendingTransactions.delete(txHash);
+            break;
+          }
+
+          case 'fatal_error':
+            console.error(
+              `Fatal error for transaction ${txHash}: ${result.reason}`
+            );
+            await this.sendErrorResponse(txHash, txInfo);
+            pendingTransactions.delete(txHash);
+            break;
+        }
+      } catch (error) {
+        txInfo.checkCount++;
+        const done = await this.executeWithRecovery(
+          txHash,
+          txInfo,
+          () => Promise.reject(error),
+          'monitorPoll',
+          true
+        );
+        if (done) pendingTransactions.delete(txHash);
+      }
+    }
   }
 
   private async handleCompletedTransaction(
@@ -361,17 +481,18 @@ export class ChainSignatureServer {
     if (!requestId) {
       throw new Error(`Missing request ID for tx ${txHash}`);
     }
+    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
+
     this.log(`🔗 OutputSerializer: serialize...`);
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
-      SerializationFormat.Borsh, // Server only respond to Solana for now
+      SerializationFormat.Borsh,
       txInfo.callbackSerializationSchema
     );
     this.log(
       `✓ OutputSerializer: serialize done (${serializedOutput.length} bytes)`
     );
 
-    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
     this.log(`🔗 CryptoUtils: signBidirectionalResponse...`);
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
@@ -381,16 +502,27 @@ export class ChainSignatureServer {
     );
     this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
+    if (txInfo.source === 'polkadot' && this.substrateMonitor) {
+      await this.substrateMonitor.sendRespondBidirectional(
+        requestIdBytes,
+        serializedOutput,
+        signature
+      );
+      console.log('✅ Response sent to Substrate');
+      return;
+    }
+
+    const { wallet, program } = this.requireSolana();
     this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
     await this.withTimeout(
-      this.program.methods
+      program.methods
         .respondBidirectional(
           Array.from(requestIdBytes),
           Buffer.from(serializedOutput),
           signature
         )
         .accounts({
-          responder: this.wallet.publicKey,
+          responder: wallet.publicKey,
         })
         .rpc(),
       `respondBidirectional(${txHash})`
@@ -404,6 +536,12 @@ export class ChainSignatureServer {
   ) {
     console.warn(`❌ Transaction failed: ${txHash}`);
 
+    const requestId = txInfo.requestId;
+    if (!requestId) {
+      throw new Error(`Missing request ID for tx ${txHash}`);
+    }
+    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
+
     const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
     const errorSchema = { struct: { error: 'bool' } };
@@ -412,11 +550,6 @@ export class ChainSignatureServer {
 
     const serializedOutput = new Uint8Array(errorData);
 
-    const requestId = txInfo.requestId;
-    if (!requestId) {
-      throw new Error(`Missing request ID for tx ${txHash}`);
-    }
-    const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
     this.log(`🔗 CryptoUtils: signBidirectionalResponse (error response)...`);
     const signature = await CryptoUtils.signBidirectionalResponse(
       requestIdBytes,
@@ -426,16 +559,27 @@ export class ChainSignatureServer {
     );
     this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
+    if (txInfo.source === 'polkadot' && this.substrateMonitor) {
+      await this.substrateMonitor.sendRespondBidirectional(
+        requestIdBytes,
+        serializedOutput,
+        signature
+      );
+      console.log('✅ Error response sent to Substrate');
+      return;
+    }
+
+    const { wallet, program } = this.requireSolana();
     this.log(`🔗 Solana RPC: respondBidirectional() error for ${txHash}...`);
     await this.withTimeout(
-      this.program.methods
+      program.methods
         .respondBidirectional(
           Array.from(requestIdBytes),
           Buffer.from(serializedOutput),
           signature
         )
         .accounts({
-          responder: this.wallet.publicKey,
+          responder: wallet.publicKey,
         })
         .rpc(),
       `respondBidirectional-error(${txHash})`
@@ -480,8 +624,9 @@ export class ChainSignatureServer {
   }
 
   private subscribeToLogs() {
-    this.cpiSubscriptionId = this.connection.onLogs(
-      this.program.programId,
+    const { connection, program } = this.requireSolana();
+    this.cpiSubscriptionId = connection.onLogs(
+      program.programId,
       async (logs, context) => {
         this.lastWebSocketEventTime = Date.now();
 
@@ -524,10 +669,11 @@ export class ChainSignatureServer {
   }
 
   private async reconnectWebSocket() {
+    const { connection } = this.requireSolana();
     if (this.cpiSubscriptionId !== null) {
       try {
         await this.withTimeout(
-          this.connection.removeOnLogsListener(this.cpiSubscriptionId),
+          connection.removeOnLogsListener(this.cpiSubscriptionId),
           'removeOnLogsListener',
           5_000
         );
@@ -562,12 +708,13 @@ export class ChainSignatureServer {
     slot: number
   ): Promise<void> {
     this.log(`🔎 Processing transaction: ${signature} (slot=${slot})`);
+    const { connection, program } = this.requireSolana();
     const events = await this.withTimeout(
       CpiEventParser.parseCpiEvents(
-        this.connection,
+        connection,
         signature,
-        this.program.programId.toString(),
-        this.program
+        program.programId.toString(),
+        program
       ),
       'parseCpiEvents'
     );
@@ -592,6 +739,7 @@ export class ChainSignatureServer {
   }
 
   private startBackfillMonitor() {
+    const { connection, program } = this.requireSolana();
     console.log(
       `🔄 Starting backfill monitor (interval=${BACKFILL_INTERVAL_MS}ms, batch=${this.backfillBatchSize}, max=${this.backfillMaxBatchSize})`
     );
@@ -617,8 +765,8 @@ export class ChainSignatureServer {
       );
       try {
         const signatures = await this.withTimeout(
-          this.connection.getSignaturesForAddress(
-            this.program.programId,
+          connection.getSignaturesForAddress(
+            program.programId,
             {
               ...(this.lastBackfillSignature
                 ? { until: this.lastBackfillSignature }
@@ -851,12 +999,13 @@ export class ChainSignatureServer {
     this.log(`✓ CryptoUtils: signMessage done`);
 
     const requestIdBytes = Array.from(Buffer.from(requestId.slice(2), 'hex'));
+    const { wallet, program } = this.requireSolana();
     this.log(`🔗 Solana RPC: respond()...`);
     const tx = await this.withTimeout(
-      this.program.methods
+      program.methods
         .respond([requestIdBytes], [signature])
         .accounts({
-          responder: this.wallet.publicKey,
+          responder: wallet.publicKey,
         })
         .rpc(),
       'respond()'
@@ -865,13 +1014,162 @@ export class ChainSignatureServer {
   }
 
   private getBidirectionalContext(): BidirectionalHandlerContext {
+    const { wallet, program } = this.requireSolana();
     return {
-      program: this.program,
-      wallet: this.wallet,
+      sendSignatures: async (
+        requestIds: Uint8Array[],
+        signatures: SignatureResponse[],
+        label: string
+      ) => {
+        const requestIdArrays = requestIds.map((id) => Array.from(id));
+        return this.withTimeout(
+          program.methods
+            .respond(requestIdArrays, signatures)
+            .accounts({
+              responder: wallet.publicKey,
+            })
+            .rpc(),
+          label
+        );
+      },
       config: this.config,
       pendingTransactions,
-      withTimeout: this.withTimeout.bind(this),
+      source: 'solana',
     };
+  }
+
+  private getSubstrateBidirectionalContext(): BidirectionalHandlerContext {
+    const substrateMonitor = this.substrateMonitor;
+    if (!substrateMonitor) {
+      throw new Error('Substrate monitor not configured');
+    }
+    return {
+      sendSignatures: async (
+        requestIds: Uint8Array[],
+        signatures: SignatureResponse[],
+        label: string
+      ) => {
+        for (let i = 0; i < requestIds.length; i++) {
+          const requestId = requestIds[i];
+          const signature = signatures[i];
+          if (!requestId || !signature) continue;
+          await this.withTimeout(
+            substrateMonitor.sendSignatureResponse(requestId, signature),
+            `${label}-substrate-${i}`
+          );
+        }
+        return undefined;
+      },
+      config: this.config,
+      pendingTransactions,
+      source: 'polkadot',
+    };
+  }
+
+  private async handleSubstrateSignatureRequest(
+    event: SubstrateSignatureRequest
+  ) {
+    const substrateMonitor = this.substrateMonitor;
+    if (!substrateMonitor) {
+      throw new Error('Substrate monitor not configured');
+    }
+    const path = Buffer.from(event.path.slice(2), 'hex').toString();
+    const algo = Buffer.from(event.algo.slice(2), 'hex').toString();
+    const dest =
+      event.dest === '0x'
+        ? ''
+        : Buffer.from(event.dest.slice(2), 'hex').toString();
+    const params = Buffer.from(event.params.slice(2), 'hex').toString();
+    const chainId = Buffer.from(event.chainId.slice(2), 'hex').toString();
+
+    console.log({ path, algo, chainId, params: params || '(empty)' });
+
+    const requestId = getRequestIdRespond({
+      address: event.sender,
+      payload: Array.from(event.payload),
+      path,
+      keyVersion: event.keyVersion,
+      chainId,
+      algo,
+      dest,
+      params,
+    });
+
+    console.log({ requestId }, '🔑 Request ID');
+
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      path,
+      event.sender,
+      this.config.mpcRootKey,
+      'polkadot:2034'
+    );
+
+    const signature = await CryptoUtils.signMessage(
+      Array.from(event.payload), // Convert Uint8Array to number[]
+      derivedPrivateKey
+    );
+
+    await substrateMonitor.sendSignatureResponse(
+      Buffer.from(requestId.slice(2), 'hex'),
+      signature
+    );
+
+    console.log('✅ Signature sent to Substrate');
+  }
+
+  private async handleSubstrateBidirectional(
+    event: SubstrateBidirectionalRequest
+  ) {
+    const path = Buffer.from(event.path.slice(2), 'hex').toString();
+    const algo = Buffer.from(event.algo.slice(2), 'hex').toString();
+    const dest =
+      event.dest === '0x'
+        ? ''
+        : Buffer.from(event.dest.slice(2), 'hex').toString();
+    const params = Buffer.from(event.params.slice(2), 'hex').toString();
+
+    const namespace = getNamespaceFromCaip2(event.caip2Id);
+
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      path,
+      event.sender,
+      this.config.mpcRootKey,
+      'polkadot:2034'
+    );
+
+    // Convert to SignBidirectionalEvent format
+    const normalizedEvent: SignBidirectionalEvent = {
+      sender: event.sender,
+      serializedTransaction: event.serializedTransaction,
+      caip2Id: event.caip2Id,
+      keyVersion: event.keyVersion,
+      path,
+      algo,
+      dest,
+      params,
+      outputDeserializationSchema: event.outputDeserializationSchema,
+      respondSerializationSchema: event.respondSerializationSchema,
+    };
+
+    if (namespace === 'bip122') {
+      await handleBitcoinBidirectional(
+        normalizedEvent,
+        this.getSubstrateBidirectionalContext(),
+        derivedPrivateKey
+      );
+      return;
+    }
+
+    if (namespace === 'eip155') {
+      await handleEthereumBidirectional(
+        normalizedEvent,
+        this.getSubstrateBidirectionalContext(),
+        derivedPrivateKey
+      );
+      return;
+    }
+
+    throw new Error(`Unsupported namespace: ${namespace}`);
   }
 
   /**
@@ -907,11 +1205,15 @@ export class ChainSignatureServer {
       clearInterval(this.wsHealthCheckIntervalId);
       this.wsHealthCheckIntervalId = null;
     }
-    if (this.cpiSubscriptionId !== null) {
+    if (this.cpiSubscriptionId !== null && this.connection) {
       this.log(`🔗 Solana RPC: removeOnLogsListener...`);
       await this.connection.removeOnLogsListener(this.cpiSubscriptionId);
       this.log(`✓ Solana RPC: removeOnLogsListener done`);
       this.cpiSubscriptionId = null;
+    }
+    if (this.substrateMonitor) {
+      await this.substrateMonitor.disconnect();
+      this.substrateMonitor = null;
     }
   }
 }

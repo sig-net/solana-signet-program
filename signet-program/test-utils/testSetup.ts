@@ -40,7 +40,7 @@ export function testSetup() {
     solanaRpcUrl: provider.connection.rpcEndpoint,
     solanaPrivateKey: testEnvConfig.SOLANA_PRIVATE_KEY,
     mpcRootKey: testEnvConfig.MPC_ROOT_KEY,
-    infuraApiKey: testEnvConfig.INFURA_API_KEY,
+    evmRpcUrl: testEnvConfig.EVM_RPC_URL,
     programId: program.programId.toString(),
     isDevnet: provider.connection.rpcEndpoint.includes('devnet'),
     signatureDeposit: '100000',

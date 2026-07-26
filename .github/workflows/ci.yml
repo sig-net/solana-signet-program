@@ -19,7 +19,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
       MPC_ROOT_KEY: ${{ secrets.MPC_ROOT_KEY }}
-      INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
+      EVM_RPC_URL: https://sepolia.infura.io/v3/${{ secrets.INFURA_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
