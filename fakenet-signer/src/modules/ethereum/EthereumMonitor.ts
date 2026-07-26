@@ -22,14 +22,18 @@ export class EthereumMonitor {
   /**
    * Probe the configured EVM RPC for debug_traceTransaction (callTracer)
    * support at startup. Output extraction reads the mined call's return data
-   * through it (the same method the real MPC uses), and many hosted RPC
-   * plans do not expose the debug namespace, so fail loudly up front rather
-   * than at the first confirmed transaction.
+   * through it (the same method the real MPC uses) and every bidirectional
+   * response depends on that extraction, so a responder without it is
+   * misconfigured: fail loudly up front rather than at the first confirmed
+   * transaction. Many hosted RPC plans do not expose the debug namespace,
+   * point EVM_RPC_URL at a dev node (anvil/geth/reth) or a plan with trace
+   * methods.
    *
    * The probe traces a well-formed but nonexistent transaction hash: an RPC
    * that SUPPORTS the method answers with a transaction-not-found style
    * error, while one that lacks it answers "method not found" (JSON-RPC
-   * -32601) or similar. Only the latter is a failure.
+   * -32601) or similar. Only the latter is a failure, so a transient network
+   * error or a still-starting node never trips it.
    */
   static async assertDebugTraceSupport(config: ServerConfig): Promise<void> {
     const probeTxHash = `0x${'11'.repeat(32)}`;
