@@ -8,6 +8,9 @@ import type {
   SignatureRequestedEvent,
   PendingTransaction,
   TransactionOutput,
+  TransactionOutputData,
+  BorshSchema,
+  SerializableValue,
   ServerConfig,
   CpiEventData,
   SignatureResponse,
@@ -25,13 +28,20 @@ import { contracts } from 'signet.js';
 const { getRequestIdRespond } = contracts.solana;
 import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
 import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
-import { OutputSerializer } from '../modules/OutputSerializer';
+// The Midnight respond payload encoding comes from the signet protocol
+// library (abi-serde, backed by @sig-net/midnight-serde): the exact
+// schema-driven packed bytes clients recompute at claim time.
+import {
+  deriveEpsilon,
+  MIDNIGHT_TESTNET_CHAIN_ID,
+  MPC_FAILURE_OUTPUT,
+  serializeRespondOutput,
+  type AbiDecodedOutput,
+} from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
-import {
-  SerializationFormat,
-  getNamespaceFromCaip2,
-} from '../modules/ChainUtils';
+import type { Schema } from 'borsh';
+import { getNamespaceFromCaip2 } from '../modules/ChainUtils';
 import { handleBitcoinBidirectional } from '../modules/bitcoin/BidirectionalHandler';
 import { handleEthereumBidirectional } from '../modules/ethereum/BidirectionalHandler';
 import type { BidirectionalHandlerContext } from '../modules/shared/BidirectionalContext';
@@ -44,6 +54,8 @@ import {
   MidnightMonitor,
   type MidnightSigningRequest,
 } from '../modules/MidnightMonitor';
+import { ResponseCache, startResponsesApi } from './ResponsesApi';
+import type http from 'node:http';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -88,6 +100,10 @@ export class ChainSignatureServer {
   private lastBackfillSignature: string | undefined;
   private substrateMonitor: SubstrateMonitor | null = null;
   private midnightMonitor: MidnightMonitor | null = null;
+  // Observed remote-execution outputs by request id, served over the public
+  // /responses/{requestId} helper API (see ResponsesApi.ts).
+  private responseCache = new ResponseCache();
+  private responsesApiServer: http.Server | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -128,8 +144,14 @@ export class ChainSignatureServer {
 
   private setupSolana() {
     // Presence is enforced by serverConfigSchema when disableSolana is unset.
+    const { solanaPrivateKey, programId } = this.config;
+    if (!solanaPrivateKey || !programId) {
+      throw new Error(
+        'setupSolana called without solanaPrivateKey/programId: serverConfigSchema should have rejected this config'
+      );
+    }
     const solanaKeypair = anchor.web3.Keypair.fromSecretKey(
-      new Uint8Array(JSON.parse(this.config.solanaPrivateKey!))
+      new Uint8Array(JSON.parse(solanaPrivateKey))
     );
 
     this.connection = new Connection(this.config.solanaRpcUrl, {
@@ -161,7 +183,7 @@ export class ChainSignatureServer {
     anchor.setProvider(this.provider);
 
     const idl = ChainSignaturesIDL as anchor.Idl;
-    idl.address = this.config.programId!;
+    idl.address = programId;
     this.program = asChainSignaturesProgram(new Program(idl, this.provider));
   }
 
@@ -181,6 +203,12 @@ export class ChainSignatureServer {
 
   async start() {
     console.log('🚀 Response Server');
+
+    // Output extraction for confirmed EVM transactions depends on
+    // debug_traceTransaction: verify the configured RPC supports it and fail
+    // loudly at startup otherwise, instead of at the first confirmed tx.
+    await EthereumMonitor.assertDebugTraceSupport(this.config);
+
     if (this.config.disableSolana) {
       console.log('Solana: disabled (DISABLE_SOLANA)');
     } else {
@@ -202,6 +230,14 @@ export class ChainSignatureServer {
     // Chain-agnostic: tracks pending destination-chain txs (EVM/Bitcoin) for
     // Midnight/Substrate sources too — must run even with Solana disabled.
     this.startTransactionMonitor();
+
+    // The public responses helper API: serves the cached raw execution
+    // output per request id so clients need no debug_traceTransaction
+    // access of their own.
+    this.responsesApiServer = startResponsesApi(
+      this.responseCache,
+      this.config.responsesApiPort ?? 3040
+    );
     if (!this.config.disableSolana) {
       this.setupEventListeners();
       this.startBackfillMonitor();
@@ -330,12 +366,18 @@ export class ChainSignatureServer {
     // Derive the signing key using the contract's path field as the derivation
     // path. The path is 32 opaque bytes of the client contract's choosing;
     // the derivation-string rendering strips the zero padding (getPath).
+    // The epsilon comes from the signet library (the v2 colon-separated
+    // scheme clients derive the expected signer with), so both sides agree
+    // by construction.
     const pathString = this.midnightMonitor.getPath(request);
-    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
-      pathString,
+    const epsilon = deriveEpsilon(
       request.predecessor,
-      this.config.mpcRootKey,
-      'midnight:testnet'
+      pathString,
+      MIDNIGHT_TESTNET_CHAIN_ID
+    );
+    const derivedPrivateKey = CryptoUtils.deriveSigningKeyFromEpsilon(
+      epsilon,
+      this.config.mpcRootKey
     );
 
     // Parse the unsigned tx and sign it properly with ethers
@@ -367,10 +409,10 @@ export class ChainSignatureServer {
       txHash: signedTxHash,
       requestId: requestIdHex,
       caip2Id: request.caip2Id,
-      explorerDeserializationSchema: Buffer.from(
+      outputDeserializationSchema: Buffer.from(
         request.outputDeserializationSchema
       ),
-      callbackSerializationSchema: Buffer.from(
+      respondSerializationSchema: Buffer.from(
         request.respondSerializationSchema
       ),
       fromAddress: wallet.address,
@@ -515,7 +557,7 @@ export class ChainSignatureServer {
             : await EthereumMonitor.waitForTransactionAndGetOutput(
                 txHash,
                 txInfo.caip2Id,
-                txInfo.explorerDeserializationSchema,
+                txInfo.outputDeserializationSchema,
                 txInfo.fromAddress,
                 txInfo.nonce,
                 this.config
@@ -533,10 +575,15 @@ export class ChainSignatureServer {
               txHash,
               txInfo,
               () =>
-                this.handleCompletedTransaction(txHash, txInfo, {
-                  success: result.success,
-                  output: result.output,
-                }),
+                this.handleCompletedTransaction(
+                  txHash,
+                  txInfo,
+                  {
+                    success: result.success,
+                    output: result.output,
+                  },
+                  result.rawOutput
+                ),
               'handleCompletedTransaction',
               true
             );
@@ -582,8 +629,20 @@ export class ChainSignatureServer {
   private async handleCompletedTransaction(
     txHash: string,
     txInfo: PendingTransaction,
-    result: TransactionOutput
+    result: TransactionOutput,
+    rawOutput?: string
   ) {
+    // Checkpoint 3 (still deserialised, serialisation happens below):
+    // 'result.output' is the decoded field map from Checkpoint 2, i.e. the MPC's
+    // 'transaction_output' right before it is re-encoded by Output::serialize in
+    // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:132.
+    // Structural difference: the MPC decodes AND re-encodes inside the ethereum
+    // crate, so by its equivalent of this handoff (process_execution_confirmed,
+    // node/src/stream/ops.rs:301) it already carries serialized bytes. Fakenet
+    // hands the decoded map to this server and serializes here instead: the
+    // serializeBorshOutput/serializeMidnightRespondOutput calls below must
+    // byte-match Output::serialize (encode_borsh/encode_abi,
+    // respond_bidirectional.rs:38).
     console.log(`✅ Transaction completed: ${txHash}`);
 
     const requestId = txInfo.requestId;
@@ -592,32 +651,169 @@ export class ChainSignatureServer {
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
 
-    if (txInfo.source === 'midnight' && this.midnightMonitor) {
-      // Midnight: ECDSA-sign the serialized output on-chain; the user
-      // polls the signet contract and claims.
-      const serializedOutput = await OutputSerializer.serialize(
-        result.output,
-        SerializationFormat.Midnight,
-        txInfo.callbackSerializationSchema
-      );
-      await this.midnightMonitor.signAndBroadcastResponse(
-        requestIdBytes,
-        serializedOutput,
-        txInfo.sender
-      );
-      console.log(`✓ Midnight: response posted for ${txHash}`);
-      return;
+    // Cache the raw traced output for the /responses/{requestId} helper API
+    // (EVM executions only: the Bitcoin monitor reports no raw output).
+    if (rawOutput !== undefined) {
+      this.responseCache.set(requestId, {
+        success: result.success,
+        output: rawOutput,
+        txHash,
+      });
     }
 
-    this.log(`🔗 OutputSerializer: serialize...`);
-    const serializedOutput = await OutputSerializer.serialize(
+    switch (txInfo.source) {
+      case 'midnight': {
+        if (!this.midnightMonitor) {
+          throw new Error(`Midnight monitor unavailable for tx ${txHash}`);
+        }
+
+        // Midnight: ECDSA-sign the serialized output on-chain; the user
+        // polls the signet contract and claims.
+        const serializedOutput = this.serializeMidnightRespondOutput(
+          txInfo.respondSerializationSchema,
+          result.output
+        );
+        await this.midnightMonitor.signAndBroadcastResponse(
+          requestIdBytes,
+          serializedOutput,
+          txInfo.sender
+        );
+        console.log(`✓ Midnight: response posted for ${txHash}`);
+        return;
+      }
+
+      case 'polkadot': {
+        if (!this.substrateMonitor) {
+          throw new Error(`Substrate monitor unavailable for tx ${txHash}`);
+        }
+        const { serializedOutput, signature } =
+          await this.serializeAndSignBorshResponse(
+            requestIdBytes,
+            txInfo,
+            result
+          );
+        await this.substrateMonitor.sendRespondBidirectional(
+          requestIdBytes,
+          serializedOutput,
+          signature
+        );
+        console.log('✅ Response sent to Substrate');
+        return;
+      }
+
+      case 'solana': {
+        const { serializedOutput, signature } =
+          await this.serializeAndSignBorshResponse(
+            requestIdBytes,
+            txInfo,
+            result
+          );
+        const { wallet, program } = this.requireSolana();
+        this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
+        await this.withTimeout(
+          program.methods
+            .respondBidirectional(
+              Array.from(requestIdBytes),
+              Buffer.from(serializedOutput),
+              signature
+            )
+            .accounts({
+              responder: wallet.publicKey,
+            })
+            .rpc(),
+          `respondBidirectional(${txHash})`
+        );
+        console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
+        return;
+      }
+
+      default:
+        throw new Error(
+          `Unsupported transaction source '${txInfo.source}' for tx ${txHash}`
+        );
+    }
+  }
+
+  /**
+   * Serialize a Midnight respond payload with the signet library's
+   * schema-driven packed encoding (`serializeRespondOutput`, abi-serde,
+   * backed by @sig-net/midnight-serde): the exact unpadded bytes clients
+   * recompute and the attestation digest commits to. Non-function-call
+   * executions (plain transfers) have no decoded output, so schema-typed
+   * success defaults are filled in first, mirroring the MPC's
+   * default_output_for_non_contract_call.
+   */
+  private serializeMidnightRespondOutput(
+    schema: Buffer | number[],
+    output: TransactionOutputData
+  ): Uint8Array {
+    const schemaBytes = Uint8Array.from(schema);
+    const values =
+      output.isFunctionCall === false
+        ? this.midnightDefaultOutput(schemaBytes)
+        : output;
+    return serializeRespondOutput(schemaBytes, values as AbiDecodedOutput);
+  }
+
+  /**
+   * Schema-typed success defaults for a non-function-call execution
+   * (a plain transfer): the exact synthesis the MPC's
+   * default_output_for_non_contract_call performs
+   * (chain-ethereum/src/respond_bidirectional.rs): string fields get
+   * 'non_function_call_success', bool fields get true, and every other
+   * type is an error, matching the MPC's bail. No decoded fields are
+   * merged in: on this path nothing was decoded (the MPC builds the
+   * output from the schema alone), so passing anything through would
+   * diverge from the bytes the MPC would attest.
+   */
+  private midnightDefaultOutput(schemaBytes: Uint8Array): TransactionOutputData {
+    const schemaStr = this.borshSchemaString(schemaBytes);
+    if (!schemaStr.trim()) {
+      throw new Error(
+        'Empty respond serialization schema: cannot synthesize a non-function-call output without a valid schema'
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(schemaStr);
+    } catch {
+      throw new Error(
+        `Invalid respond serialization schema, not valid JSON: ${schemaStr.slice(0, 100)}`
+      );
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(
+        `Respond serialization schema must be a JSON array of {name, type} fields, got: ${schemaStr.slice(0, 100)}`
+      );
+    }
+    const fields = parsed as Array<{ name: string; type: string }>;
+    const data: TransactionOutputData = {};
+    for (const field of fields) {
+      if (field.type === 'string') {
+        data[field.name] = 'non_function_call_success';
+      } else if (field.type === 'bool') {
+        data[field.name] = true;
+      } else {
+        throw new Error(
+          `Cannot synthesize a non-function-call default for field '${field.name}' of type ${field.type}`
+        );
+      }
+    }
+    return data;
+  }
+
+  /** Borsh-serialize the output and MPC-sign it for Solana/Substrate responses. */
+  private async serializeAndSignBorshResponse(
+    requestIdBytes: Buffer,
+    txInfo: PendingTransaction,
+    result: TransactionOutput
+  ) {
+    this.log(`🔗 serializeBorshOutput...`);
+    const serializedOutput = this.serializeBorshOutput(
       result.output,
-      SerializationFormat.Borsh,
-      txInfo.callbackSerializationSchema
+      txInfo.respondSerializationSchema
     );
-    this.log(
-      `✓ OutputSerializer: serialize done (${serializedOutput.length} bytes)`
-    );
+    this.log(`✓ serializeBorshOutput done (${serializedOutput.length} bytes)`);
 
     this.log(`🔗 CryptoUtils: signBidirectionalResponse...`);
     const signature = await CryptoUtils.signBidirectionalResponse(
@@ -628,32 +824,131 @@ export class ChainSignatureServer {
     );
     this.log(`✓ CryptoUtils: signBidirectionalResponse done`);
 
-    if (txInfo.source === 'polkadot' && this.substrateMonitor) {
-      await this.substrateMonitor.sendRespondBidirectional(
-        requestIdBytes,
-        serializedOutput,
-        signature
+    return { serializedOutput, signature };
+  }
+
+  /**
+   * Borsh-encode the output against the request's respond schema. Must
+   * byte-match the MPC's Output::serialize (encode_borsh,
+   * respond_bidirectional.rs:38).
+   */
+  private serializeBorshOutput(
+    output: TransactionOutputData,
+    schema: Buffer | number[]
+  ): Uint8Array {
+    const schemaStr = this.borshSchemaString(schema);
+    if (!schemaStr.trim()) {
+      throw new Error(
+        'Empty serialization schema: cannot serialize without a valid schema'
       );
-      console.log('✅ Response sent to Substrate');
-      return;
+    }
+    let parsedSchema: unknown;
+    try {
+      parsedSchema = JSON.parse(schemaStr);
+    } catch {
+      throw new Error(
+        `Invalid serialization schema, not valid JSON: ${schemaStr.slice(0, 100)}`
+      );
     }
 
-    const { wallet, program } = this.requireSolana();
-    this.log(`🔗 Solana RPC: respondBidirectional() for ${txHash}...`);
-    await this.withTimeout(
-      program.methods
-        .respondBidirectional(
-          Array.from(requestIdBytes),
-          Buffer.from(serializedOutput),
-          signature
-        )
-        .accounts({
-          responder: wallet.publicKey,
-        })
-        .rpc(),
-      `respondBidirectional(${txHash})`
-    );
-    console.log(`✓ Solana RPC: respondBidirectional() done for ${txHash}`);
+    // Handle scalar bool schema (schema is literally "bool")
+    if (typeof parsedSchema === 'string' && parsedSchema === 'bool') {
+      const outputRecord = output as Record<string, unknown>;
+      const boolValue =
+        typeof output === 'boolean'
+          ? output
+          : 'error' in outputRecord
+            ? Boolean(outputRecord.error)
+            : 'success' in outputRecord
+              ? Boolean(outputRecord.success)
+              : true;
+      return borsh.serialize('bool' as unknown as Schema, boolValue);
+    }
+
+    const borshSchema = parsedSchema as BorshSchema;
+
+    let dataToSerialize: SerializableValue = output;
+    if (output.isFunctionCall === false) {
+      dataToSerialize = this.createBorshData(borshSchema, output);
+    }
+
+    // Handle single-field objects with empty key
+    if (typeof dataToSerialize === 'object' && dataToSerialize !== null) {
+      const keys = Object.keys(dataToSerialize as TransactionOutputData);
+      if (keys.length === 1 && keys[0] === '') {
+        dataToSerialize =
+          (dataToSerialize as TransactionOutputData)[''] ?? dataToSerialize;
+      }
+    }
+
+    // Wrap common boolean error struct when payload is an object with `error`
+    if (
+      borshSchema.struct &&
+      Object.keys(borshSchema.struct).length === 1 &&
+      borshSchema.struct.error === 'bool' &&
+      typeof dataToSerialize === 'object' &&
+      dataToSerialize !== null &&
+      'error' in (dataToSerialize as Record<string, unknown>)
+    ) {
+      const data = dataToSerialize as Record<string, unknown>;
+      dataToSerialize = { error: Boolean(data.error) };
+    }
+
+    try {
+      return borsh.serialize(borshSchema as Schema, dataToSerialize);
+    } catch (error) {
+      // Emit schema/payload for debugging serialization issues
+      console.error(
+        '[serializeBorshOutput] Borsh serialization failed',
+        { schema: borshSchema, payload: dataToSerialize },
+        error
+      );
+      throw error;
+    }
+  }
+
+  /** Cut a NUL-padded on-chain schema at the first NUL and decode to text. */
+  private borshSchemaString(schema: Buffer | number[] | Uint8Array): string {
+    if (typeof schema === 'string') return schema;
+    const raw = new TextDecoder().decode(new Uint8Array(schema));
+    const nul = raw.indexOf('\0');
+    return nul === -1 ? raw : raw.slice(0, nul);
+  }
+
+  private createBorshData(
+    borshSchema: BorshSchema,
+    fallback?: TransactionOutputData
+  ): TransactionOutputData {
+    const struct = borshSchema.struct;
+    if (!struct) {
+      return { success: true };
+    }
+
+    const obj: TransactionOutputData = {};
+    for (const [key, type] of Object.entries(struct)) {
+      if (fallback && key in fallback && fallback[key] !== undefined) {
+        obj[key] = fallback[key];
+        continue;
+      }
+
+      // Only bool and string defaults exist, matching
+      // default_output_for_non_contract_call in
+      // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:261
+      // which bails on every other type.
+      switch (type) {
+        case 'bool':
+          obj[key] = true;
+          break;
+        case 'string':
+          obj[key] = 'non_function_call_success';
+          break;
+        default:
+          throw new Error(
+            `Cannot serialize non-function call success as type ${type}`
+          );
+      }
+    }
+    return obj;
   }
 
   private async handleFailedTransaction(
@@ -668,26 +963,27 @@ export class ChainSignatureServer {
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
 
+    // A failed execution has no attested output: record the failure so the
+    // /responses/{requestId} helper API answers instead of 404ing forever.
+    this.responseCache.set(requestId, {
+      success: false,
+      output: null,
+      txHash,
+    });
+
     const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
-    if (txInfo.source === 'midnight' && this.midnightMonitor) {
-      // Midnight: deadbeef prefix + serialized error using respond schema.
-      // deadbeef in first 4 bytes makes claim() fail (byte 0 = 0xde != 0x01),
-      // and a future refund() circuit can detect it via slice<4>(outputData, 0).
-      const errorOutput = { success: false };
-      const serializedError = await OutputSerializer.serialize(
-        errorOutput,
-        SerializationFormat.Midnight,
-        txInfo.callbackSerializationSchema
-      );
-      const outputData = new Uint8Array(
-        MAGIC_ERROR_PREFIX.length + serializedError.length
-      );
-      outputData.set(MAGIC_ERROR_PREFIX);
-      outputData.set(serializedError, MAGIC_ERROR_PREFIX.length);
+    if (txInfo.source === 'midnight') {
+      if (!this.midnightMonitor) {
+        throw new Error(`Midnight monitor unavailable for tx ${txHash}`);
+      }
+      // Midnight: the schema-independent 5-byte failure output (deadbeef
+      // sentinel + 0x01), one fixed width for every respond schema so client
+      // refund circuits can take it as a Bytes<5> argument and clients can
+      // recompute the failure candidate without the receipt.
       await this.midnightMonitor.signAndBroadcastResponse(
         requestIdBytes,
-        outputData,
+        MPC_FAILURE_OUTPUT,
         txInfo.sender
       );
       console.log(`✓ Midnight: error response posted for ${txHash}`);
@@ -1368,6 +1664,15 @@ export class ChainSignatureServer {
     if (this.midnightMonitor) {
       await this.midnightMonitor.stop();
       this.midnightMonitor = null;
+    }
+    if (this.responsesApiServer) {
+      const responsesApiServer = this.responsesApiServer;
+      this.responsesApiServer = null;
+      // Resolve regardless of the close error: a server that never started
+      // listening reports one, and shutdown should not fail over it.
+      await new Promise<void>((resolve) => {
+        responsesApiServer.close(() => resolve());
+      });
     }
   }
 }

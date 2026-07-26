@@ -21,6 +21,7 @@ async function main() {
     midnightProofServerUrl: envConfig.MIDNIGHT_PROOF_SERVER_URL,
     midnightSignetContractAddress: envConfig.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
     midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,
+    responsesApiPort: envConfig.RESPONSES_API_PORT,
   };
 
   const server = new ChainSignatureServer(config);

@@ -31,6 +31,8 @@ export interface ServerConfig {
   midnightProofServerUrl?: string;
   midnightSignetContractAddress?: string;
   midnightWalletSeed?: string;
+  /** TCP port of the public /responses/{requestId} helper API (default 3040). */
+  responsesApiPort?: number;
 }
 
 export const serverConfigSchema = z
@@ -73,6 +75,7 @@ export const serverConfigSchema = z
     midnightProofServerUrl: z.string().optional(),
     midnightSignetContractAddress: z.string().optional(),
     midnightWalletSeed: z.string().optional(),
+    responsesApiPort: z.number().int().positive().optional(),
   })
   .superRefine((config, ctx) => {
     if (!config.disableSolana) {
@@ -131,7 +134,7 @@ export interface PrevoutRef {
  * Each entry is added immediately after the server hands signatures back to the
  * requester, and removed once the monitor emits either a success/failure
  * response. Fields mirror the data needed by `BitcoinMonitor`/`EthereumMonitor`
- * plus the serialization schemas required to format the final callback payload.
+ * plus the schemas required to decode the output and format the respond payload.
  */
 export interface PendingTransaction {
   /** Canonical transaction hash on the destination chain (txid for Bitcoin). */
@@ -143,11 +146,24 @@ export interface PendingTransaction {
   /** CAIP-2 chain identifier (e.g. `eip155:1`, `bip122:000000...`). */
   caip2Id: string;
 
-  /** Schema emitted on-chain describing how to decode explorer outputs. */
-  explorerDeserializationSchema: Buffer | number[];
+  /**
+   * Schema for decoding the executed transaction's output, carried verbatim
+   * from `SignBidirectionalEvent.outputDeserializationSchema` (the MPC's
+   * `BidirectionalTx.output_deserialization_schema`). Only the schema is
+   * carried, never a format: the format follows from the destination chain
+   * the signed transaction is submitted to (ABI for EVM).
+   */
+  outputDeserializationSchema: Buffer | number[];
 
-  /** Schema to re-encode the callback payload for `respondBidirectional`. */
-  callbackSerializationSchema: Buffer | number[];
+  /**
+   * Schema for re-encoding the decoded output into the respond payload,
+   * carried verbatim from `SignBidirectionalEvent.respondSerializationSchema`
+   * (the MPC's `BidirectionalTx.respond_serialization_schema`). Only the
+   * schema is carried, never a format: the format follows from the source
+   * chain the request came from, which is where the response is posted
+   * (Borsh for Solana and Substrate, Midnight format for Midnight).
+   */
+  respondSerializationSchema: Buffer | number[];
 
   /** Address that broadcast the transaction (EVM sender or `bitcoin`). */
   fromAddress: string;
@@ -174,7 +190,7 @@ export interface PendingTransaction {
   submittedInputs?: Set<number>;
 
   /** Chain the request originated from; responses are routed back to it. */
-  source?: 'solana' | 'polkadot' | 'midnight';
+  source: 'solana' | 'polkadot' | 'midnight';
 }
 
 // Borsh schema types
@@ -187,19 +203,10 @@ export interface BorshSchema {
   enum?: Array<{ [key: string]: BorshStructField | string }>;
 }
 
-// ABI schema types
-export interface AbiSchemaField {
-  name: string;
-  type: string;
-}
-
-// Midnight schema field — extends ABI field with size hints for dynamic types
-export interface MidnightSchemaField {
-  name: string;
-  type: string;
-  maxBytes?: number;
-  maxItems?: number;
-}
+// ABI schemas need no local types: both the EVM output decode
+// (deserializeEvmOutput) and the schema-driven packed respond encoding
+// (serializeRespondOutput) come from @sig-net/midnight's abi-serde, backed
+// by @sig-net/midnight-serde.
 
 // Serialization output types
 export type SerializableValue =
@@ -208,6 +215,7 @@ export type SerializableValue =
   | boolean
   | bigint
   | null
+  | Uint8Array
   | SerializableValue[]
   | { [key: string]: SerializableValue };
 
@@ -222,7 +230,19 @@ export interface TransactionOutput {
 
 export type TransactionStatus =
   | { status: 'pending' }
-  | { status: 'success'; success: boolean; output: TransactionOutputData }
+  | {
+      status: 'success';
+      success: boolean;
+      output: TransactionOutputData;
+      /**
+       * The raw EVM return data of the mined call as `0x`-prefixed hex,
+       * exactly as debug_traceTransaction's top call frame reports it
+       * (`0x` for a plain transfer). EVM monitor only. Cached by the
+       * server so clients can fetch it via /responses/{requestId} without
+       * their own debug_traceTransaction access.
+       */
+      rawOutput?: string;
+    }
   | { status: 'error'; reason: string }
   | { status: 'fatal_error'; reason: string };
 

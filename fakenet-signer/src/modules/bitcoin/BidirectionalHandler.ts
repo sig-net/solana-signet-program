@@ -106,12 +106,10 @@ async function handleBitcoinSigningPlan(
       txHash: plan.explorerTxid,
       requestId: aggregateRequestId,
       caip2Id: event.caip2Id,
-      explorerDeserializationSchema: Buffer.from(
+      outputDeserializationSchema: Buffer.from(
         event.outputDeserializationSchema
       ),
-      callbackSerializationSchema: Buffer.from(
-        event.respondSerializationSchema
-      ),
+      respondSerializationSchema: Buffer.from(event.respondSerializationSchema),
       fromAddress: 'bitcoin',
       nonce: 0,
       checkCount: 0,

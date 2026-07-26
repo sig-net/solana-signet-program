@@ -1,7 +1,7 @@
 {
   "name": "fakenet-signer",
   "version": "1.8.0",
-  "description": "Multi-chain signature orchestrator for Solana - listens for signature requests, executes transactions on target chains (Ethereum, Bitcoin, etc.), and returns results. Includes Bitcoin adapters for mempool.space API and Bitcoin Core RPC.",
+  "description": "Multi-chain MPC signature orchestrator (fakenet responder) for Solana, Midnight, and Substrate source chains: listens for signature requests, executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. Includes Bitcoin adapters for mempool.space API and Bitcoin Core RPC.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -35,6 +35,9 @@
   },
   "keywords": [
     "solana",
+    "midnight",
+    "substrate",
+    "polkadot",
     "ethereum",
     "bitcoin",
     "blockchain",
@@ -55,16 +58,12 @@
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
     "@midnight-ntwrk/compact-js": "2.5.5-rc.6",
-    "@midnight-ntwrk/compact-runtime": "0.18.0-rc.1",
     "@midnight-ntwrk/midnight-js": "5.0.0-beta.4",
-    "@midnight-ntwrk/midnight-js-contracts": "5.0.0-beta.4",
     "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.0-beta.4",
     "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.4",
     "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.4",
-    "@midnight-ntwrk/midnight-js-network-id": "5.0.0-beta.4",
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.4",
     "@midnight-ntwrk/midnight-js-types": "5.0.0-beta.4",
-    "@midnight-ntwrk/midnight-js-utils": "5.0.0-beta.4",
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
     "@midnightntwrk/wallet-sdk-abstractions": "3.0.0-beta.0",
     "@midnightntwrk/wallet-sdk-address-format": "4.0.0-beta.2",
@@ -81,21 +80,19 @@
     "@solana/web3.js": "^1.98.0",
     "bitcoin-core": "^5.0.0",
     "bitcoinjs-lib": "^6.1.5",
+    "bn.js": "^5.2.1",
     "borsh": "^2.0.0",
     "bs58": "^6.0.0",
     "dotenv": "^17.2.3",
-    "ecpair": "^2.1.0",
     "ethers": "^6.13.5",
     "signet.js": "0.4.0",
     "tiny-secp256k1": "^2.2.3",
     "tsx": "^4.19.2",
-    "ws": "^8.18.2",
     "zod": "^4.1.11",
-    "@sig-net/midnight": "0.10.0",
-    "@sig-net/midnight-contract": "0.10.0"
+    "@sig-net/midnight": "0.13.0",
+    "@sig-net/midnight-contract": "0.13.0"
   },
   "devDependencies": {
-    "tsdown": "^0.15.6",
-    "vitest": "^4.1.8"
+    "tsdown": "^0.15.6"
   }
 }

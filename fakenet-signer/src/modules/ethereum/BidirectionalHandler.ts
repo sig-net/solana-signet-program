@@ -45,10 +45,8 @@ export async function handleEthereumBidirectional(
     txHash: result.signedTxHash,
     requestId,
     caip2Id: event.caip2Id,
-    explorerDeserializationSchema: Buffer.from(
-      event.outputDeserializationSchema
-    ),
-    callbackSerializationSchema: Buffer.from(event.respondSerializationSchema),
+    outputDeserializationSchema: Buffer.from(event.outputDeserializationSchema),
+    respondSerializationSchema: Buffer.from(event.respondSerializationSchema),
     fromAddress: result.fromAddress,
     nonce: result.nonce,
     checkCount: 0,

@@ -22,6 +22,9 @@ const nodeGlobals = {
   fetch: 'readonly',
   AbortSignal: 'readonly',
   TextDecoder: 'readonly',
+  TextEncoder: 'readonly',
+  WebSocket: 'readonly',
+  performance: 'readonly',
   URL: 'readonly',
 };
 
@@ -99,6 +102,8 @@ export default [
       '**/node_modules/**',
       '**/dist/**',
       '**/*.d.ts',
+      // Compact compiler output (generated)
+      'fakenet-signer/src/managed/**',
     ],
   },
 ];

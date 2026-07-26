@@ -4,7 +4,7 @@ This repository contains Solana Anchor program that is deployed on Solana blockc
 
 ### Prerequisites
 
-- Node.js v16+ and npm
+- Node.js 22+ and npm (the fakenet-signer's Midnight leg depends on the midnight-js SDKs, whose floor is Node 22)
 - Rust and Cargo
 - Solana CLI v2.0.0+
 - Anchor Framework v0.29.0+
