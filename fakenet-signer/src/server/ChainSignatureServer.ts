@@ -40,6 +40,10 @@ import {
   SubstrateMonitor,
   SubstrateSignatureRequest,
 } from '../modules/SubstrateMonitor';
+import {
+  MidnightMonitor,
+  type MidnightSigningRequest,
+} from '../modules/MidnightMonitor';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -83,6 +87,7 @@ export class ChainSignatureServer {
   private backfillCycleCounter = 0;
   private lastBackfillSignature: string | undefined;
   private substrateMonitor: SubstrateMonitor | null = null;
+  private midnightMonitor: MidnightMonitor | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -118,6 +123,7 @@ export class ChainSignatureServer {
     if (this.config.substrateWsUrl) {
       this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
     }
+    this.midnightMonitor = MidnightMonitor.fromServerConfig(this.config);
   }
 
   private setupSolana() {
@@ -187,6 +193,10 @@ export class ChainSignatureServer {
 
     if (this.substrateMonitor) {
       await this.connectToSubstrate();
+    }
+
+    if (this.midnightMonitor) {
+      await this.connectToMidnight();
     }
 
     // Chain-agnostic: tracks pending destination-chain txs (EVM/Bitcoin) for
@@ -276,6 +286,105 @@ export class ChainSignatureServer {
     } catch (error) {
       console.log({ error }, 'Failed to connect to Substrate');
     }
+  }
+
+  private async connectToMidnight() {
+    if (!this.midnightMonitor) return;
+
+    try {
+      await this.midnightMonitor.initialize();
+      console.log('Connected to Midnight network');
+
+      await this.midnightMonitor.start({
+        onSigningRequest: async (request: MidnightSigningRequest) => {
+          console.log(
+            `Midnight signing request: 0x${Buffer.from(request.requestId).toString('hex')} caip2=${request.caip2Id}`
+          );
+          try {
+            await this.handleMidnightSigningRequest(request);
+          } catch (error) {
+            console.error('Error processing Midnight signing request:', error);
+          }
+        },
+      });
+    } catch (error) {
+      console.error('Failed to connect to Midnight:', error);
+    }
+  }
+
+  /**
+   * Handle a signing request from the Midnight vault contract.
+   *
+   * The MPC reads calldata args + EVM gas params from the contract's ledger,
+   * builds ABI calldata + RLP transaction off-chain from contract-controlled values,
+   * signs with the derived secp256k1 key, and sends the signed tx to the client
+   * via WebSocket. The CLIENT broadcasts to Sepolia. The MPC monitors for the tx hash.
+   */
+  private async handleMidnightSigningRequest(request: MidnightSigningRequest) {
+    if (!this.midnightMonitor) return;
+
+    // Build the unsigned EVM transaction from contract-controlled calldata + gas params
+    const unsignedTxBytes =
+      this.midnightMonitor.buildSerializedTransaction(request);
+
+    // Derive the signing key using the contract's path field as the derivation
+    // path. The path is 32 opaque bytes of the client contract's choosing;
+    // the derivation-string rendering strips the zero padding (getPath).
+    const pathString = this.midnightMonitor.getPath(request);
+    const derivedPrivateKey = await CryptoUtils.deriveSigningKeyWithChainId(
+      pathString,
+      request.predecessor,
+      this.config.mpcRootKey,
+      'midnight:testnet'
+    );
+
+    // Parse the unsigned tx and sign it properly with ethers
+    const unsignedTx = ethers.Transaction.from(ethers.hexlify(unsignedTxBytes));
+    const wallet = new ethers.Wallet(derivedPrivateKey);
+    const signedTxHex = await wallet.signTransaction(unsignedTx);
+    const signedTx = ethers.Transaction.from(signedTxHex);
+    const signedTxHash = signedTx.hash;
+    if (!signedTxHash) {
+      throw new Error('Midnight: signed transaction has no hash');
+    }
+
+    console.log(`Midnight: Signed tx ${signedTxHash}`);
+    console.log(`  Signing address: ${wallet.address}`);
+
+    const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
+
+    // Post the MPC signature on-chain to the signet contract
+    // (the client polls it and broadcasts the EVM tx itself).
+    await this.midnightMonitor.broadcastSignedTransaction({
+      requestId: requestIdHex,
+      signedTransaction: signedTxHex,
+      txHash: signedTxHash,
+    });
+
+    // Store as pending transaction for the monitor to track.
+    // The client broadcasts to Sepolia; the MPC watches for confirmation.
+    pendingTransactions.set(signedTxHash, {
+      txHash: signedTxHash,
+      requestId: requestIdHex,
+      caip2Id: request.caip2Id,
+      explorerDeserializationSchema: Buffer.from(
+        request.outputDeserializationSchema
+      ),
+      callbackSerializationSchema: Buffer.from(
+        request.respondSerializationSchema
+      ),
+      fromAddress: wallet.address,
+      nonce: Number(unsignedTx.nonce),
+      checkCount: 0,
+      namespace: request.caip2Id.split(':')[0] ?? 'eip155',
+      prevouts: [],
+      sender: request.predecessor,
+      source: 'midnight',
+    });
+
+    console.log(
+      `Midnight: Monitoring EVM tx ${signedTxHash} (client will broadcast)`
+    );
   }
 
   private async ensureInitialized() {
@@ -483,6 +592,23 @@ export class ChainSignatureServer {
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
 
+    if (txInfo.source === 'midnight' && this.midnightMonitor) {
+      // Midnight: ECDSA-sign the serialized output on-chain; the user
+      // polls the signet contract and claims.
+      const serializedOutput = await OutputSerializer.serialize(
+        result.output,
+        SerializationFormat.Midnight,
+        txInfo.callbackSerializationSchema
+      );
+      await this.midnightMonitor.signAndBroadcastResponse(
+        requestIdBytes,
+        serializedOutput,
+        txInfo.sender
+      );
+      console.log(`✓ Midnight: response posted for ${txHash}`);
+      return;
+    }
+
     this.log(`🔗 OutputSerializer: serialize...`);
     const serializedOutput = await OutputSerializer.serialize(
       result.output,
@@ -543,6 +669,30 @@ export class ChainSignatureServer {
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
 
     const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+
+    if (txInfo.source === 'midnight' && this.midnightMonitor) {
+      // Midnight: deadbeef prefix + serialized error using respond schema.
+      // deadbeef in first 4 bytes makes claim() fail (byte 0 = 0xde != 0x01),
+      // and a future refund() circuit can detect it via slice<4>(outputData, 0).
+      const errorOutput = { success: false };
+      const serializedError = await OutputSerializer.serialize(
+        errorOutput,
+        SerializationFormat.Midnight,
+        txInfo.callbackSerializationSchema
+      );
+      const outputData = new Uint8Array(
+        MAGIC_ERROR_PREFIX.length + serializedError.length
+      );
+      outputData.set(MAGIC_ERROR_PREFIX);
+      outputData.set(serializedError, MAGIC_ERROR_PREFIX.length);
+      await this.midnightMonitor.signAndBroadcastResponse(
+        requestIdBytes,
+        outputData,
+        txInfo.sender
+      );
+      console.log(`✓ Midnight: error response posted for ${txHash}`);
+      return;
+    }
 
     const errorSchema = { struct: { error: 'bool' } };
     const borshData = borsh.serialize(errorSchema, { error: true });
@@ -1214,6 +1364,10 @@ export class ChainSignatureServer {
     if (this.substrateMonitor) {
       await this.substrateMonitor.disconnect();
       this.substrateMonitor = null;
+    }
+    if (this.midnightMonitor) {
+      await this.midnightMonitor.stop();
+      this.midnightMonitor = null;
     }
   }
 }
