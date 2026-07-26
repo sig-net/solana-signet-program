@@ -26,7 +26,7 @@ yarn release:patch      # Patch bump, build, publish
 
 ## Architecture
 
-This is a multi-chain signature orchestrator for Solana. It listens for signature requests on Solana, executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results back to Solana.
+This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification registry), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's is hash-only (the ECDSA-signed keccak256 digest of `request_id || serialized_output`), so Midnight clients fetch the raw output themselves (e.g. from the public `/responses/{requestId}` helper API this server exposes) and verify it against the attested digest.
 
 ### Core Flow
 
@@ -34,7 +34,7 @@ This is a multi-chain signature orchestrator for Solana. It listens for signatur
 2. **ChainSignatureServer**: Main orchestrator that processes signature requests and manages the transaction lifecycle
 3. **Chain Processors**: Sign transactions for target chains (Ethereum: EIP-1559/Legacy, Bitcoin: PSBT)
 4. **Monitors**: Track transaction confirmations with exponential backoff polling
-5. **Bidirectional Handlers**: For sign-and-respond flows that write results back to Solana
+5. **Bidirectional Handlers**: For sign-and-respond flows that write results back to the source chain (full output to Solana, hash-only attestation to Midnight)
 
 ### Key Components
 
@@ -45,6 +45,8 @@ This is a multi-chain signature orchestrator for Solana. It listens for signatur
 | EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                               |
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                            |
 | Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde) |
+| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract registry for requests, signs and posts hash-only attestations with the sender-scoped response key |
+| ResponsesApi                 | `src/server/`                       | Public `GET /responses/{requestId}` helper API serving each request's raw traced EVM output (a convenience, never an authority: clients digest-match and signature-verify) |
 | Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                          |
 
 ### Two Workflows
@@ -60,10 +62,13 @@ This is a multi-chain signature orchestrator for Solana. It listens for signatur
 
 ## Configuration
 
-Environment variables loaded from `.env` (4 levels up):
+Environment variables loaded from the repo-root `.env`:
 
 - `EVM_RPC_URL` (required — any EVM endpoint; hosted providers carry their credential in the URL, e.g. for Infura: `https://sepolia.infura.io/v3/<api-key-here>`)
-- `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `MPC_ROOT_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
+- `MPC_ROOT_KEY` (required)
+- `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
+- `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_WALLET_SEED` plus the `MIDNIGHT_*` endpoint overrides (`MIDNIGHT_NETWORK_ID`, `MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_INDEXER_WS_URL`, `MIDNIGHT_PROOF_SERVER_URL`) enable the Midnight leg (optional)
+- `RESPONSES_API_PORT` (optional, default 3040: TCP port of the public `/responses/{requestId}` helper API)
 - `DISABLE_SOLANA`, `VERBOSE`, `BITCOIN_NETWORK` (optional)
 
 Runtime config in `src/config/Config.ts` includes polling intervals, timeouts, and key derivation settings.
