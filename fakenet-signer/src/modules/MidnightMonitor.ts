@@ -701,7 +701,7 @@ export class MidnightMonitor {
 
     // The attestation commits to the output AS IS, at its exact unpadded
     // length: no padding and no fixed field width (the event carries only
-    // the digest, the output itself travels off chain).
+    // the signature, the output itself travels off chain).
     const serializedOutput = evmReturnData;
 
     // ECDSA-sign the attestation digest keccak256(requestId || output) with
@@ -715,10 +715,9 @@ export class MidnightMonitor {
     );
     const sig = signAttestationDigest(attestationDigest, responseSecretKey);
     const signature = ecdsaSignatureToMpcSignature(sig);
-    const respondBidirectionalEvent: RespondBidirectionalEvent = {
-      attestationDigest,
-      signature,
-    };
+    // The event carries the signature alone: the digest is recomputed from
+    // the output by whoever verifies, so it never goes on-chain.
+    const respondBidirectionalEvent: RespondBidirectionalEvent = { signature };
 
     const response: SignedResponse = {
       requestId: requestIdHex,
