@@ -66,3 +66,6 @@ test-ledger/
 # Package manager lock files
 package-lock.json
 pnpm-lock.yaml
+
+# Playwright MCP scratch output (page snapshots, console logs)
+.playwright-mcp/

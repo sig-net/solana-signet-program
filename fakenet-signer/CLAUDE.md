@@ -26,7 +26,7 @@ yarn release:patch      # Patch bump, build, publish
 
 ## Architecture
 
-This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification registry), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's is hash-only (the ECDSA-signed keccak256 digest of `request_id || serialized_output`), so Midnight clients fetch the raw output themselves (e.g. from the public `/responses/{requestId}` helper API this server exposes) and verify it against the attested digest.
+This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification registry), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's is signature-only (the MPC's ECDSA signature over the keccak256 digest of `request_id || serialized_output`, with the digest itself off-chain too), so Midnight clients fetch the raw output themselves (e.g. from the public `/responses/{requestId}` helper API this server exposes), recompute the digest and verify the posted signature over it.
 
 ### Core Flow
 
@@ -34,7 +34,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 2. **ChainSignatureServer**: Main orchestrator that processes signature requests and manages the transaction lifecycle
 3. **Chain Processors**: Sign transactions for target chains (Ethereum: EIP-1559/Legacy, Bitcoin: PSBT)
 4. **Monitors**: Track transaction confirmations with exponential backoff polling
-5. **Bidirectional Handlers**: For sign-and-respond flows that write results back to the source chain (full output to Solana, hash-only attestation to Midnight)
+5. **Bidirectional Handlers**: For sign-and-respond flows that write results back to the source chain (full output to Solana, signature-only attestation to Midnight)
 
 ### Key Components
 
@@ -45,8 +45,8 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 | EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                               |
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                            |
 | Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde) |
-| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract registry for requests, signs and posts hash-only attestations with the sender-scoped response key |
-| ResponsesApi                 | `src/server/`                       | Public `GET /responses/{requestId}` helper API serving each request's raw traced EVM output (a convenience, never an authority: clients digest-match and signature-verify) |
+| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract registry for requests, signs and posts signature-only attestations with the sender-scoped response key |
+| ResponsesApi                 | `src/server/`                       | Public `GET /responses/{requestId}` helper API serving each request's raw traced EVM output (a convenience, never an authority: clients recompute the digest from it and signature-verify) |
 | Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                          |
 
 ### Two Workflows

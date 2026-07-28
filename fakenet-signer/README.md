@@ -9,7 +9,7 @@ Multi-chain signature orchestrator that bridges blockchain networks through MPC-
 
 - 🔐 **MPC-Based Key Derivation** - Hierarchical deterministic key derivation from a single root key
 - 🌉 **Multi-Chain Support** - Execute transactions on Ethereum (EIP-1559 & Legacy) and Bitcoin (PSBT), with extensible architecture for more chains
-- 🌙 **Midnight Support**: Polls the signet contract's notification registry, signs requests with per-contract derived keys, and posts hash-only respond-bidirectional attestations
+- 🌙 **Midnight Support**: Polls the signet contract's notification registry, signs requests with per-contract derived keys, and posts signature-only respond-bidirectional attestations
 - ₿ **Bitcoin Adapters** - Unified interface for Bitcoin operations with mempool.space API and Bitcoin Core RPC support
 - 📡 **Event-Driven Architecture** - Subscribes to Solana CPI events for real-time request processing
 - ⚡ **Transaction Monitoring** - Intelligent polling with exponential backoff for transaction confirmation
@@ -375,13 +375,13 @@ The responder needs only the central signet contract's address. It polls that co
 
 For each discovered request the responder rebuilds the unsigned EVM transaction from the on-ledger, contract-controlled parameters, derives the signing key from the MPC root key using the requesting contract's address and the request's 32-byte path (the signet library's v2 epsilon derivation, so clients derive the same expected signer), signs it, and posts the ECDSA signature record on-chain via the signet contract's `respond` circuit. The client polls the contract for the signature and broadcasts the EVM transaction itself.
 
-### Hash-only respond path
+### Signature-only respond path
 
-Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond is hash-only:
+Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature alone:
 
 1. After the EVM transaction confirms, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). The server probes for support at startup and fails loudly without it, and extraction additionally treats a missing method as an immediate error response, never an endless retry.
 2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
-3. The responder computes the attestation digest `keccak256(requestId || serializedOutput)` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signed digest is posted on-chain via `respondBidirectional`, and the output itself never travels on-chain.
+3. The responder computes the attestation digest `keccak256(requestId || serializedOutput)` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signature is posted on-chain via `respondBidirectional`, and neither the digest nor the output itself travels on-chain.
 4. A failed execution (revert or replacement) is attested the same way over the fixed 5-byte failure output (the `0xDEADBEEF` sentinel plus `0x01`), one width for every respond schema, so client refund circuits can verify it without the receipt.
 
 Clients fetch the raw output off-chain (for example from the `/responses/{requestId}` helper API below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
@@ -473,12 +473,12 @@ Runs the Midnight leg end to end:
 
 - Polls the signet contract's notification registry via the GraphQL indexer
 - Resolves notifications to authenticated requests from each requester's ledger
-- Posts signature responses and hash-only respond-bidirectional attestations
+- Posts signature responses and signature-only respond-bidirectional attestations
 - Serialises all contract writes behind a single queue (the private-state store is single-writer)
 
 #### `ResponsesApi`
 
-Public `GET /responses/{requestId}` helper serving each request's raw traced EVM output (a convenience, never an authority: clients digest-match and signature-verify).
+Public `GET /responses/{requestId}` helper serving each request's raw traced EVM output (a convenience, never an authority: clients recompute the digest from it and signature-verify).
 
 #### Output serialization
 
@@ -705,7 +705,7 @@ interface SignatureRequestedEvent {
    - Decode per outputDeserializationSchema, re-pack per respondSerializationSchema
    - Sign the attestation digest keccak256(request_id + serialized_output)
      with the per-caller response key
-   - Post the hash-only respondBidirectional record on-chain
+   - Post the signature-only respondBidirectional record on-chain
 7. On error:
    - Attest the fixed 5-byte failure output (0xDEADBEEF + 0x01) the same way
 ```
