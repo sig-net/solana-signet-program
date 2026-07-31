@@ -2,10 +2,12 @@
  * MidnightMonitor - Generic signet monitor for any Midnight contract.
  *
  * The MPC needs ONLY the signet contract address. Requester contracts are
- * discovered through the signet registry, and each notification names the
- * ledger field position of the caller's SignBidirectionalEventMap, so no
- * compiled caller contract, ZK keys or contract-info.json are needed to
- * READ state (posting responses uses the published signet contract package).
+ * discovered through the signet registry, and each notification carries the
+ * resolved ledger-tree path (requestsPathDepth + requestsPath) of the
+ * caller's SignBidirectionalEventMap, so no compiled caller contract, ZK
+ * keys or contract-info.json are needed to READ state: the feed follows the
+ * path through raw contract state node for node (posting responses uses the
+ * signet contract package).
  *
  * Flow:
  * 1. Polls the signet contract's notification registry via the Midnight
