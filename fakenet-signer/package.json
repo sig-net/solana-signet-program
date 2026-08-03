@@ -89,8 +89,8 @@
     "tiny-secp256k1": "^2.2.3",
     "tsx": "^4.19.2",
     "zod": "^4.1.11",
-    "@sig-net/midnight": "0.15.0",
-    "@sig-net/midnight-contract": "0.15.0"
+    "@sig-net/midnight": "link:../../midnight-integration-event-notifications/packages/signet-midnight",
+    "@sig-net/midnight-contract": "link:../../midnight-integration-event-notifications/packages/signet-contract"
   },
   "devDependencies": {
     "tsdown": "^0.15.6"

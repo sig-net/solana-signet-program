@@ -2,18 +2,18 @@
  * MidnightMonitor - Generic signet monitor for any Midnight contract.
  *
  * The MPC needs ONLY the signet contract address. Requester contracts are
- * discovered through the signet registry, and each notification carries the
- * resolved ledger-tree path (requestsPathDepth + requestsPath) of the
- * caller's SignBidirectionalEventMap, so no compiled caller contract, ZK
- * keys or contract-info.json are needed to READ state: the feed follows the
- * path through raw contract state node for node (posting responses uses the
- * signet contract package).
+ * discovered through the signet contract's emitted notification events, and
+ * each notification names the caller contract plus the resolved ledger-tree
+ * path (requestsPathDepth + requestsPath) of its SignBidirectionalEventMap,
+ * so no compiled caller contract, ZK keys or contract-info.json are needed
+ * to READ state: the feed enumerates the pointed-at map through raw contract
+ * state node for node (posting responses uses the signet contract package).
  *
  * Flow:
- * 1. Polls the signet contract's notification registry via the Midnight
+ * 1. Polls the signet contract's notification events via the Midnight
  *    GraphQL indexer (SignetRequestFeed)
- * 2. Resolves each notification to an authenticated SignBidirectionalEvent
- *    read from the named caller's own ledger
+ * 2. Enumerates each notified caller's own request map and serves every
+ *    authenticated SignBidirectionalEvent it has not served before
  * 3. Builds ABI calldata + RLP transaction off-chain
  * 4. Posts the MPC's ECDSA signature to the signet contract (respond)
  * 5. After the EVM tx confirms, ECDSA-signs the attestation digest of
@@ -22,7 +22,7 @@
  *    fixed "midnight response key" path, the same sender-scoped derivation
  *    the real MPC uses, sig-net/mpc respond_bidirectional.rs) and posts the
  *    RespondBidirectionalEvent on-chain (respondBidirectional). The
- *    signet contract stores it unverified, and clients verify against the
+ *    signet contract emits it unverified, and clients verify against the
  *    response key they pinned via initialise after their deploy. The USER
  *    polls and calls claimDeposit().
  */
@@ -46,8 +46,8 @@ import {
   formatSecp256k1PublicKey,
   secp256k1PublicKeyOf,
   signAttestationDigest,
+  signetEventSourceFromPublicDataProvider,
   SignetRequestFeed,
-  readSignetContractLedgerFromState,
   signatureToSignatureRespondedEvent,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
@@ -124,8 +124,8 @@ export interface MidnightMonitorConfig {
   proofServerUrl: string;
   /**
    * Address of the deployed central signet contract. The responder both POLLS
-   * its notification registry to discover requests (via
-   * {@link SignetRequestFeed}) and posts its responses here — one contract for
+   * its emitted notification events to discover requests (via
+   * {@link SignetRequestFeed}) and posts its responses here: one contract for
    * both directions.
    */
   signetContractAddress: string;
@@ -170,9 +170,9 @@ export class MidnightMonitor {
 
   private publicDataProvider: PublicDataProvider | null = null;
 
-  // The registry-polling request feed: polls the ONE signet contract's
-  // notification registry, resolves each entry to an authenticated request
-  // read from the caller's own ledger, and dedupes by request id. Built in
+  // The event-polling request feed: polls the ONE signet contract's emitted
+  // notification events, enumerates each notified caller's own request map
+  // (an authenticated read), and dedupes by request id. Built in
   // initialize().
   private feed: SignetRequestFeed | null = null;
 
@@ -220,16 +220,19 @@ export class MidnightMonitor {
       subscriptionURL: this.config.indexerWsUrl,
     });
 
-    // One feed over the central signet contract's notification registry — no
-    // requester list. The indexer provider is the state source for both the
-    // registry poll and the caller-ledger reads the resolver does.
+    // One feed over the central signet contract's notification events, no
+    // requester list. The indexer provider serves both roles: the event
+    // source for discovery and the state source for the caller-ledger reads.
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
+      eventSource: signetEventSourceFromPublicDataProvider(
+        this.publicDataProvider
+      ),
     });
 
     console.log(
-      `MidnightMonitor: polling signet contract registry at ${this.config.signetContractAddress}`
+      `MidnightMonitor: polling signet contract events at ${this.config.signetContractAddress}`
     );
     console.log('MidnightMonitor: Initialized (no compiled contract needed)');
   }
@@ -478,10 +481,11 @@ export class MidnightMonitor {
 
   /**
    * Post the MPC's respond-bidirectional response on-chain via the joined
-   * signet contract. Stored UNVERIFIED (the signet contract is an append-only
-   * log): clients verify the ECDSA signature over the attestation digest
-   * keccak256(requestId || serializedOutput) against the response key their
-   * deploy pinned. Lazily constructs the wallet + contract on first call.
+   * signet contract. Emitted UNVERIFIED (the signet contract is an
+   * unauthenticated event log): clients verify the ECDSA signature over the
+   * attestation digest keccak256(requestId || serializedOutput) against the
+   * response key their deploy pinned. Lazily constructs the wallet + contract
+   * on first call.
    */
   async postRespondBidirectional(
     requestId: Uint8Array,
@@ -503,15 +507,25 @@ export class MidnightMonitor {
       return;
     }
 
-    // Discover by registry poll: the feed reads the signet contract's notifications,
-    // resolves each to an AUTHENTICATED request from the named caller's own
-    // ledger (forged / not-yet-indexed / non-member notifications are dropped and
-    // retried), and dedupes by request id. No requester contract list.
+    // Discover by event poll: the feed reads the signet contract's emitted
+    // notifications, enumerates each notified caller's own request map (an
+    // AUTHENTICATED read: stateless callers and non-map paths yield nothing
+    // and are retried), and dedupes by request id.
+    // No requester contract list.
+    //
+    // Restart behaviour: the response events carry a signature and nothing
+    // else, so there is no per-request "already responded" check to read
+    // back from chain. A restart therefore reprocesses every request still
+    // present in a notified caller's map. That is safe by design: duplicate
+    // posts are acceptable (the event log is unauthenticated and clients
+    // verify every candidate), dropped responses are not, and a client that
+    // settles a request removes it from its map, which shrinks the
+    // reprocess set.
     let resolved: ResolvedSignetRequest[];
     try {
       resolved = await this.feed.poll();
     } catch (error) {
-      console.error('MidnightMonitor: Error polling signet registry:', error);
+      console.error('MidnightMonitor: Error polling signet events:', error);
       return;
     }
 
@@ -520,27 +534,6 @@ export class MidnightMonitor {
       requestId,
       request: signetRequest,
     } of resolved) {
-      // Restart guard: a request whose respondBidirectional response is
-      // already on the signet contract was fully processed by a previous run
-      // of this responder (respondBidirectional is the pipeline's terminal
-      // stage). Skip it, leaving it marked yielded in the feed, so a restart
-      // does not re-sign and re-post every historical request. If the check
-      // itself fails, process the request anyway: reprocessing is acceptable,
-      // missing a request is not.
-      try {
-        if (await this.hasRespondBidirectionalResponse(requestId)) {
-          console.log(
-            `MidnightMonitor: request ${requestId} already has a respondBidirectional response on-chain, skipping (processed before a restart)`
-          );
-          continue;
-        }
-      } catch (error) {
-        console.warn(
-          `MidnightMonitor: could not check existing responses for ${requestId}, processing anyway:`,
-          error
-        );
-      }
-
       console.log(
         `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
       );
@@ -565,39 +558,6 @@ export class MidnightMonitor {
         this.feed.forget(requestId);
       }
     }
-  }
-
-  /**
-   * Whether the signet contract already holds at least one
-   * respondBidirectional post for `requestId` (read from the contract's
-   * respondBidirectional counter map). Used as the restart guard in
-   * {@link fetchAndProcessRequests}.
-   *
-   * Why THIS check and not the signature-response log: the pipeline runs
-   * discovery -> sign -> post SIGNATURE response -> monitor the EVM tx ->
-   * post respondBidirectional, and the EVM-tx monitor state lives only in
-   * memory. A request with a signature response but no respondBidirectional
-   * was interrupted mid-pipeline, and nothing would ever resume its EVM
-   * monitoring after a restart, so it MUST be reprocessed (re-posting a
-   * duplicate signature is acceptable, dropping the respondBidirectional is
-   * not). Only the terminal stage's presence proves no work remains.
-   */
-  private async hasRespondBidirectionalResponse(
-    requestId: RequestIdHex
-  ): Promise<boolean> {
-    if (!this.publicDataProvider) {
-      throw new Error('MidnightMonitor: not initialized (no data provider)');
-    }
-    const state = await this.publicDataProvider.queryContractState(
-      this.config.signetContractAddress
-    );
-    if (!state?.data) {
-      // No readable signet contract state means no responses recorded.
-      return false;
-    }
-    const { respondBidirectionalCounterMap } =
-      readSignetContractLedgerFromState(state.data);
-    return (respondBidirectionalCounterMap.get(requestId) ?? 0n) > 0n;
   }
 
   /**
@@ -732,8 +692,8 @@ export class MidnightMonitor {
     };
 
     // Post the response on-chain to the signet contract. There is no
-    // push/websocket channel — the contract's respondBidirectionalMap is
-    // the delivery surface; the client polls it, verifies it, and presents
+    // push/websocket channel: the contract's emitted events are the delivery
+    // surface. The client polls them, verifies each candidate, and presents
     // the record to claimDeposit().
     await this.postRespondBidirectional(requestId, respondBidirectionalEvent);
     console.log(
@@ -806,9 +766,9 @@ export class MidnightMonitor {
   }
 
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
-    // The signet contract address is now the sole requirement: the responder
-    // discovers requesters by polling its notification registry, so no requester list is
-    // needed (or accepted).
+    // The signet contract address is the sole requirement: the responder
+    // discovers requesters by polling its notification events, so no
+    // requester list is needed (or accepted).
     if (!config.midnightIndexerUrl || !config.midnightSignetContractAddress) {
       // A partially-set Midnight config is almost certainly a mistake: say
       // which variable is missing instead of silently never starting the leg.
