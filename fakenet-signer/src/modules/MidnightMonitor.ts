@@ -41,12 +41,15 @@ import type { SigningRequest } from './midnight/signet-request-types';
 import {
   bytesToHex,
   calculateSignetAttestationDigest,
+  decodeRespondBidirectionalEventPayload,
   deriveMidnightResponseSecretKey,
   ecdsaSignatureToMpcSignature,
   formatSecp256k1PublicKey,
+  requestIdHex as requestIdHexOf,
   secp256k1PublicKeyOf,
   signAttestationDigest,
   signetEventSourceFromPublicDataProvider,
+  SignetEventName,
   SignetRequestFeed,
   signatureToSignatureRespondedEvent,
   signBidirectionalEventToUnsignedEvmTransaction,
@@ -57,6 +60,7 @@ import {
   type SignBidirectionalEvent,
   type SignatureRespondedEvent,
   type RespondBidirectionalEvent,
+  type SignetEventSource,
 } from '@sig-net/midnight';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
@@ -176,6 +180,11 @@ export class MidnightMonitor {
   // initialize().
   private feed: SignetRequestFeed | null = null;
 
+  // The signet contract's event source: the feed reads discovery
+  // notifications through it, and the restart guard reads the emitted
+  // RespondBidirectionalEvent posts through it. Built in initialize().
+  private eventSource: SignetEventSource | null = null;
+
   // The responder wallet and the joined signet contract are both
   // constructed lazily on first access and memoized (loaded once). The cached
   // promise is cleared if construction rejects, so a later call can retry.
@@ -223,12 +232,13 @@ export class MidnightMonitor {
     // One feed over the central signet contract's notification events, no
     // requester list. The indexer provider serves both roles: the event
     // source for discovery and the state source for the caller-ledger reads.
+    this.eventSource = signetEventSourceFromPublicDataProvider(
+      this.publicDataProvider
+    );
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
-      eventSource: signetEventSourceFromPublicDataProvider(
-        this.publicDataProvider
-      ),
+      eventSource: this.eventSource,
     });
 
     console.log(
@@ -499,10 +509,41 @@ export class MidnightMonitor {
     );
   }
 
+  /**
+   * The request ids the signet contract's emitted RespondBidirectionalEvent
+   * posts declare, one entry per distinct id. respondBidirectional is the
+   * signing pipeline's terminal stage, so a discovered request whose id is
+   * in this set has already been processed to completion (typically by a
+   * previous run of this process). The declared id is unauthenticated
+   * routing data: the guard only suppresses duplicate work and never gates
+   * verification (clients verify every candidate themselves).
+   */
+  private async respondedRequestIds(
+    eventSource: SignetEventSource
+  ): Promise<Set<RequestIdHex>> {
+    const ids = new Set<RequestIdHex>();
+    const events = await eventSource.querySignetEvents(
+      this.config.signetContractAddress
+    );
+    for (const event of events) {
+      if (event.name !== SignetEventName.RespondBidirectionalEvent) continue;
+      try {
+        ids.add(
+          requestIdHexOf(
+            decodeRespondBidirectionalEventPayload(event.payload).requestId
+          )
+        );
+      } catch {
+        // A malformed post declares no usable id, so it marks nothing done.
+      }
+    }
+    return ids;
+  }
+
   private async fetchAndProcessRequests(
     onSigningRequest: (request: MidnightSigningRequest) => Promise<void>
   ): Promise<void> {
-    if (!this.feed) {
+    if (!this.feed || !this.eventSource) {
       console.error('MidnightMonitor: not initialized');
       return;
     }
@@ -512,15 +553,6 @@ export class MidnightMonitor {
     // AUTHENTICATED read: stateless callers and non-map paths yield nothing
     // and are retried), and dedupes by request id.
     // No requester contract list.
-    //
-    // Restart behaviour: the response events carry a signature and nothing
-    // else, so there is no per-request "already responded" check to read
-    // back from chain. A restart therefore reprocesses every request still
-    // present in a notified caller's map. That is safe by design: duplicate
-    // posts are acceptable (the event log is unauthenticated and clients
-    // verify every candidate), dropped responses are not, and a client that
-    // settles a request removes it from its map, which shrinks the
-    // reprocess set.
     let resolved: ResolvedSignetRequest[];
     try {
       resolved = await this.feed.poll();
@@ -529,11 +561,35 @@ export class MidnightMonitor {
       return;
     }
 
+    // Restart guard: skip a discovered request when an emitted
+    // RespondBidirectionalEvent already declares its id, as that post is the
+    // pipeline's terminal stage. The guard fails open: if the read errors,
+    // every request is processed, since duplicate posts are acceptable (the
+    // event log is unauthenticated and clients verify every candidate) and
+    // dropped responses are not.
+    let respondedIds = new Set<RequestIdHex>();
+    if (resolved.length > 0) {
+      try {
+        respondedIds = await this.respondedRequestIds(this.eventSource);
+      } catch (error) {
+        console.error(
+          'MidnightMonitor: Error reading responded request ids:',
+          error
+        );
+      }
+    }
+
     for (const {
       callerAddress,
       requestId,
       request: signetRequest,
     } of resolved) {
+      if (respondedIds.has(requestId)) {
+        console.log(
+          `MidnightMonitor: skipping request ${requestId}: a RespondBidirectionalEvent already declares its id`
+        );
+        continue;
+      }
       console.log(
         `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
       );
@@ -662,8 +718,8 @@ export class MidnightMonitor {
     );
 
     // The attestation commits to the output AS IS, at its exact unpadded
-    // length: no padding and no fixed field width (the event carries only
-    // the signature, the output itself travels off chain).
+    // length: no padding and no fixed field width (the event never carries
+    // the output: it travels off chain).
     const serializedOutput = evmReturnData;
 
     // ECDSA-sign the attestation digest keccak256(requestId || output) with
@@ -677,7 +733,7 @@ export class MidnightMonitor {
     );
     const sig = signAttestationDigest(attestationDigest, responseSecretKey);
     const signature = ecdsaSignatureToMpcSignature(sig);
-    // The event carries the signature alone: the digest is recomputed from
+    // The record carries the signature: the digest is recomputed from
     // the output by whoever verifies, so it never goes on-chain.
     const respondBidirectionalEvent: RespondBidirectionalEvent = { signature };
 
