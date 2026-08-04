@@ -25,15 +25,12 @@ import type { SigningRequest } from './midnight/signet-request-types';
 import {
   bytesToHex,
   calculateSignetAttestationDigest,
-  decodeRespondBidirectionalEventPayload,
   deriveMidnightResponseSecretKey,
   ecdsaSignatureToMpcSignature,
   formatSecp256k1PublicKey,
-  requestIdHex as requestIdHexOf,
   secp256k1PublicKeyOf,
   signAttestationDigest,
   signetEventSourceFromPublicDataProvider,
-  SignetEventName,
   SignetRequestFeed,
   signatureToSignatureRespondedEvent,
   signBidirectionalEventToUnsignedEvmTransaction,
@@ -44,7 +41,6 @@ import {
   type SignBidirectionalEvent,
   type SignatureRespondedEvent,
   type RespondBidirectionalEvent,
-  type SignetEventSource,
 } from '@sig-net/midnight';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
@@ -150,7 +146,6 @@ export class MidnightMonitor {
 
   // Built in initialize().
   private feed: SignetRequestFeed | null = null;
-  private eventSource: SignetEventSource | null = null;
 
   private responderWalletPromise?: Promise<ResponderWallet>;
   private responderContractPromise?: Promise<DeployedSignetContract>;
@@ -191,13 +186,12 @@ export class MidnightMonitor {
 
     // The indexer provider serves both roles: the event source for discovery
     // and the state source for the caller-ledger reads.
-    this.eventSource = signetEventSourceFromPublicDataProvider(
-      this.publicDataProvider
-    );
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
-      eventSource: this.eventSource,
+      eventSource: signetEventSourceFromPublicDataProvider(
+        this.publicDataProvider
+      ),
     });
 
     console.log(
@@ -413,10 +407,7 @@ export class MidnightMonitor {
     return { raw, result };
   }
 
-  /**
-   * Post an MPC signature response on-chain via the joined signet contract.
-   * The contract cannot verify it, so pollers recover the signer themselves.
-   */
+  /** Post an MPC signature response on-chain via the joined signet contract. */
   async postSignatureResponse(
     requestId: Uint8Array,
     signatureResponse: SignatureRespondedEvent
@@ -432,9 +423,7 @@ export class MidnightMonitor {
 
   /**
    * Post the MPC's respond-bidirectional response on-chain via the joined
-   * signet contract. The contract emits it unverified: clients check the
-   * signature over the attestation digest against the response key they
-   * pinned at deploy.
+   * signet contract.
    */
   async postRespondBidirectional(
     requestId: Uint8Array,
@@ -448,39 +437,10 @@ export class MidnightMonitor {
     );
   }
 
-  /**
-   * The request ids the emitted RespondBidirectionalEvent posts declare.
-   * respondBidirectional is the pipeline's terminal stage, so an id in this
-   * set has already been processed to completion. The declared id is
-   * unauthenticated, so this only suppresses duplicate work and never stands
-   * in for verification.
-   */
-  private async respondedRequestIds(
-    eventSource: SignetEventSource
-  ): Promise<Set<RequestIdHex>> {
-    const ids = new Set<RequestIdHex>();
-    const events = await eventSource.querySignetEvents(
-      this.config.signetContractAddress
-    );
-    for (const event of events) {
-      if (event.name !== SignetEventName.RespondBidirectionalEvent) continue;
-      try {
-        ids.add(
-          requestIdHexOf(
-            decodeRespondBidirectionalEventPayload(event.payload).requestId
-          )
-        );
-      } catch {
-        // A malformed post declares no usable id, so it marks nothing done.
-      }
-    }
-    return ids;
-  }
-
   private async fetchAndProcessRequests(
     onSigningRequest: (request: MidnightSigningRequest) => Promise<void>
   ): Promise<void> {
-    if (!this.feed || !this.eventSource) {
+    if (!this.feed) {
       console.error('MidnightMonitor: not initialized');
       return;
     }
@@ -493,32 +453,11 @@ export class MidnightMonitor {
       return;
     }
 
-    // Restart guard, deliberately failing open: on a read error every request
-    // is processed, as a duplicate post is acceptable and a dropped response
-    // is not.
-    let respondedIds = new Set<RequestIdHex>();
-    if (resolved.length > 0) {
-      try {
-        respondedIds = await this.respondedRequestIds(this.eventSource);
-      } catch (error) {
-        console.error(
-          'MidnightMonitor: Error reading responded request ids:',
-          error
-        );
-      }
-    }
-
     for (const {
       callerAddress,
       requestId,
       request: signetRequest,
     } of resolved) {
-      if (respondedIds.has(requestId)) {
-        console.log(
-          `MidnightMonitor: skipping request ${requestId}: a RespondBidirectionalEvent already declares its id`
-        );
-        continue;
-      }
       console.log(
         `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
       );
