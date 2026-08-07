@@ -364,12 +364,11 @@ export class ChainSignatureServer {
       this.midnightMonitor.buildSerializedTransaction(request);
 
     // Derive the signing key using the contract's path field as the derivation
-    // path. The path is 32 opaque bytes of the client contract's choosing;
-    // the derivation-string rendering strips the zero padding (getPath).
-    // The epsilon comes from the signet library (the v2 colon-separated
-    // scheme clients derive the expected signer with), so both sides agree
-    // by construction.
-    const pathString = this.midnightMonitor.getPath(request);
+    // path. The path is 32 opaque bytes of the client contract's choosing,
+    // rendered as its verbatim full-width hex (getPathHex). The epsilon
+    // comes from the signet library (the v2 colon-separated scheme clients
+    // derive the expected signer with), so both sides agree by construction.
+    const pathString = this.midnightMonitor.getPathHex(request);
     const epsilon = deriveEpsilon(
       request.predecessor,
       pathString,
@@ -766,7 +765,9 @@ export class ChainSignatureServer {
    * output from the schema alone), so passing anything through would
    * diverge from the bytes the MPC would attest.
    */
-  private midnightDefaultOutput(schemaBytes: Uint8Array): TransactionOutputData {
+  private midnightDefaultOutput(
+    schemaBytes: Uint8Array
+  ): TransactionOutputData {
     const schemaStr = this.borshSchemaString(schemaBytes);
     if (!schemaStr.trim()) {
       throw new Error(

@@ -24,15 +24,10 @@ import type { SigningRequest } from './midnight/signet-request-types';
 
 import {
   bytesToHex,
-  calculateSignetAttestationDigest,
   deriveMidnightResponseSecretKey,
-  ecdsaSignatureToMpcSignature,
   formatSecp256k1PublicKey,
-  secp256k1PublicKeyOf,
-  signAttestationDigest,
   signetEventSourceFromPublicDataProvider,
   SignetRequestFeed,
-  signatureToSignatureRespondedEvent,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
   MPCSignatureAlgorithm,
@@ -42,6 +37,15 @@ import {
   type SignatureRespondedEvent,
   type RespondBidirectionalEvent,
 } from '@sig-net/midnight';
+// The posting-side helpers: the responder is the MPC's test double, so it
+// signs and encodes through the SDK's minting surface.
+import {
+  calculateSignetAttestationDigest,
+  ecdsaSignatureToMpcSignature,
+  secp256k1PublicKeyOf,
+  signAttestationDigest,
+  signatureToSignatureRespondedEvent,
+} from '@sig-net/midnight/testing';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
@@ -660,12 +664,14 @@ export class MidnightMonitor {
       : null;
   }
 
+  /**
+   * The derivation-string rendering of a request's `path: Bytes<32>`:
+   * lowercase hex of the FULL 32 bytes, verbatim, no 0x prefix. Mirrors the
+   * real MPC's rendering (sig-net/mpc chain-midnight convert.rs), which
+   * never trims: `0xab..00` and `0xab..` must derive different keys.
+   */
   getPathHex(request: MidnightSigningRequest): string {
     return Buffer.from(request.path).toString('hex');
-  }
-
-  getPath(request: MidnightSigningRequest): string {
-    return Buffer.from(request.path).toString('utf8').replace(/\0/g, '');
   }
 
   static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
