@@ -25,7 +25,6 @@ import { type ResolvedSignetRequest, SignetRequestFeed } from './midnight/signet
 
 import {
   bytesToHex,
-  deriveMidnightResponseSecretKey,
   formatSecp256k1PublicKey,
   signetEventSourceFromPublicDataProvider,
   signBidirectionalEventToUnsignedEvmTransaction,
@@ -36,10 +35,11 @@ import {
   type SignatureRespondedEvent,
   type RespondBidirectionalEvent,
 } from '@sig-net/midnight';
-// The posting-side helpers: the responder is the MPC's test double, so it
-// signs and encodes through the SDK's minting surface.
+// The secret-taking helpers: the responder is the MPC's test double, so it
+// derives, signs and encodes through the SDK's minting surface.
 import {
   calculateSignetAttestationDigest,
+  deriveMidnightResponseSecretKey,
   ecdsaSignatureToMpcSignature,
   secp256k1PublicKeyOf,
   signAttestationDigest,
