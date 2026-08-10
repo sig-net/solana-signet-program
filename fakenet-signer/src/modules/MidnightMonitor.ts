@@ -21,17 +21,16 @@ import { ethers } from 'ethers';
 import type { ServerConfig } from '../types';
 
 import type { SigningRequest } from './midnight/signet-request-types';
+import { type ResolvedSignetRequest, SignetRequestFeed } from './midnight/signet-request-feed';
 
 import {
   bytesToHex,
   deriveMidnightResponseSecretKey,
   formatSecp256k1PublicKey,
   signetEventSourceFromPublicDataProvider,
-  SignetRequestFeed,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
   MPCSignatureAlgorithm,
-  type ResolvedSignetRequest,
   type RequestIdHex,
   type SignBidirectionalEvent,
   type SignatureRespondedEvent,
