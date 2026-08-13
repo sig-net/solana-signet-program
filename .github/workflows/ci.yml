@@ -20,8 +20,8 @@ jobs:
     env:
       MPC_ROOT_KEY: ${{ secrets.MPC_ROOT_KEY }}
       # A local anvil (started below): the responder's startup probe requires
-      # debug_traceTransaction, which hosted plans like plain Infura lack, and
-      # a local node also frees fork PRs from needing any RPC secret.
+      # the callTracer debug API, which hosted plans like plain Infura lack,
+      # and a local node also frees fork PRs from needing any RPC secret.
       EVM_RPC_URL: http://127.0.0.1:8545
     steps:
       - name: Checkout

@@ -20,29 +20,35 @@ export class EthereumMonitor {
   private static extractionFailureCounts = new Map<string, number>();
 
   /**
-   * Probe the configured EVM RPC for debug_traceTransaction (callTracer)
-   * support at startup. Output extraction reads the mined call's return data
-   * through it (the same method the real MPC uses) and every bidirectional
-   * response depends on that extraction, so a responder without it is
-   * misconfigured: fail loudly up front rather than at the first confirmed
-   * transaction. Many hosted RPC plans do not expose the debug namespace,
-   * point EVM_RPC_URL at a dev node (anvil/geth/reth) or a plan with trace
-   * methods.
+   * Probe the configured EVM RPC for the callTracer debug API at startup.
+   * Output extraction reads each mined call's return data through
+   * debug_traceTransaction (the same method the real MPC uses) and every
+   * bidirectional response depends on that extraction, so a responder
+   * without it is misconfigured: fail loudly up front, before the first
+   * confirmed transaction hits the gap. Many hosted RPC plans do not expose
+   * the debug namespace, point EVM_RPC_URL at a dev node (anvil/geth/reth)
+   * or a plan with trace methods.
    *
-   * The probe traces a well-formed but nonexistent transaction hash: an RPC
-   * that SUPPORTS the method answers with a transaction-not-found style
-   * error, while one that lacks it answers "method not found" (JSON-RPC
-   * -32601) or similar. Only the latter is a failure, so a transient network
-   * error or a still-starting node never trips it.
+   * The probe issues a debug_traceCall of a trivial call at the latest
+   * block, standing in for debug_traceTransaction: nodes ship the two as
+   * one debug tracing API. The probe MUST stay call-shaped. A forked dev
+   * node executes a call on its own state, but it forwards a trace of an
+   * unknown transaction hash to its fork upstream and relays the answer, so
+   * a transaction-shaped probe reports a debug-less upstream as the node's
+   * own missing support and kills a responder whose local tracing works.
+   * A node that supports the tracer answers the call with a trace, one that
+   * lacks it answers "method not found" (JSON-RPC -32601) or similar. Only
+   * the latter is a failure, so a transient network error or a
+   * still-starting node never trips it.
    */
   static async assertDebugTraceSupport(config: ServerConfig): Promise<void> {
-    const probeTxHash = `0x${'11'.repeat(32)}`;
     const fetchRequest = new ethers.FetchRequest(config.evmRpcUrl);
     fetchRequest.timeout = 30_000;
     const provider = new ethers.JsonRpcProvider(fetchRequest);
     try {
-      await provider.send('debug_traceTransaction', [
-        probeTxHash,
+      await provider.send('debug_traceCall', [
+        { to: ethers.ZeroAddress },
+        'latest',
         {
           tracer: 'callTracer',
           tracerConfig: { onlyTopCall: true },
@@ -52,16 +58,17 @@ export class EthereumMonitor {
     } catch (error) {
       if (this.isMethodNotSupportedError(error)) {
         throw new Error(
-          'The EVM RPC configured via EVM_RPC_URL does not support ' +
-            'debug_traceTransaction with the callTracer. The responder needs ' +
-            'it to extract execution outputs (the same method the real MPC ' +
-            'uses). Point EVM_RPC_URL at a node with the debug namespace ' +
-            'enabled, e.g. a local anvil/geth/reth dev node or a provider ' +
-            'plan that includes trace methods.'
+          'The EVM RPC configured via EVM_RPC_URL does not support the ' +
+            'callTracer debug API (probed via debug_traceCall). The ' +
+            'responder needs debug_traceTransaction to extract execution ' +
+            'outputs (the same method the real MPC uses). Point EVM_RPC_URL ' +
+            'at a node with the debug namespace enabled, e.g. a local ' +
+            'anvil/geth/reth dev node or a provider plan that includes ' +
+            'trace methods.'
         );
       }
-      // Any other error (typically transaction-not-found for the probe
-      // hash) proves the method exists: the probe passes.
+      // Any other error is transient (network, a still-starting node): the
+      // probe passes.
     } finally {
       provider.destroy();
     }
@@ -90,7 +97,7 @@ export class EthereumMonitor {
       messages
     );
   }
-  
+
   static async waitForTransactionAndGetOutput(
     txHash: string,
     caip2Id: string,
