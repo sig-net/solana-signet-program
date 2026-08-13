@@ -20,54 +20,6 @@ export class EthereumMonitor {
   private static extractionFailureCounts = new Map<string, number>();
 
   /**
-   * Probe the configured EVM RPC for debug_traceTransaction (callTracer)
-   * support at startup. Output extraction reads the mined call's return data
-   * through it (the same method the real MPC uses) and every bidirectional
-   * response depends on that extraction, so a responder without it is
-   * misconfigured: fail loudly up front rather than at the first confirmed
-   * transaction. Many hosted RPC plans do not expose the debug namespace,
-   * point EVM_RPC_URL at a dev node (anvil/geth/reth) or a plan with trace
-   * methods.
-   *
-   * The probe traces a well-formed but nonexistent transaction hash: an RPC
-   * that SUPPORTS the method answers with a transaction-not-found style
-   * error, while one that lacks it answers "method not found" (JSON-RPC
-   * -32601) or similar. Only the latter is a failure, so a transient network
-   * error or a still-starting node never trips it.
-   */
-  static async assertDebugTraceSupport(config: ServerConfig): Promise<void> {
-    const probeTxHash = `0x${'11'.repeat(32)}`;
-    const fetchRequest = new ethers.FetchRequest(config.evmRpcUrl);
-    fetchRequest.timeout = 30_000;
-    const provider = new ethers.JsonRpcProvider(fetchRequest);
-    try {
-      await provider.send('debug_traceTransaction', [
-        probeTxHash,
-        {
-          tracer: 'callTracer',
-          tracerConfig: { onlyTopCall: true },
-          timeout: '5s',
-        },
-      ]);
-    } catch (error) {
-      if (this.isMethodNotSupportedError(error)) {
-        throw new Error(
-          'The EVM RPC configured via EVM_RPC_URL does not support ' +
-            'debug_traceTransaction with the callTracer. The responder needs ' +
-            'it to extract execution outputs (the same method the real MPC ' +
-            'uses). Point EVM_RPC_URL at a node with the debug namespace ' +
-            'enabled, e.g. a local anvil/geth/reth dev node or a provider ' +
-            'plan that includes trace methods.'
-        );
-      }
-      // Any other error (typically transaction-not-found for the probe
-      // hash) proves the method exists: the probe passes.
-    } finally {
-      provider.destroy();
-    }
-  }
-
-  /**
    * Whether an RPC error means the method itself is missing or unsupported
    * (JSON-RPC -32601 or a provider's equivalent), as opposed to a transient
    * or per-transaction failure.
@@ -90,7 +42,7 @@ export class EthereumMonitor {
       messages
     );
   }
-  
+
   static async waitForTransactionAndGetOutput(
     txHash: string,
     caip2Id: string,
@@ -154,7 +106,7 @@ export class EthereumMonitor {
           if (this.isMethodNotSupportedError(error)) {
             this.extractionFailureCounts.delete(txHash);
             console.error(
-              `EthereumMonitor: the configured EVM RPC (EVM_RPC_URL) does not support debug_traceTransaction; cannot extract output for ${txHash}`,
+              `EthereumMonitor: the EVM RPC configured via EVM_RPC_URL does not support debug_traceTransaction with the callTracer, so the mined call's output cannot be extracted for ${txHash}. Point EVM_RPC_URL at a node with the debug namespace enabled, e.g. a local anvil/geth/reth dev node or a provider plan that includes trace methods.`,
               error
             );
             return {

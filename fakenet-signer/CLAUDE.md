@@ -76,3 +76,25 @@ Runtime config in `src/config/Config.ts` includes polling intervals, timeouts, a
 ## TypeScript
 
 Strict mode enabled with `noUncheckedIndexedAccess`. Uses Zod for runtime config validation.
+
+## No startup probe for debug-trace support
+
+Never add a boot-time check that the configured `EVM_RPC_URL` supports
+`debug_traceTransaction`. Every possible probe design is wrong:
+
+- Tracing a dummy or historical tx hash: a forked dev node (anvil
+  `--fork-url`) forwards traces of transactions it did not mine to its fork
+  upstream and relays the answer, so the probe measures the upstream's debug
+  support, not the node's. A debug-less upstream then kills a responder whose
+  actual workload (tracing locally mined txs) works fine.
+- Probing `debug_traceCall` as a stand-in: hosted providers gate trace
+  methods individually, so a plan with `debug_traceTransaction` but without
+  `debug_traceCall` gets wrongly killed.
+- Mining a local tx to trace: needs funded keys or anvil-only cheatcodes,
+  and a probe must never broadcast anything.
+
+The exact check already exists where it matters: output extraction in
+`EthereumMonitor.waitForTransactionAndGetOutput` treats a missing method as
+an immediate `fatal_error` (`debug_trace_not_supported`) with a log line
+naming the fix, and the source chain gets an error response, a designed-for
+outcome clients handle with refund branches.

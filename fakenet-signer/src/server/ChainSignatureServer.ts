@@ -204,11 +204,6 @@ export class ChainSignatureServer {
   async start() {
     console.log('🚀 Response Server');
 
-    // Output extraction for confirmed EVM transactions depends on
-    // debug_traceTransaction: verify the configured RPC supports it and fail
-    // loudly at startup otherwise, instead of at the first confirmed tx.
-    await EthereumMonitor.assertDebugTraceSupport(this.config);
-
     if (this.config.disableSolana) {
       console.log('Solana: disabled (DISABLE_SOLANA)');
     } else {
