@@ -22,6 +22,7 @@ import type { ServerConfig } from '../types';
 
 import type { SigningRequest } from './midnight/signet-request-types';
 import { type ResolvedSignetRequest, SignetRequestFeed } from './midnight/signet-request-feed';
+import { DEFAULT_TICK_GUARD_RELEASE_MS, runTickWithGuardRelease } from './shared/TickGuard';
 
 import {
   bytesToHex,
@@ -217,11 +218,18 @@ export class MidnightMonitor {
     this.pollIntervalId = setInterval(async () => {
       // A tick can outlast the poll interval (wallet sync, contract writes).
       // Overlapping ticks would write concurrently to the single-writer
-      // private-state store and deadlock on its lock (LEVEL_LOCKED).
+      // private-state store and deadlock on its lock (LEVEL_LOCKED). The
+      // guard release bounds the flip side: a tick that hangs on an
+      // un-timeouted await would otherwise hold this flag forever and kill
+      // discovery silently.
       if (this.polling) return;
       this.polling = true;
       try {
-        await this.fetchAndProcessRequests(handlers.onSigningRequest);
+        await runTickWithGuardRelease(
+          'MidnightMonitor poll',
+          DEFAULT_TICK_GUARD_RELEASE_MS,
+          () => this.fetchAndProcessRequests(handlers.onSigningRequest)
+        );
       } catch (error) {
         console.error('MidnightMonitor: Poll error:', error);
       } finally {
