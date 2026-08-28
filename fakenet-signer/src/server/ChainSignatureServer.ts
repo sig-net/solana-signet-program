@@ -16,7 +16,10 @@ import type {
   SignatureResponse,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
-import { DEFAULT_TICK_GUARD_RELEASE_MS, runTickWithGuardRelease } from '../modules/shared/TickGuard';
+import {
+  DEFAULT_TICK_GUARD_RELEASE_MS,
+  runTickWithGuardRelease,
+} from '../modules/shared/TickGuard';
 import { serverConfigSchema } from '../types';
 import {
   type ChainSignaturesProgram,

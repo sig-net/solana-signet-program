@@ -88,16 +88,21 @@ export class SignetRequestFeed {
   private async notificationPointers(): Promise<
     { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }[]
   > {
-    const events = await this.eventSource.querySignetEvents(this.signetContractAddress);
+    const events = await this.eventSource.querySignetEvents(
+      this.signetContractAddress
+    );
     const pointers = new Map<
       string,
       { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }
     >();
     for (const event of events) {
-      if (!isSignetEventNamed(event, SignetEventName.SignBidirectionalEvent)) continue;
+      if (!isSignetEventNamed(event, SignetEventName.SignBidirectionalEvent))
+        continue;
       let pointer;
       try {
-        const post = decodeSignBidirectionalEventNotificationPayload(event.payload);
+        const post = decodeSignBidirectionalEventNotificationPayload(
+          event.payload
+        );
         const notification = decodeSignBidirectionalNotification(post.event);
         pointer = {
           callerAddress: notification.callerAddress,
@@ -117,7 +122,11 @@ export class SignetRequestFeed {
     }
     return [...pointers.values()].sort((a, b) => {
       const byCaller =
-        a.callerAddress < b.callerAddress ? -1 : a.callerAddress > b.callerAddress ? 1 : 0;
+        a.callerAddress < b.callerAddress
+          ? -1
+          : a.callerAddress > b.callerAddress
+            ? 1
+            : 0;
       if (byCaller !== 0) return byCaller;
       return a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0;
     });
@@ -143,7 +152,9 @@ export class SignetRequestFeed {
       let raw = states.get(pointer.callerAddress);
       if (raw === undefined) {
         try {
-          raw = (await this.source.queryContractState(pointer.callerAddress))?.data ?? null;
+          raw =
+            (await this.source.queryContractState(pointer.callerAddress))
+              ?.data ?? null;
         } catch {
           raw = null;
         }
@@ -152,7 +163,11 @@ export class SignetRequestFeed {
       if (raw === null) {
         continue; // no state at the named caller: nothing to serve yet
       }
-      const request = lookupSignetRequestAt(raw, pointer.requestsPath, pointer.requestId);
+      const request = lookupSignetRequestAt(
+        raw,
+        pointer.requestsPath,
+        pointer.requestId
+      );
       if (request === undefined) {
         continue; // forged pointer, or the ledger write has not indexed yet
       }

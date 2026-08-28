@@ -21,8 +21,14 @@ import { ethers } from 'ethers';
 import type { ServerConfig } from '../types';
 
 import type { SigningRequest } from './midnight/signet-request-types';
-import { type ResolvedSignetRequest, SignetRequestFeed } from './midnight/signet-request-feed';
-import { DEFAULT_TICK_GUARD_RELEASE_MS, runTickWithGuardRelease } from './shared/TickGuard';
+import {
+  type ResolvedSignetRequest,
+  SignetRequestFeed,
+} from './midnight/signet-request-feed';
+import {
+  DEFAULT_TICK_GUARD_RELEASE_MS,
+  runTickWithGuardRelease,
+} from './shared/TickGuard';
 
 import {
   bytesToHex,
@@ -89,7 +95,7 @@ export interface SignedResponse {
   requestId: string;
   /** The exact unpadded serialised output the attestation commits to, as hex. */
   serializedOutput: string;
-  /** The signed attestation digest keccak256(requestId || output), as hex. */
+  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, output])), as hex. */
   attestationDigest: string;
   /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
   bigRx: string;
@@ -593,9 +599,10 @@ export class MidnightMonitor {
     // padding, no fixed field width. The output itself travels off-chain.
     const serializedOutput = evmReturnData;
 
-    // keccak256(requestId || output), matching the circuit clients verify
-    // against in-circuit (verifyRespondBidirectionalEvent). A mismatch here
-    // makes every response fail at claim time.
+    // The Poseidon attestation digest over (requestId, output), matching the
+    // circuit clients verify against in-circuit
+    // (verifyRespondBidirectionalEvent). A mismatch here makes every response
+    // fail at claim time.
     const attestationDigest = calculateSignetAttestationDigest(
       requestId,
       serializedOutput
