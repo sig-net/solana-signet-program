@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![allow(unexpected_cfgs)]
+#![allow(deprecated)] // TODO: remove after updating Anchor
 
 pub mod evm;
 use anchor_lang::prelude::*;
@@ -398,7 +399,7 @@ pub mod chain_signatures {
         serialized_output: Vec<u8>,
         signature: Signature,
     ) -> Result<()> {
-        emit!(RespondBidirectionalEvent {
+        emit_cpi!(RespondBidirectionalEvent {
             request_id,
             responder: *ctx.accounts.responder.key,
             serialized_output,
@@ -558,12 +559,14 @@ pub struct RespondError<'info> {
     pub responder: Signer<'info>,
 }
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct GetSignatureDeposit<'info> {
     #[account(seeds = [b"program-state"], bump)]
     pub program_state: Account<'info, ProgramState>,
 }
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct ReadRespond<'info> {
     pub responder: Signer<'info>,
