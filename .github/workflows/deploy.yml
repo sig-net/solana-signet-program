@@ -2,31 +2,31 @@ name: Deploy Program
 
 on:
   workflow_dispatch:
-    inputs:
-      cluster:
-        description: Target cluster
-        type: choice
-        options: [testnet, devnet]
 
 concurrency:
-  group: deploy-${{ inputs.cluster }}
+  group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy to ${{ inputs.cluster }}
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    environment: sol-${{ inputs.cluster }}
     permissions:
       contents: read
+    environment: sol-${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
     container:
       image: ghcr.io/${{ github.repository }}/signet-anchor-build-env:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Guard branch
+        run: |
+          case "${{ github.ref_name }}" in
+            main|develop) ;;
+            *) echo "ref ${{ github.ref }} cannot deploy" >&2; exit 1 ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -39,7 +39,7 @@ jobs:
       - name: Write keypairs from secrets
         env:
           DEPLOYER_KEY: ${{ secrets.SOL_DEPLOYER_KEY }}
-          PROGRAM_KEY: ${{ inputs.cluster == 'devnet' && secrets.SOL_PROGRAM_KEY_DEVNET || secrets.SOL_PROGRAM_KEY_TESTNET }}
+          PROGRAM_KEY: ${{ github.ref_name == 'develop' && secrets.SOL_PROGRAM_KEY_DEVNET || secrets.SOL_PROGRAM_KEY_TESTNET }}
         run: |
           printf '%s' "$DEPLOYER_KEY" > "$HOME/deployer.json"
           printf '%s' "$PROGRAM_KEY"  > "$HOME/program-key.json"
@@ -47,17 +47,17 @@ jobs:
 
       - name: Deploy
         working-directory: signet-program
-        run: scripts/deploy.sh ${{ inputs.cluster }}
+        run: scripts/deploy.sh ${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
 
       - name: Triage on failure
         if: failure()
         working-directory: signet-program
-        run: scripts/triage.sh ${{ inputs.cluster }}
+        run: scripts/triage.sh ${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chain_signatures-${{ inputs.cluster }}-${{ github.sha }}
+          name: chain_signatures-${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}-${{ github.sha }}
           path: |
             signet-program/target/deploy/chain_signatures.so
             signet-program/target/idl/*.json

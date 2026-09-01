@@ -1,9 +1,15 @@
 # Deploying the signet Solana program
 
 Deploys run through the **Deploy Program** workflow (`.github/workflows/deploy.yml`),
-triggered manually from GitHub Actions (cluster: `testnet` or `devnet`).
-**Dispatch is restricted to `main` branch** (merge first, then deploy).
-Builds happen inside the pinned `signet-anchor-build-env` container.
+triggered manually from GitHub Actions. The target cluster is derived from the branch:
+
+| Branch | Cluster |
+|---|---|
+| `main` | `testnet` |
+| `develop` | `devnet` |
+
+Dispatching from any other branch fails. Builds happen inside the pinned
+`signet-anchor-build-env` container.
 
 ## What a deploy does
 
@@ -29,8 +35,8 @@ their data; the close is only the BPF loader program-data account.
 
 | Name | Protection | Purpose |
 |---|---|---|
-| `sol-testnet` | none | testnet deploys run freely |
-| `sol-devnet` | required reviewers | devnet is shared — every deploy (destructive close) needs a human click |
+| `sol-testnet` | required reviewers | testnet deploys (from `main`) need a human click |
+| `sol-devnet` | none | devnet deploys (from `develop`) run freely |
 
 **Secrets** (Settings → Secrets and variables → Actions) — each is the JSON
 keypair file contents:
