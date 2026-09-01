@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      packages: read
     environment: sol-${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
     container:
       image: ghcr.io/${{ github.repository }}/signet-anchor-build-env:latest
