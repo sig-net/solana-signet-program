@@ -1,0 +1,64 @@
+name: Deploy Program
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    environment: sol-${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
+    container:
+      image: ghcr.io/${{ github.repository }}/signet-anchor-build-env:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Guard branch
+        run: |
+          case "${{ github.ref_name }}" in
+            main|develop) ;;
+            *) echo "ref ${{ github.ref }} cannot deploy" >&2; exit 1 ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache smoke test build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: signet-program/scripts/smoke_respond_bidirectional
+          key: smoke
+
+      - name: Write keypairs from secrets
+        env:
+          DEPLOYER_KEY: ${{ secrets.SOL_DEPLOYER_KEY }}
+          PROGRAM_KEY: ${{ github.ref_name == 'develop' && secrets.SOL_PROGRAM_KEY_DEVNET || secrets.SOL_PROGRAM_KEY_TESTNET }}
+        run: |
+          printf '%s' "$DEPLOYER_KEY" > "$HOME/deployer.json"
+          printf '%s' "$PROGRAM_KEY"  > "$HOME/program-key.json"
+          chmod 600 "$HOME"/*.json
+
+      - name: Deploy
+        working-directory: signet-program
+        run: scripts/deploy.sh ${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
+
+      - name: Triage on failure
+        if: failure()
+        working-directory: signet-program
+        run: scripts/triage.sh ${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chain_signatures-${{ github.ref_name == 'main' && 'testnet' || 'devnet' }}-${{ github.sha }}
+          path: |
+            signet-program/target/deploy/chain_signatures.so
+            signet-program/target/idl/*.json
+          if-no-files-found: error
