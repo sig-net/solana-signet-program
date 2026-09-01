@@ -1,0 +1,16 @@
+[package]
+name = "smoke_respond_bidirectional"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anchor-lang = "0.31.1"
+signet = { package = "chain-signatures-solana-program", path = "../../programs/signet" }
+solana-client = "2.3"
+solana-sdk = "2.3"
+solana-transaction-status = "2.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+anyhow = "1"
+sha2 = "0.10"
+
+[workspace]
