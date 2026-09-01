@@ -64,10 +64,12 @@ else
 fi
 
 step "fund deployer"
-NEED=$(( $(solana rent "$MAX_LEN" | grep -oE '[0-9]+\.[0-9]+' | tr -d '.') * 2 + 10000000 ))
+sol_to_lamports() { LC_ALL=C awk -v v="$1" 'BEGIN{printf "%.9f", v+0}' | tr -d '.'; }
+RENT_LAMPORTS=$(sol_to_lamports "$(solana rent "$MAX_LEN" | grep -oE '[0-9]+\.[0-9]+')")
+NEED=$(( RENT_LAMPORTS * 2 + 10000000 ))
 echo "target balance: $NEED lamports"
 for _ in $(seq 1 8); do
-  BALANCE=$(solana balance | grep -oE '[0-9]+(\.[0-9]+)?' | tr -d '.')
+  BALANCE=$(sol_to_lamports "$(solana balance | grep -oE '[0-9]+\.?[0-9]*' | head -1)")
   if [ "${BALANCE:-0}" -ge "$NEED" ]; then
     echo "funded: $BALANCE lamports"; break
   fi
