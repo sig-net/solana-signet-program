@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
     let blockhash = rpc.get_latest_blockhash().await?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
-    let sig: Signature = rpc.send_and_commit_transaction(&tx).await?;
+    let sig: Signature = rpc.send_and_confirm_transaction(&tx).await?;
     println!("tx committed: {sig}");
 
     let confirmed = rpc
@@ -159,7 +159,7 @@ async fn ensure_initialized(
     );
     let blockhash = rpc.get_latest_blockhash().await?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
-    let sig: Signature = rpc.send_and_commit_transaction(&tx).await?;
+    let sig: Signature = rpc.send_and_confirm_transaction(&tx).await?;
     println!("initialized program_state {state_pda} (admin=payer, deposit=0, chain_id={chain_id}) tx={sig}");
     Ok(())
 }
@@ -176,6 +176,6 @@ fn load_keypair(path: &str) -> anyhow::Result<Keypair> {
         .trim_end_matches(']')
         .split(',')
         .map(|s| s.trim().parse::<u8>().map_err(|e| anyhow::anyhow!("{e}")))
-        .collect()?;
-    Ok(Keypair::from_bytes(&bytes)?)
+        .collect::<Result<Vec<u8>, _>>()?;
+    Ok(Keypair::try_from(bytes.as_slice())?)
 }
