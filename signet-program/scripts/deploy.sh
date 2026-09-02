@@ -9,7 +9,7 @@ case "$CLUSTER" in
   testnet) RPC_URL=https://api.testnet.solana.com
            PROGRAM_ID=SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg ;;
   devnet)  RPC_URL=https://api.devnet.solana.com
-           PROGRAM_ID=SigDuEPNeDjh3oJv7MUraPN7zaTFomS6ZWfpXwjUg4B ;;
+           PROGRAM_ID=SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM ;;
   *) echo "unknown cluster: $CLUSTER" >&2; exit 1 ;;
 esac
 
@@ -54,13 +54,6 @@ if solana program show "$PROGRAM_ID" >/dev/null 2>&1; then
     echo "deployer ($DEPLOYER_PUBKEY) cannot replace a program owned by $ONCHAIN_AUTH" >&2
     exit 1
   fi
-fi
-
-step "close existing program"
-if solana program show "$PROGRAM_ID" >/dev/null 2>&1; then
-  solana program close "$PROGRAM_ID" --bypass-warning
-else
-  echo "fresh deploy — nothing to close"
 fi
 
 step "fund deployer"
