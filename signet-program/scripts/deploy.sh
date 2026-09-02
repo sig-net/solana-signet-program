@@ -19,7 +19,7 @@ MAX_LEN=${MAX_LEN:-524288}
 CHAIN_ID="solana:$CLUSTER"
 SO=target/deploy/chain_signatures.so
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 step() { printf '\n==> %s\n' "$*"; }
 
 step "verify program keypair"
