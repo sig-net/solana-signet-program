@@ -6,7 +6,7 @@ chain_signatures = "SigMcRMjKfnC7RDG5q4yUMZM1s5KJ9oYTPP4NmJRDRw"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.devnet]
-chain_signatures = "SigDuEPNeDjh3oJv7MUraPN7zaTFomS6ZWfpXwjUg4B"
+chain_signatures = "SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM"
 proxy_test_cpi = "76SSSaQQjQ35d8shjHUsUNFwfpnJamVAiCN5hWzuF84f"
 
 [programs.testnet]
