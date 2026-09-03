@@ -16,6 +16,10 @@ import type {
   SignatureResponse,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
+import {
+  DEFAULT_TICK_GUARD_RELEASE_MS,
+  runTickWithGuardRelease,
+} from '../modules/shared/TickGuard';
 import { serverConfigSchema } from '../types';
 import {
   type ChainSignaturesProgram,
@@ -498,7 +502,11 @@ export class ChainSignatureServer {
       if (this.monitoring) return;
       this.monitoring = true;
       try {
-        await this.runTransactionMonitorTick();
+        await runTickWithGuardRelease(
+          'Transaction monitor',
+          DEFAULT_TICK_GUARD_RELEASE_MS,
+          () => this.runTransactionMonitorTick()
+        );
       } catch (error) {
         console.error('Transaction monitor tick error:', error);
       } finally {
