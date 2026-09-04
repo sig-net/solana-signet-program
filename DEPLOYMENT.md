@@ -22,7 +22,10 @@ One idempotent operation, no modes to choose:
    deploy` reuses the existing program data account; capacity 512 KB reserved
    on first deploy, extendable later with `solana program extend`).
 4. Verify: `solana program show` + a smoke test that initializes
-   `program-state` if absent (admin = deployer, deposit 0) and sends a real
+   `program-state` if absent (admin = deployer, deposit 1 lamport, canonical
+   chain id `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`), **asserts the
+   on-chain `chain_id` and deposit match on every deploy** (hard-fails with
+   the exact `admin` remediation command otherwise), and sends a real
    `respond_bidirectional` transaction, asserting the event lands in the
    transaction's **inner instructions** (`emit_cpi!`).
 5. Upload the exact `.so` + IDL as workflow artifacts.
@@ -50,3 +53,17 @@ keypair file contents:
 
 The workflow hard-fails if a program keypair secret doesn't derive the expected
 id, so cluster/secret mixups cannot ship.
+
+## Admin maintenance
+
+`chain_id` was historically immutable (set only by `initialize`, which cannot
+rerun). The program now has an admin-only `update_chain_id` instruction; the
+`admin` binary in `scripts/smoke_respond_bidirectional` drives it:
+
+```sh
+cargo run --release --manifest-path scripts/smoke_respond_bidirectional/Cargo.toml \
+  --bin admin -- <rpc_url> <deployer_keypair> <program_id> \
+  update-chain-id solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp
+```
+
+Also supports `update-deposit <lamports>`.

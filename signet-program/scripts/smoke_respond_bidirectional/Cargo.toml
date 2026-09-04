@@ -3,6 +3,14 @@ name = "smoke_respond_bidirectional"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "smoke_respond_bidirectional"
+path = "src/main.rs"
+
+[[bin]]
+name = "admin"
+path = "src/admin.rs"
+
 [dependencies]
 anchor-lang = "0.31.1"
 signet = { package = "chain-signatures-solana-program", path = "../../programs/signet" }
