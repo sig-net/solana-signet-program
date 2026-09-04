@@ -95,7 +95,7 @@ solana program close --buffers --bypass-warning >/dev/null 2>&1 || true
 step "verify"
 sleep 5
 solana program show "$PROGRAM_ID"
-cargo run --release --manifest-path scripts/smoke_respond_bidirectional/Cargo.toml -- \
+cargo run --release --manifest-path scripts/smoke_respond_bidirectional/Cargo.toml --bin smoke_respond_bidirectional -- \
   "$RPC_URL" "$DEPLOYER_KEYPAIR" "$PROGRAM_ID" "$CHAIN_ID"
 
 step "done"
