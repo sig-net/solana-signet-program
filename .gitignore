@@ -69,6 +69,3 @@ pnpm-lock.yaml
 
 # Playwright MCP scratch output (page snapshots, console logs)
 .playwright-mcp/
-
-# Keypairs — never commit
-solana_keys/
