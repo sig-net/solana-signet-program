@@ -13,7 +13,7 @@ use solana_transaction_status::{
     option_serializer::OptionSerializer, UiInstruction, UiParsedInstruction,
     UiTransactionEncoding,
 };
-use signet::{AffinePoint, RespondBidirectionalEvent, Signature as ProgSignature};
+use signet::{AffinePoint, ProgramState, RespondBidirectionalEvent, Signature as ProgSignature};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     let payer = load_keypair(&payer_path)?;
     let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
 
-    ensure_initialized(&rpc, &payer, &program_id, &chain_id).await?;
+    ensure_initialized(&rpc, &payer, &program_id, &chain_id, &EXPECTED_DEPOSIT).await?;
 
     let ix_disc: [u8; 8] = sha2::Sha256::digest(b"global:respond_bidirectional")[..8]
         .try_into()
@@ -128,15 +128,18 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+const EXPECTED_DEPOSIT: u64 = 1;
+
 async fn ensure_initialized(
     rpc: &RpcClient,
     payer: &Keypair,
     program_id: &Pubkey,
     chain_id: &str,
+    expected_deposit: &u64,
 ) -> anyhow::Result<()> {
     let (state_pda, _) = Pubkey::find_program_address(&[b"program-state"], program_id);
-    if rpc.get_account(&state_pda).await.is_ok() {
-        println!("program_state already initialized: {state_pda}");
+    if let Ok(account) = rpc.get_account(&state_pda).await {
+        verify_state(&account, chain_id, expected_deposit)?;
         return Ok(());
     }
 
@@ -144,7 +147,7 @@ async fn ensure_initialized(
         .try_into()
         .unwrap();
     let mut data = ix_disc.to_vec();
-    data.extend_from_slice(&0u64.to_le_bytes());
+    data.extend_from_slice(&expected_deposit.to_le_bytes());
     data.extend_from_slice(&(chain_id.len() as u32).to_le_bytes());
     data.extend_from_slice(chain_id.as_bytes());
 
@@ -160,7 +163,35 @@ async fn ensure_initialized(
     let blockhash = rpc.get_latest_blockhash().await?;
     let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
     let sig: Signature = rpc.send_and_confirm_transaction(&tx).await?;
-    println!("initialized program_state {state_pda} (admin=payer, deposit=0, chain_id={chain_id}) tx={sig}");
+    println!("initialized program_state {state_pda} (admin=payer, deposit={expected_deposit}, chain_id={chain_id}) tx={sig}");
+    let account = rpc.get_account(&state_pda).await?;
+    verify_state(&account, chain_id, expected_deposit)
+}
+
+fn verify_state(
+    account: &solana_sdk::account::Account,
+    chain_id: &str,
+    expected_deposit: &u64,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        account.data.len() >= 8 && account.data[..8] == *ProgramState::DISCRIMINATOR,
+        "program-state account has unexpected layout"
+    );
+    let state = ProgramState::deserialize(&mut &account.data[8..])?;
+    anyhow::ensure!(
+        state.chain_id == chain_id,
+        "program_state.chain_id is {:?}, expected {chain_id:?} — fix with: admin update-chain-id {chain_id}",
+        state.chain_id
+    );
+    anyhow::ensure!(
+        state.signature_deposit == *expected_deposit,
+        "program_state.signature_deposit is {}, expected {expected_deposit} — fix with: admin update-deposit {expected_deposit}",
+        state.signature_deposit
+    );
+    println!(
+        "program_state OK: admin={} deposit={} chain_id={}",
+        state.admin, state.signature_deposit, state.chain_id
+    );
     Ok(())
 }
 

@@ -16,7 +16,9 @@ esac
 DEPLOYER_KEYPAIR=${DEPLOYER_KEYPAIR:-$HOME/deployer.json}
 PROGRAM_KEYPAIR=${PROGRAM_KEYPAIR:-$HOME/program-key.json}
 MAX_LEN=${MAX_LEN:-524288}
-CHAIN_ID="solana:$CLUSTER"
+# Canonical CAIP-2 Solana chain id used by the MPC/KDF stack — must match
+# KDF_CHAIN_IDS.SOLANA in signet.js on every cluster.
+CHAIN_ID="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
 SO=target/deploy/chain_signatures.so
 
 cd "$(dirname "$0")/.."
