@@ -2,6 +2,7 @@
 name = "smoke_respond_bidirectional"
 version = "0.1.0"
 edition = "2021"
+default-run = "smoke_respond_bidirectional"
 
 [[bin]]
 name = "smoke_respond_bidirectional"

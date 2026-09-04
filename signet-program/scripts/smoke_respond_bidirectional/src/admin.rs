@@ -48,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         vec![
             AccountMeta::new(state_pda, false),
             AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ],
     );
 
