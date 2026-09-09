@@ -10,25 +10,27 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { CompiledContract } from '@midnight-ntwrk/compact-js/effect';
-import { httpClientProvingProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
+import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import {
-  createProofProvider,
-  ZKConfigRegistry,
-  zkConfigToProvingKeyMaterial,
   type MidnightProvider,
   type ProofProvider,
   type UnboundTransaction,
   type WalletProvider,
   type ZKConfigProvider,
 } from '@midnight-ntwrk/midnight-js/types';
-import type {
-  ProvingKeyMaterial,
-  ProvingProvider,
-} from '@midnightntwrk/ledger-v9';
-import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
+import type { FinalizedTransaction } from '@midnightntwrk/ledger-v9';
+import {
+  ProtocolVersion,
+  WalletTransaction,
+} from '@midnightntwrk/wallet-sdk-abstractions';
+import {
+  DefaultForkSchedule,
+  type WalletFacade,
+} from '@midnightntwrk/wallet-sdk-facade';
+import { Either } from 'effect';
 import {
   Contract,
   SIGNET_CONTRACT_PRIVATE_STATE_ID,
@@ -75,81 +77,63 @@ const BALANCE_TTL_MS = 30 * 60 * 1000;
 /**
  * Adapt a started {@link WalletFacade} + {@link AccountKeys} to midnight-js's
  * `WalletProvider & MidnightProvider`. `balanceTx` balances the unbound
- * transaction with the account's shielded/dust keys, signs, then finalizes
- * (which proves); `submitTx` relays through the facade. The casts bridge the
- * midnight-js-protocol vs ledger-v9 nominal type identities of the same
- * underlying classes.
+ * transaction with the account's wallets, signs, then finalizes (which
+ * proves); `submitTx` relays through the facade.
+ *
+ * midnight-js hands over and expects bare ledger transactions, while the
+ * facade only accepts {@link WalletTransaction} handles stamped with the
+ * protocol version they were authored for. Every crossing here stamps the
+ * facade's active protocol version and unwraps within that version's epoch,
+ * so a chain still on the ledger-v8 side of the fork is refused before
+ * anything is proved against the wrong ledger.
  */
 function createWalletAndMidnightProvider(
   facade: WalletFacade,
   keys: AccountKeys
 ): WalletProvider & MidnightProvider {
+  const activeProtocolVersion =
+    async (): Promise<ProtocolVersion.ProtocolVersion> =>
+      (await facade.waitForSyncedState()).activeProtocolVersion;
+
   return {
     getCoinPublicKey: () => keys.shieldedSecretKeys.coinPublicKey,
     getEncryptionPublicKey: () => keys.shieldedSecretKeys.encryptionPublicKey,
     async balanceTx(tx: UnboundTransaction, ttl?: Date) {
+      const version = await activeProtocolVersion();
       const recipe = await facade.balanceUnboundTransaction(
-        tx as never,
-        {
-          shieldedSecretKeys: keys.shieldedSecretKeys,
-          dustSecretKey: keys.dustSecretKey,
-        },
+        WalletTransaction.adopt('Unbound', tx, version),
         { ttl: ttl ?? new Date(Date.now() + BALANCE_TTL_MS) }
       );
       const signed = await facade.signRecipe(
         recipe,
         keys.unshieldedKeystore.signDataAsync
       );
-      return (await facade.finalizeRecipe(signed)) as never;
+      const finalized = await facade.finalizeRecipe(signed);
+      return Either.getOrThrowWith(
+        WalletTransaction.unwrapWithin<FinalizedTransaction>(
+          finalized,
+          ProtocolVersion.epochOf(version, DefaultForkSchedule.v9)
+        ),
+        (mismatch) => mismatch
+      );
     },
-    submitTx: (tx) => facade.submitTransaction(tx as never) as never,
+    async submitTx(tx: FinalizedTransaction) {
+      return facade.submitTransaction(
+        WalletTransaction.adopt('Finalized', tx, await activeProtocolVersion())
+      );
+    },
   };
 }
 
 /**
  * Proof provider via the proof server's /check + /prove endpoints, with ZK key
- * material resolved from the contract's compiled assets. Exists instead of
- * midnight-js's own `httpClientProofProvider` because that one (5.0.0-beta.3)
- * lacks the `lookupKey` the ledger-v9 1.0.0-rc.3 WASM validates for — delete
- * in favor of `httpClientProofProvider` once midnight-js ships a beta aligned
- * with ledger-v9 1.0.0-rc.3. (Ported from lib's createProofServerProvider.)
+ * material resolved from the contract's compiled assets.
  */
 function createProofServerProvider<K extends string>(
   proofServerUrl: string,
   zkConfigProvider: ZKConfigProvider<K>
 ): ProofProvider {
-  const registry = new ZKConfigRegistry([
-    zkConfigProvider as ZKConfigProvider<string>,
-  ]);
-
-  // Pass the REGISTRY (not the provider) to the base: its /check and /prove
-  // key resolution special-cases a ZKConfigRegistry. The `as` bridges the
-  // nominal type: the base only ever calls `.resolveKeyLocation` on it.
-  const base = httpClientProvingProvider(
-    proofServerUrl,
-    registry as unknown as ZKConfigProvider<string>
-  );
-
-  const lookupKey = async (
-    keyLocation: string
-  ): Promise<ProvingKeyMaterial | undefined> => {
-    const resolved = await registry.resolveKeyLocation(keyLocation);
-    if (resolved !== undefined) {
-      return zkConfigToProvingKeyMaterial(resolved);
-    }
-    try {
-      return zkConfigToProvingKeyMaterial(
-        await zkConfigProvider.get(keyLocation as K)
-      );
-    } catch {
-      // Protocol builtins ("midnight/...") resolve to undefined and are
-      // supplied by the proof server itself.
-      return undefined;
-    }
-  };
-
-  const provingProvider: ProvingProvider = { ...base, lookupKey };
-  return createProofProvider(provingProvider);
+  return httpClientProofProvider({ url: proofServerUrl, zkConfigProvider });
 }
 
 /**

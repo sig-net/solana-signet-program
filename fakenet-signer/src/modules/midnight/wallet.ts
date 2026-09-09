@@ -8,7 +8,7 @@ import {
   type UnshieldedKeystore,
   UnshieldedWallet,
 } from '@midnightntwrk/wallet-sdk-unshielded-wallet';
-import { HDWallet, Roles } from '@midnightntwrk/wallet-sdk-hd';
+import { WalletSeeds } from '@midnightntwrk/wallet-sdk-hd';
 import {
   WalletFacade,
   mergeWalletEntries,
@@ -33,43 +33,32 @@ export const COST_PARAMETERS: {
 
 /** The live key material for one account. Reused for signing / balancing. */
 export interface AccountKeys {
+  /** The three per-wallet seeds the facade and its sub-wallets start from. */
+  seeds: WalletSeeds;
+  /** The shielded key pair the seeds derive: its coin and encryption public keys identify the account. */
   shieldedSecretKeys: ledger.ZswapSecretKeys;
-  dustSecretKey: ledger.DustSecretKey;
   unshieldedKeystore: UnshieldedKeystore;
 }
 
 /**
- * Parse a seed and derive the three role keys (Zswap / NightExternal / Dust).
- * Pure crypto — no network. This is the step that exercises the ledger WASM.
+ * Parse a seed and derive the three per-wallet seeds (Zswap / NightExternal /
+ * Dust roles at account 0, address index 0) plus the keys read off them.
+ * Pure crypto, no network. This is the step that exercises the ledger WASM.
  */
 export function deriveAccountKeys(
   seed: string,
   networkId: NetworkId
 ): AccountKeys {
   const { seed: seedBytes } = parseSeed(seed);
+  const seeds = WalletSeeds.fromMasterSeed(seedBytes);
 
-  const hd = HDWallet.fromSeed(seedBytes);
-  if (hd.type !== 'seedOk')
-    throw new Error('HDWallet.fromSeed failed (seedError).');
-
-  const derived = hd.hdWallet
-    .selectAccount(0)
-    .selectRoles([Roles.Zswap, Roles.NightExternal, Roles.Dust])
-    .deriveKeysAt(0);
-  if (derived.type !== 'keysDerived')
-    throw new Error('deriveKeysAt failed (keyOutOfBounds).');
-  hd.hdWallet.clear();
-
-  const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(
-    derived.keys[Roles.Zswap]
-  );
-  const dustSecretKey = ledger.DustSecretKey.fromSeed(derived.keys[Roles.Dust]);
+  const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(seeds.shielded);
   const unshieldedKeystore = createKeystore(
-    { kind: 'schnorr', secret: derived.keys[Roles.NightExternal] },
+    { kind: 'schnorr', secret: seeds.unshielded },
     networkId
   );
 
-  return { shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
+  return { seeds, shieldedSecretKeys, unshieldedKeystore };
 }
 
 /**
@@ -96,16 +85,11 @@ export function initialiseWalletFacade(
         mergeWalletEntries
       ),
     },
-    shielded: (cfg) =>
-      ShieldedWallet(cfg).startWithSecretKeys(keys.shieldedSecretKeys),
+    shielded: (cfg) => ShieldedWallet(cfg).startWithSeed(keys.seeds.shielded),
     unshielded: (cfg) =>
       UnshieldedWallet(cfg).startWithPublicKey(
         UnshieldedPublicKey.fromKeyStore(keys.unshieldedKeystore)
       ),
-    dust: (cfg) =>
-      DustWallet(cfg).startWithSecretKey(
-        keys.dustSecretKey,
-        ledger.LedgerParameters.initialParameters().dust
-      ),
+    dust: (cfg) => DustWallet(cfg).startWithSeed(keys.seeds.dust),
   });
 }

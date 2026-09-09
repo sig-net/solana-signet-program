@@ -305,7 +305,7 @@ export class MidnightMonitor {
     );
     const keys = deriveAccountKeys(seed, this.config.networkId);
     const walletFacade = await initialiseWalletFacade(keys, this.nodeConfig);
-    await walletFacade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
+    await walletFacade.start(keys.seeds);
     await walletFacade.waitForSyncedState();
     console.log('MidnightMonitor: responder wallet synced');
     return { keys, walletFacade };
