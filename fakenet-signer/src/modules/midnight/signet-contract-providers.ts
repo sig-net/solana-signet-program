@@ -21,16 +21,7 @@ import {
   type WalletProvider,
   type ZKConfigProvider,
 } from '@midnight-ntwrk/midnight-js/types';
-import type { FinalizedTransaction } from '@midnightntwrk/ledger-v9';
-import {
-  ProtocolVersion,
-  WalletTransaction,
-} from '@midnightntwrk/wallet-sdk-abstractions';
-import {
-  DefaultForkSchedule,
-  type WalletFacade,
-} from '@midnightntwrk/wallet-sdk-facade';
-import { Either } from 'effect';
+import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
 import {
   Contract,
   SIGNET_CONTRACT_PRIVATE_STATE_ID,
@@ -77,51 +68,32 @@ const BALANCE_TTL_MS = 30 * 60 * 1000;
 /**
  * Adapt a started {@link WalletFacade} + {@link AccountKeys} to midnight-js's
  * `WalletProvider & MidnightProvider`. `balanceTx` balances the unbound
- * transaction with the account's wallets, signs, then finalizes (which
- * proves); `submitTx` relays through the facade.
- *
- * midnight-js hands over and expects bare ledger transactions, while the
- * facade only accepts {@link WalletTransaction} handles stamped with the
- * protocol version they were authored for. Every crossing here stamps the
- * facade's active protocol version and unwraps within that version's epoch,
- * so a chain still on the ledger-v8 side of the fork is refused before
- * anything is proved against the wrong ledger.
+ * transaction with the account's shielded/dust keys, signs, then finalizes
+ * (which proves); `submitTx` relays through the facade.
  */
 function createWalletAndMidnightProvider(
   facade: WalletFacade,
   keys: AccountKeys
 ): WalletProvider & MidnightProvider {
-  const activeProtocolVersion =
-    async (): Promise<ProtocolVersion.ProtocolVersion> =>
-      (await facade.waitForSyncedState()).activeProtocolVersion;
-
   return {
     getCoinPublicKey: () => keys.shieldedSecretKeys.coinPublicKey,
     getEncryptionPublicKey: () => keys.shieldedSecretKeys.encryptionPublicKey,
     async balanceTx(tx: UnboundTransaction, ttl?: Date) {
-      const version = await activeProtocolVersion();
       const recipe = await facade.balanceUnboundTransaction(
-        WalletTransaction.adopt('Unbound', tx, version),
+        tx,
+        {
+          shieldedSecretKeys: keys.shieldedSecretKeys,
+          dustSecretKey: keys.dustSecretKey,
+        },
         { ttl: ttl ?? new Date(Date.now() + BALANCE_TTL_MS) }
       );
       const signed = await facade.signRecipe(
         recipe,
         keys.unshieldedKeystore.signDataAsync
       );
-      const finalized = await facade.finalizeRecipe(signed);
-      return Either.getOrThrowWith(
-        WalletTransaction.unwrapWithin<FinalizedTransaction>(
-          finalized,
-          ProtocolVersion.epochOf(version, DefaultForkSchedule.v9)
-        ),
-        (mismatch) => mismatch
-      );
+      return await facade.finalizeRecipe(signed);
     },
-    async submitTx(tx: FinalizedTransaction) {
-      return facade.submitTransaction(
-        WalletTransaction.adopt('Finalized', tx, await activeProtocolVersion())
-      );
-    },
+    submitTx: (tx) => facade.submitTransaction(tx),
   };
 }
 
