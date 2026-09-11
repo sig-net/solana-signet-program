@@ -37,7 +37,6 @@ import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 // schema-driven packed bytes clients recompute at claim time.
 import {
   deriveEpsilon,
-  MIDNIGHT_TESTNET_CHAIN_ID,
   MPC_FAILURE_OUTPUT,
   serializeRespondOutput,
   type AbiDecodedOutput,
@@ -368,11 +367,7 @@ export class ChainSignatureServer {
     // comes from the signet library (the v2 colon-separated scheme clients
     // derive the expected signer with), so both sides agree by construction.
     const pathString = this.midnightMonitor.getPathHex(request);
-    const epsilon = deriveEpsilon(
-      request.predecessor,
-      pathString,
-      MIDNIGHT_TESTNET_CHAIN_ID
-    );
+    const epsilon = deriveEpsilon(request.predecessor, pathString);
     const derivedPrivateKey = CryptoUtils.deriveSigningKeyFromEpsilon(
       epsilon,
       this.config.mpcRootKey
