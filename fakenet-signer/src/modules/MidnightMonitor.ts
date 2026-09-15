@@ -19,6 +19,7 @@
 import { Buffer } from 'buffer';
 import { ethers } from 'ethers';
 import type { ServerConfig } from '../types';
+import type { OutputCacheStore } from '../server/OutputCache';
 
 import type { SigningRequest } from './midnight/signet-request-types';
 import {
@@ -118,6 +119,12 @@ export interface MidnightMonitorConfig {
    * to discover requests and posts its responses to it.
    */
   signetContractAddress: string;
+  /**
+   * Where every attested output's exact bytes go before its attestation is
+   * posted: the fakenet's twin of the MPC's output cache, keyed by this
+   * monitor's network id and signet contract address.
+   */
+  outputCache: OutputCacheStore;
   mpcRootKey: string;
   pollIntervalMs?: number;
   wsPort?: number;
@@ -612,6 +619,18 @@ export class MidnightMonitor {
     // Only the signature goes on-chain: the verifier recomputes the digest.
     const respondBidirectionalEvent: RespondBidirectionalEvent = { signature };
 
+    // The exact attested bytes reach the output cache BEFORE the attestation
+    // is posted, as the MPC's publisher does: a client downloads them by
+    // request id and verifies the posted signature over them.
+    this.config.outputCache.ensureOutput(
+      {
+        networkId: this.config.networkId,
+        signetContractAddress: this.config.signetContractAddress,
+      },
+      requestId,
+      serializedOutput
+    );
+
     const response: SignedResponse = {
       requestId: requestIdHex,
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
@@ -688,7 +707,10 @@ export class MidnightMonitor {
     return Buffer.from(request.path).toString('hex');
   }
 
-  static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
+  static fromServerConfig(
+    config: ServerConfig,
+    outputCache: OutputCacheStore
+  ): MidnightMonitor | null {
     if (!config.midnightIndexerUrl || !config.midnightSignetContractAddress) {
       // A half-set Midnight config is almost certainly a mistake, so name the
       // missing variable instead of silently never starting the leg.
@@ -720,6 +742,7 @@ export class MidnightMonitor {
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
       signetContractAddress: config.midnightSignetContractAddress,
+      outputCache,
       mpcRootKey: config.mpcRootKey,
       responderWalletSeed:
         config.midnightWalletSeed ||
