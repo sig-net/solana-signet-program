@@ -44,7 +44,14 @@ export class OutputCacheStore {
    *   either end ignored.
    */
   constructor(prefix: string) {
-    this.prefix = prefix.replace(/^\/+|\/+$/g, '');
+    let trimmed = prefix;
+    while (trimmed.startsWith('/')) {
+      trimmed = trimmed.slice(1);
+    }
+    while (trimmed.endsWith('/')) {
+      trimmed = trimmed.slice(0, -1);
+    }
+    this.prefix = trimmed;
     if (this.prefix.length === 0) {
       throw new Error('OutputCache: OUTPUT_CACHE_PREFIX must not be empty');
     }
@@ -111,9 +118,10 @@ export function startOutputCacheApi(
       res.end('only GET is supported');
       return;
     }
-    const name = decodeURIComponent(
-      (req.url ?? '').split('?')[0]?.replace(/^\/+/, '') ?? ''
-    );
+    let name = decodeURIComponent((req.url ?? '').split('?')[0] ?? '');
+    while (name.startsWith('/')) {
+      name = name.slice(1);
+    }
     const object = store.get(name);
     if (object === undefined) {
       res.writeHead(404, { 'content-type': 'text/plain' });
