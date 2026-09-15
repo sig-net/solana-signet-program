@@ -31,8 +31,10 @@ export interface ServerConfig {
   midnightProofServerUrl?: string;
   midnightSignetContractAddress?: string;
   midnightWalletSeed?: string;
-  /** TCP port of the public /responses/{requestId} helper API (default 3040). */
-  responsesApiPort?: number;
+  /** TCP port the output cache simulation is served on (default 3040). */
+  outputCachePort?: number;
+  /** Object prefix of the output cache simulation (default `v1/fakenet`). */
+  outputCachePrefix?: string;
 }
 
 export const serverConfigSchema = z
@@ -75,7 +77,8 @@ export const serverConfigSchema = z
     midnightProofServerUrl: z.string().optional(),
     midnightSignetContractAddress: z.string().optional(),
     midnightWalletSeed: z.string().optional(),
-    responsesApiPort: z.number().int().positive().optional(),
+    outputCachePort: z.number().int().positive().optional(),
+    outputCachePrefix: z.string().optional(),
   })
   .superRefine((config, ctx) => {
     if (!config.disableSolana) {
@@ -234,14 +237,6 @@ export type TransactionStatus =
       status: 'success';
       success: boolean;
       output: TransactionOutputData;
-      /**
-       * The raw EVM return data of the mined call as `0x`-prefixed hex,
-       * exactly as debug_traceTransaction's top call frame reports it
-       * (`0x` for a plain transfer). EVM monitor only. Cached by the
-       * server so clients can fetch it via /responses/{requestId} without
-       * their own debug_traceTransaction access.
-       */
-      rawOutput?: string;
     }
   | { status: 'error'; reason: string }
   | { status: 'fatal_error'; reason: string };
