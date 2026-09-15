@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Post-failure triage: dump on-chain state relevant to a failed deploy.
 # Usage: triage.sh <testnet|devnet>
+# Both targets are Solana *devnet* programs: "testnet" is the sig.net
+# environment name, not the Solana cluster.
 set -euo pipefail
 
 CLUSTER=${1:?usage: triage.sh <testnet|devnet>}
 case "$CLUSTER" in
-  testnet) RPC_URL=https://api.testnet.solana.com
+  testnet) RPC_URL=https://api.devnet.solana.com
            PROGRAM_ID=SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg ;;
   devnet)  RPC_URL=https://api.devnet.solana.com
            PROGRAM_ID=SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM ;;
