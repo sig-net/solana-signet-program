@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Deploy the signet Solana program to a public cluster.
 # Usage: deploy.sh <testnet|devnet>
+# Both targets are Solana *devnet* programs: "testnet" is the sig.net
+# environment name, not the Solana cluster.
 # Env overrides: DEPLOYER_KEYPAIR, PROGRAM_KEYPAIR, MAX_LEN
 set -euo pipefail
 
 CLUSTER=${1:?usage: deploy.sh <testnet|devnet>}
 case "$CLUSTER" in
-  testnet) RPC_URL=https://api.testnet.solana.com
+  testnet) RPC_URL=https://api.devnet.solana.com
            PROGRAM_ID=SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg ;;
   devnet)  RPC_URL=https://api.devnet.solana.com
            PROGRAM_ID=SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM ;;

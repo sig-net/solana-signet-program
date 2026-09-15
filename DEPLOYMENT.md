@@ -1,12 +1,18 @@
 # Deploying the signet Solana program
 
 Deploys run through the **Deploy Program** workflow (`.github/workflows/deploy.yml`),
-triggered manually from GitHub Actions. The target cluster is derived from the branch:
+triggered manually from GitHub Actions. The target environment is derived from the branch:
 
-| Branch | Cluster |
-|---|---|
-| `main` | `testnet` |
-| `develop` | `devnet` |
+| Branch | Environment | Solana cluster | Program id |
+|---|---|---|---|
+| `main` | `testnet` | devnet | `SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg` |
+| `develop` | `devnet` | devnet | `SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM` |
+
+`testnet` and `devnet` are sig.net environment names. Both programs live on
+Solana **devnet** (`https://api.devnet.solana.com`); nothing is deployed to the
+Solana testnet cluster. Both share the same upgrade authority
+(`2gTzQy83dPqx4wq4TfJCDuJxM8evbF49MYbGwh2K5G4c`), so one `SOL_DEPLOYER_KEY`
+serves both targets.
 
 Dispatching from any other branch fails. Builds happen inside the pinned
 `signet-anchor-build-env` container.
