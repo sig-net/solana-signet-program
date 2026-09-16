@@ -45,8 +45,9 @@ const envSchema = z
     MIDNIGHT_PROOF_SERVER_URL: z.string().url().optional(),
     MIDNIGHT_SIGNET_CONTRACT_ADDRESS: z.string().optional(),
     MIDNIGHT_WALLET_SEED: z.string().optional(),
-    // TCP port of the public /responses/{requestId} helper API.
-    RESPONSES_API_PORT: z.coerce.number().int().positive().optional(),
+    // The output cache simulation: its TCP port and object prefix.
+    OUTPUT_CACHE_PORT: z.coerce.number().int().positive().optional(),
+    OUTPUT_CACHE_PREFIX: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     if (!env.DISABLE_SOLANA) {
@@ -94,7 +95,8 @@ function validateEnv(): EnvConfig {
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS:
         process.env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
       MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,
-      RESPONSES_API_PORT: nonEmpty(process.env.RESPONSES_API_PORT),
+      OUTPUT_CACHE_PORT: nonEmpty(process.env.OUTPUT_CACHE_PORT),
+      OUTPUT_CACHE_PREFIX: nonEmpty(process.env.OUTPUT_CACHE_PREFIX),
     });
 
     return env;
