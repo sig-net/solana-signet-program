@@ -26,10 +26,17 @@ SO=target/deploy/chain_signatures.so
 cd "$(dirname "$0")/.."
 step() { printf '\n==> %s\n' "$*"; }
 
-step "verify program keypair"
+step "verify keypairs"
 KEY_PUBKEY=$(solana-keygen pubkey "$PROGRAM_KEYPAIR")
 if [ "$KEY_PUBKEY" != "$PROGRAM_ID" ]; then
   echo "program keypair derives $KEY_PUBKEY, expected $PROGRAM_ID" >&2
+  exit 1
+fi
+# Upgrade authority of both programs on devnet
+DEPLOYER_PUBKEY=2gTzQy83dPqx4wq4TfJCDuJxM8evbF49MYbGwh2K5G4c
+KEY_PUBKEY=$(solana-keygen pubkey "$DEPLOYER_KEYPAIR")
+if [ "$KEY_PUBKEY" != "$DEPLOYER_PUBKEY" ]; then
+  echo "deployer keypair derives $KEY_PUBKEY, expected $DEPLOYER_PUBKEY" >&2
   exit 1
 fi
 solana config set --url "$RPC_URL" --keypair "$DEPLOYER_KEYPAIR" >/dev/null
@@ -52,7 +59,6 @@ fi
 step "guards"
 if solana program show "$PROGRAM_ID" >/dev/null 2>&1; then
   ONCHAIN_AUTH=$(solana program show "$PROGRAM_ID" | grep '^Authority:' | awk '{print $NF}')
-  DEPLOYER_PUBKEY=$(solana address -k "$DEPLOYER_KEYPAIR")
   echo "existing program authority: $ONCHAIN_AUTH"
   if [ "$ONCHAIN_AUTH" != "$DEPLOYER_PUBKEY" ]; then
     echo "deployer ($DEPLOYER_PUBKEY) cannot replace a program owned by $ONCHAIN_AUTH" >&2
@@ -60,21 +66,21 @@ if solana program show "$PROGRAM_ID" >/dev/null 2>&1; then
   fi
 fi
 
-step "fund deployer"
-sol_to_lamports() { LC_ALL=C awk -v v="$1" 'BEGIN{printf "%.9f", v+0}' | tr -d '.'; }
+step "check deployer funds"
+sol_to_lamports() { LC_ALL=C awk -v v="$1" 'BEGIN{printf "%.9f", v+0}' | tr -d '.' | sed 's/^0*//'; }
 RENT_LAMPORTS=$(sol_to_lamports "$(solana rent "$MAX_LEN" | grep -oE '[0-9]+\.[0-9]+')")
 NEED=$(( RENT_LAMPORTS * 2 + 10000000 ))
-echo "target balance: $NEED lamports"
-for _ in $(seq 1 8); do
-  BALANCE=$(sol_to_lamports "$(solana balance | grep -oE '[0-9]+\.?[0-9]*' | head -1)")
-  if [ "${BALANCE:-0}" -ge "$NEED" ]; then
-    echo "funded: $BALANCE lamports"; break
-  fi
-  solana airdrop 2 || true
-  sleep 20
+BALANCE=
+for _ in 1 2 3; do
+  BALANCE=$(solana balance 2>/dev/null | grep -oE '[0-9]+\.?[0-9]*' | head -1 || true)
+  BALANCE=$(sol_to_lamports "${BALANCE:-0}")
+  if [ "${BALANCE:-0}" -gt 0 ]; then break; fi
+  sleep 5
 done
+echo "balance: ${BALANCE:-0} lamports, need $NEED"
 if [ "${BALANCE:-0}" -lt "$NEED" ]; then
-  echo "could not fund deployer to $NEED lamports" >&2
+  echo "deployer $DEPLOYER_PUBKEY is underfunded — send ≥ $(( NEED - ${BALANCE:-0} )) lamports" >&2
+  echo "from a wallet with devnet SOL and rerun (CI airdrops are rate-limited; none attempted)" >&2
   exit 1
 fi
 

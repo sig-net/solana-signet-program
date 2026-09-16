@@ -23,7 +23,8 @@ One idempotent operation, no modes to choose:
 
 1. Build with `declare_id!` patched to the target cluster's program id.
 2. Guard: ELF must fit the capacity budget; if the program already exists
-   on-chain, the deployer key must be its upgrade authority.
+   on-chain, the deployer key must be its upgrade authority, and the deployer
+   account must already hold rent ×2 + fees.
 3. Deploy as an in-place **upgrade** at the same program id (`solana program
    deploy` reuses the existing program data account; capacity 512 KB reserved
    on first deploy, extendable later with `solana program extend`).
@@ -51,14 +52,14 @@ their data.
 **Secrets** (Settings → Secrets and variables → Actions) — each is the JSON
 keypair file contents:
 
-| Secret | Content |
-|---|---|
-| `SOL_DEPLOYER_KEY` | upgrade authority + fee payer |
-| `SOL_PROGRAM_KEY_TESTNET` | keypair deriving `SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg` |
-| `SOL_PROGRAM_KEY_DEVNET` | keypair deriving `SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM` |
+| Secret | Scope | Content |
+|---|---|---|
+| `SOL_DEPLOYER_KEY` | repository | funded devnet upgrade authority + fee payer (`2gTzQy83dPqx4wq4TfJCDuJxM8evbF49MYbGwh2K5G4c`), shared by both targets |
+| `SOL_PROGRAM_KEY_TESTNET` | `sol-testnet` environment | keypair deriving `SigTVbfRK9LsXWpSv9KgpabrQcFKr5hDdUwMhYsXyKg` |
+| `SOL_PROGRAM_KEY_DEVNET` | `sol-devnet` environment | keypair deriving `SigDHT99hPznk4d9SAxWLoBnKWT8jcob5pV8X7ti8SM` |
 
-The workflow hard-fails if a program keypair secret doesn't derive the expected
-id, so cluster/secret mixups cannot ship.
+The workflow hard-fails if a program or deployer keypair secret doesn't derive
+the expected pubkey, so cluster/secret mixups cannot ship.
 
 ## Admin maintenance
 

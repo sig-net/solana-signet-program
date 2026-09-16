@@ -39,6 +39,7 @@ jobs:
 
       - name: Write keypairs from secrets
         env:
+          # Must resolve to the funded devnet keypair (2gTzQy…)
           DEPLOYER_KEY: ${{ secrets.SOL_DEPLOYER_KEY }}
           PROGRAM_KEY: ${{ github.ref_name == 'develop' && secrets.SOL_PROGRAM_KEY_DEVNET || secrets.SOL_PROGRAM_KEY_TESTNET }}
         run: |
