@@ -66,21 +66,21 @@ if solana program show "$PROGRAM_ID" >/dev/null 2>&1; then
   fi
 fi
 
-step "fund deployer"
-sol_to_lamports() { LC_ALL=C awk -v v="$1" 'BEGIN{printf "%.9f", v+0}' | tr -d '.'; }
+step "check deployer funds"
+sol_to_lamports() { LC_ALL=C awk -v v="$1" 'BEGIN{printf "%.9f", v+0}' | tr -d '.' | sed 's/^0*//'; }
 RENT_LAMPORTS=$(sol_to_lamports "$(solana rent "$MAX_LEN" | grep -oE '[0-9]+\.[0-9]+')")
 NEED=$(( RENT_LAMPORTS * 2 + 10000000 ))
-echo "target balance: $NEED lamports"
-for _ in $(seq 1 8); do
-  BALANCE=$(sol_to_lamports "$(solana balance | grep -oE '[0-9]+\.?[0-9]*' | head -1)")
-  if [ "${BALANCE:-0}" -ge "$NEED" ]; then
-    echo "funded: $BALANCE lamports"; break
-  fi
-  solana airdrop 2 || true
-  sleep 20
+BALANCE=
+for _ in 1 2 3; do
+  BALANCE=$(solana balance 2>/dev/null | grep -oE '[0-9]+\.?[0-9]*' | head -1 || true)
+  BALANCE=$(sol_to_lamports "${BALANCE:-0}")
+  if [ "${BALANCE:-0}" -gt 0 ]; then break; fi
+  sleep 5
 done
+echo "balance: ${BALANCE:-0} lamports, need $NEED"
 if [ "${BALANCE:-0}" -lt "$NEED" ]; then
-  echo "could not fund deployer to $NEED lamports" >&2
+  echo "deployer $DEPLOYER_PUBKEY is underfunded — send ≥ $(( NEED - ${BALANCE:-0} )) lamports" >&2
+  echo "from a wallet with devnet SOL and rerun (CI airdrops are rate-limited; none attempted)" >&2
   exit 1
 fi
 

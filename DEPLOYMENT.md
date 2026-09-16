@@ -23,7 +23,8 @@ One idempotent operation, no modes to choose:
 
 1. Build with `declare_id!` patched to the target cluster's program id.
 2. Guard: ELF must fit the capacity budget; if the program already exists
-   on-chain, the deployer key must be its upgrade authority.
+   on-chain, the deployer key must be its upgrade authority, and the deployer
+   account must already hold rent ×2 + fees.
 3. Deploy as an in-place **upgrade** at the same program id (`solana program
    deploy` reuses the existing program data account; capacity 512 KB reserved
    on first deploy, extendable later with `solana program extend`).
