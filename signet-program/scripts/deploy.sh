@@ -26,10 +26,17 @@ SO=target/deploy/chain_signatures.so
 cd "$(dirname "$0")/.."
 step() { printf '\n==> %s\n' "$*"; }
 
-step "verify program keypair"
+step "verify keypairs"
 KEY_PUBKEY=$(solana-keygen pubkey "$PROGRAM_KEYPAIR")
 if [ "$KEY_PUBKEY" != "$PROGRAM_ID" ]; then
   echo "program keypair derives $KEY_PUBKEY, expected $PROGRAM_ID" >&2
+  exit 1
+fi
+# Upgrade authority of both programs on devnet
+DEPLOYER_PUBKEY=2gTzQy83dPqx4wq4TfJCDuJxM8evbF49MYbGwh2K5G4c
+KEY_PUBKEY=$(solana-keygen pubkey "$DEPLOYER_KEYPAIR")
+if [ "$KEY_PUBKEY" != "$DEPLOYER_PUBKEY" ]; then
+  echo "deployer keypair derives $KEY_PUBKEY, expected $DEPLOYER_PUBKEY" >&2
   exit 1
 fi
 solana config set --url "$RPC_URL" --keypair "$DEPLOYER_KEYPAIR" >/dev/null
@@ -52,7 +59,6 @@ fi
 step "guards"
 if solana program show "$PROGRAM_ID" >/dev/null 2>&1; then
   ONCHAIN_AUTH=$(solana program show "$PROGRAM_ID" | grep '^Authority:' | awk '{print $NF}')
-  DEPLOYER_PUBKEY=$(solana address -k "$DEPLOYER_KEYPAIR")
   echo "existing program authority: $ONCHAIN_AUTH"
   if [ "$ONCHAIN_AUTH" != "$DEPLOYER_PUBKEY" ]; then
     echo "deployer ($DEPLOYER_PUBKEY) cannot replace a program owned by $ONCHAIN_AUTH" >&2
