@@ -16,6 +16,10 @@ import type {
   SignatureResponse,
 } from '../types';
 import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
+import {
+  DEFAULT_TICK_GUARD_RELEASE_MS,
+  runTickWithGuardRelease,
+} from '../modules/shared/TickGuard';
 import { serverConfigSchema } from '../types';
 import {
   type ChainSignaturesProgram,
@@ -33,7 +37,6 @@ import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 // schema-driven packed bytes clients recompute at claim time.
 import {
   deriveEpsilon,
-  MIDNIGHT_TESTNET_CHAIN_ID,
   MPC_FAILURE_OUTPUT,
   serializeRespondOutput,
   type AbiDecodedOutput,
@@ -54,7 +57,12 @@ import {
   MidnightMonitor,
   type MidnightSigningRequest,
 } from '../modules/MidnightMonitor';
-import { ResponseCache, startResponsesApi } from './ResponsesApi';
+import {
+  DEFAULT_OUTPUT_CACHE_PORT,
+  DEFAULT_OUTPUT_CACHE_PREFIX,
+  OutputCacheStore,
+  startOutputCacheApi,
+} from './OutputCache';
 import type http from 'node:http';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
@@ -100,10 +108,10 @@ export class ChainSignatureServer {
   private lastBackfillSignature: string | undefined;
   private substrateMonitor: SubstrateMonitor | null = null;
   private midnightMonitor: MidnightMonitor | null = null;
-  // Observed remote-execution outputs by request id, served over the public
-  // /responses/{requestId} helper API (see ResponsesApi.ts).
-  private responseCache = new ResponseCache();
-  private responsesApiServer: http.Server | null = null;
+  // The attested output bytes of every Midnight response, served under the
+  // MPC's bucket layout (see OutputCache.ts).
+  private readonly outputCache: OutputCacheStore;
+  private outputCacheServer: http.Server | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -139,7 +147,13 @@ export class ChainSignatureServer {
     if (this.config.substrateWsUrl) {
       this.substrateMonitor = new SubstrateMonitor(this.config.substrateWsUrl);
     }
-    this.midnightMonitor = MidnightMonitor.fromServerConfig(this.config);
+    this.outputCache = new OutputCacheStore(
+      this.config.outputCachePrefix ?? DEFAULT_OUTPUT_CACHE_PREFIX
+    );
+    this.midnightMonitor = MidnightMonitor.fromServerConfig(
+      this.config,
+      this.outputCache
+    );
   }
 
   private setupSolana() {
@@ -226,12 +240,11 @@ export class ChainSignatureServer {
     // Midnight/Substrate sources too — must run even with Solana disabled.
     this.startTransactionMonitor();
 
-    // The public responses helper API: serves the cached raw execution
-    // output per request id so clients need no debug_traceTransaction
-    // access of their own.
-    this.responsesApiServer = startResponsesApi(
-      this.responseCache,
-      this.config.responsesApiPort ?? 3040
+    // The output cache simulation: serves the exact bytes each Midnight
+    // attestation commits to, by request id, as the MPC's bucket does.
+    this.outputCacheServer = startOutputCacheApi(
+      this.outputCache,
+      this.config.outputCachePort ?? DEFAULT_OUTPUT_CACHE_PORT
     );
     if (!this.config.disableSolana) {
       this.setupEventListeners();
@@ -364,11 +377,7 @@ export class ChainSignatureServer {
     // comes from the signet library (the v2 colon-separated scheme clients
     // derive the expected signer with), so both sides agree by construction.
     const pathString = this.midnightMonitor.getPathHex(request);
-    const epsilon = deriveEpsilon(
-      request.predecessor,
-      pathString,
-      MIDNIGHT_TESTNET_CHAIN_ID
-    );
+    const epsilon = deriveEpsilon(request.predecessor, pathString);
     const derivedPrivateKey = CryptoUtils.deriveSigningKeyFromEpsilon(
       epsilon,
       this.config.mpcRootKey
@@ -498,7 +507,11 @@ export class ChainSignatureServer {
       if (this.monitoring) return;
       this.monitoring = true;
       try {
-        await this.runTransactionMonitorTick();
+        await runTickWithGuardRelease(
+          'Transaction monitor',
+          DEFAULT_TICK_GUARD_RELEASE_MS,
+          () => this.runTransactionMonitorTick()
+        );
       } catch (error) {
         console.error('Transaction monitor tick error:', error);
       } finally {
@@ -569,15 +582,10 @@ export class ChainSignatureServer {
               txHash,
               txInfo,
               () =>
-                this.handleCompletedTransaction(
-                  txHash,
-                  txInfo,
-                  {
-                    success: result.success,
-                    output: result.output,
-                  },
-                  result.rawOutput
-                ),
+                this.handleCompletedTransaction(txHash, txInfo, {
+                  success: result.success,
+                  output: result.output,
+                }),
               'handleCompletedTransaction',
               true
             );
@@ -623,8 +631,7 @@ export class ChainSignatureServer {
   private async handleCompletedTransaction(
     txHash: string,
     txInfo: PendingTransaction,
-    result: TransactionOutput,
-    rawOutput?: string
+    result: TransactionOutput
   ) {
     // Checkpoint 3 (still deserialised, serialisation happens below):
     // 'result.output' is the decoded field map from Checkpoint 2, i.e. the MPC's
@@ -644,16 +651,6 @@ export class ChainSignatureServer {
       throw new Error(`Missing request ID for tx ${txHash}`);
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-
-    // Cache the raw traced output for the /responses/{requestId} helper API
-    // (EVM executions only: the Bitcoin monitor reports no raw output).
-    if (rawOutput !== undefined) {
-      this.responseCache.set(requestId, {
-        success: result.success,
-        output: rawOutput,
-        txHash,
-      });
-    }
 
     switch (txInfo.source) {
       case 'midnight': {
@@ -958,14 +955,6 @@ export class ChainSignatureServer {
       throw new Error(`Missing request ID for tx ${txHash}`);
     }
     const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
-
-    // A failed execution has no attested output: record the failure so the
-    // /responses/{requestId} helper API answers instead of 404ing forever.
-    this.responseCache.set(requestId, {
-      success: false,
-      output: null,
-      txHash,
-    });
 
     const MAGIC_ERROR_PREFIX = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 
@@ -1661,13 +1650,13 @@ export class ChainSignatureServer {
       await this.midnightMonitor.stop();
       this.midnightMonitor = null;
     }
-    if (this.responsesApiServer) {
-      const responsesApiServer = this.responsesApiServer;
-      this.responsesApiServer = null;
+    if (this.outputCacheServer) {
+      const outputCacheServer = this.outputCacheServer;
+      this.outputCacheServer = null;
       // Resolve regardless of the close error: a server that never started
       // listening reports one, and shutdown should not fail over it.
       await new Promise<void>((resolve) => {
-        responsesApiServer.close(() => resolve());
+        outputCacheServer.close(() => resolve());
       });
     }
   }

@@ -67,6 +67,33 @@ pub mod chain_signatures {
         Ok(())
     }
 
+    /// Update the CAIP-2 chain identifier.
+    ///
+    /// # Admin Only
+    ///
+    /// This instruction is restricted to the program administrator and is **not intended
+    /// for application developers**. It is used for program maintenance.
+    ///
+    /// # Arguments
+    ///
+    /// * `new_chain_id` - New CAIP-2 chain identifier
+    ///
+    /// # Emits
+    ///
+    /// * [`ChainIdUpdatedEvent`]
+    pub fn update_chain_id(ctx: Context<AdminOnly>, new_chain_id: String) -> Result<()> {
+        let program_state = &mut ctx.accounts.program_state;
+        let old_chain_id = program_state.chain_id.clone();
+        program_state.chain_id = new_chain_id;
+
+        emit!(ChainIdUpdatedEvent {
+            old_chain_id,
+            new_chain_id: program_state.chain_id.clone(),
+        });
+
+        Ok(())
+    }
+
     /// Withdraw accumulated funds from the program.
     ///
     /// # Admin Only
@@ -736,6 +763,16 @@ pub struct DepositUpdatedEvent {
     pub old_deposit: u64,
     /// New deposit amount in lamports.
     pub new_deposit: u64,
+}
+
+/// Emitted when the admin updates the CAIP-2 chain identifier via
+/// [`chain_signatures::update_chain_id`].
+#[event]
+pub struct ChainIdUpdatedEvent {
+    /// Previous chain identifier.
+    pub old_chain_id: String,
+    /// New chain identifier.
+    pub new_chain_id: String,
 }
 
 /// Emitted when the admin withdraws funds via [`chain_signatures::withdraw_funds`].

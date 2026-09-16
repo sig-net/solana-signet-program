@@ -16,7 +16,7 @@ jobs:
         id: radar
         uses: auditware/radar-action@main
         with:
-          path: "."
+          path: "signet-program/programs"
           ignore: "low"
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3

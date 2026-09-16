@@ -76,7 +76,7 @@ export class EthereumMonitor {
         }
 
         try {
-          const { output, rawOutput } = await this.extractTransactionOutput(
+          const output = await this.extractTransactionOutput(
             tx,
             provider,
             outputDeserializationSchema
@@ -97,7 +97,6 @@ export class EthereumMonitor {
             status: 'success',
             success: output.success,
             output: output.output,
-            rawOutput,
           };
         } catch (error) {
           // A missing debug_traceTransaction can never heal by retrying:
@@ -220,7 +219,7 @@ export class EthereumMonitor {
     tx: ethers.TransactionResponse,
     provider: ethers.JsonRpcProvider,
     outputDeserializationSchema: Buffer | number[]
-  ): Promise<{ output: TransactionOutput; rawOutput: string }> {
+  ): Promise<TransactionOutput> {
     // Contract call = calldata longer than 2 bytes, matching is_contract_call
     // in github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/event_parsing.rs:19
     const isContractCall = ethers.dataLength(tx.data) > 2;
@@ -247,17 +246,14 @@ export class EthereumMonitor {
         rawOutput
       );
 
-      return { output: { success: true, output: decodedOutput }, rawOutput };
+      return { success: true, output: decodedOutput };
     } else {
       return {
+        success: true,
         output: {
           success: true,
-          output: {
-            success: true,
-            isFunctionCall: false,
-          },
+          isFunctionCall: false,
         },
-        rawOutput,
       };
     }
   }

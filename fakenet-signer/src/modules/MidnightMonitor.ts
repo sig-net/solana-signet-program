@@ -19,9 +19,17 @@
 import { Buffer } from 'buffer';
 import { ethers } from 'ethers';
 import type { ServerConfig } from '../types';
+import type { OutputCacheStore } from '../server/OutputCache';
 
 import type { SigningRequest } from './midnight/signet-request-types';
-import { type ResolvedSignetRequest, SignetRequestFeed } from './midnight/signet-request-feed';
+import {
+  type ResolvedSignetRequest,
+  SignetRequestFeed,
+} from './midnight/signet-request-feed';
+import {
+  DEFAULT_TICK_GUARD_RELEASE_MS,
+  runTickWithGuardRelease,
+} from './shared/TickGuard';
 
 import {
   bytesToHex,
@@ -88,7 +96,7 @@ export interface SignedResponse {
   requestId: string;
   /** The exact unpadded serialised output the attestation commits to, as hex. */
   serializedOutput: string;
-  /** The signed attestation digest keccak256(requestId || output), as hex. */
+  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, output])), as hex. */
   attestationDigest: string;
   /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
   bigRx: string;
@@ -111,6 +119,12 @@ export interface MidnightMonitorConfig {
    * to discover requests and posts its responses to it.
    */
   signetContractAddress: string;
+  /**
+   * Where every attested output's exact bytes go before its attestation is
+   * posted: the fakenet's twin of the MPC's output cache, keyed by this
+   * monitor's network id and signet contract address.
+   */
+  outputCache: OutputCacheStore;
   mpcRootKey: string;
   pollIntervalMs?: number;
   wsPort?: number;
@@ -217,11 +231,18 @@ export class MidnightMonitor {
     this.pollIntervalId = setInterval(async () => {
       // A tick can outlast the poll interval (wallet sync, contract writes).
       // Overlapping ticks would write concurrently to the single-writer
-      // private-state store and deadlock on its lock (LEVEL_LOCKED).
+      // private-state store and deadlock on its lock (LEVEL_LOCKED). The
+      // guard release bounds the flip side: a tick that hangs on an
+      // un-timeouted await would otherwise hold this flag forever and kill
+      // discovery silently.
       if (this.polling) return;
       this.polling = true;
       try {
-        await this.fetchAndProcessRequests(handlers.onSigningRequest);
+        await runTickWithGuardRelease(
+          'MidnightMonitor poll',
+          DEFAULT_TICK_GUARD_RELEASE_MS,
+          () => this.fetchAndProcessRequests(handlers.onSigningRequest)
+        );
       } catch (error) {
         console.error('MidnightMonitor: Poll error:', error);
       } finally {
@@ -585,9 +606,10 @@ export class MidnightMonitor {
     // padding, no fixed field width. The output itself travels off-chain.
     const serializedOutput = evmReturnData;
 
-    // keccak256(requestId || output), matching the circuit clients verify
-    // against in-circuit (verifyRespondBidirectionalEvent). A mismatch here
-    // makes every response fail at claim time.
+    // The Poseidon attestation digest over (requestId, output), matching the
+    // circuit clients verify against in-circuit
+    // (verifyRespondBidirectionalEvent). A mismatch here makes every response
+    // fail at claim time.
     const attestationDigest = calculateSignetAttestationDigest(
       requestId,
       serializedOutput
@@ -596,6 +618,18 @@ export class MidnightMonitor {
     const signature = ecdsaSignatureToMpcSignature(sig);
     // Only the signature goes on-chain: the verifier recomputes the digest.
     const respondBidirectionalEvent: RespondBidirectionalEvent = { signature };
+
+    // The exact attested bytes reach the output cache BEFORE the attestation
+    // is posted, as the MPC's publisher does: a client downloads them by
+    // request id and verifies the posted signature over them.
+    this.config.outputCache.ensureOutput(
+      {
+        networkId: this.config.networkId,
+        signetContractAddress: this.config.signetContractAddress,
+      },
+      requestId,
+      serializedOutput
+    );
 
     const response: SignedResponse = {
       requestId: requestIdHex,
@@ -673,7 +707,10 @@ export class MidnightMonitor {
     return Buffer.from(request.path).toString('hex');
   }
 
-  static fromServerConfig(config: ServerConfig): MidnightMonitor | null {
+  static fromServerConfig(
+    config: ServerConfig,
+    outputCache: OutputCacheStore
+  ): MidnightMonitor | null {
     if (!config.midnightIndexerUrl || !config.midnightSignetContractAddress) {
       // A half-set Midnight config is almost certainly a mistake, so name the
       // missing variable instead of silently never starting the leg.
@@ -705,6 +742,7 @@ export class MidnightMonitor {
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
       signetContractAddress: config.midnightSignetContractAddress,
+      outputCache,
       mpcRootKey: config.mpcRootKey,
       responderWalletSeed:
         config.midnightWalletSeed ||

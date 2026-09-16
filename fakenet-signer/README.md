@@ -51,7 +51,7 @@ VERBOSE=true  # Optional: enable detailed logging
 BITCOIN_NETWORK=testnet  # Options: regtest, testnet
 ```
 
-This is the minimal Solana-sourced setup. The full reference, including the `DISABLE_SOLANA`, `SUBSTRATE_WS_URL`, `MIDNIGHT_*`, and `RESPONSES_API_PORT` variables, is under [Configuration](#configuration).
+This is the minimal Solana-sourced setup. The full reference, including the `DISABLE_SOLANA`, `SUBSTRATE_WS_URL`, `MIDNIGHT_*`, and `OUTPUT_CACHE_*` variables, is under [Configuration](#configuration).
 
 ### 2. Basic Usage
 
@@ -381,26 +381,16 @@ Unlike Solana, where the full serialized output travels on-chain in the `Respond
 
 1. After the EVM transaction confirms, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). Extraction treats a missing method as an immediate error response with a log line naming the fix, never an endless retry.
 2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
-3. The responder computes the attestation digest `keccak256(requestId || serializedOutput)` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signature is posted on-chain via `respondBidirectional`, and neither the digest nor the output itself travels on-chain.
+3. The responder computes the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signature is posted on-chain via `respondBidirectional`, and neither the digest nor the output itself travels on-chain.
 4. A failed execution (revert or replacement) is attested the same way over the fixed 5-byte failure output (the `0xDEADBEEF` sentinel plus `0x01`), one width for every respond schema, so client refund circuits can verify it without the receipt.
 
-Clients fetch the raw output off-chain (for example from the `/responses/{requestId}` helper API below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
+Clients obtain the output bytes off-chain (recomputed from the mined transaction's trace, or downloaded from the output cache below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
 
-### The `/responses/{requestId}` helper API
+### The output cache
 
-The server exposes a small public HTTP API, `GET /responses/{requestId}` (request id as 64 hex chars, `0x` prefix optional), on `RESPONSES_API_PORT` (default 3040). It serves each request's raw traced EVM output exactly as `debug_traceTransaction` reported it, so clients need no debug-capable RPC access of their own:
+The real MPC, when configured with output storage, uploads the exact bytes each attestation commits to into a public bucket before it posts the attestation, one object per request under `<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin`. The fakenet simulates that bucket in memory and serves it over HTTP on `OUTPUT_CACHE_PORT` (default 3040) under `OUTPUT_CACHE_PREFIX` (default `v1/fakenet`): `GET /v1/fakenet/<networkId>/<signetContractAddress>/<requestId>.bin` answers the raw bytes as `application/octet-stream`, and 404 while the responder has not attested the request yet. A failed execution stores the fixed 5-byte failure output, exactly what its attestation commits to.
 
-```json
-{
-  "requestId": "abc1...64 hex chars",
-  "success": true,
-  "output": "0x0000...",
-  "txHash": "0x...",
-  "observedAt": "2026-01-01T00:00:00.000Z"
-}
-```
-
-It answers 404 while no execution result has been observed yet, and `output` is `null` for a failed execution (which has no attested output: the MPC posts the fixed failure output instead). The API is a CONVENIENCE, never an authority: the data is unauthenticated, and a client must recompute the attestation digest from it and verify the MPC's posted signature before trusting it.
+Point a client's `MpcOutputCacheReader` (`@sig-net/midnight`) at `http://<host>:3040/v1/fakenet` and it reads the fakenet exactly as it reads a real MPC's bucket. The cache is a CONVENIENCE, never an authority: the bytes are unauthenticated, and a client must verify the MPC's posted signature over them before trusting them.
 
 ## Architecture
 
@@ -476,9 +466,9 @@ Runs the Midnight leg end to end:
 - Posts signature responses and signature-only respond-bidirectional attestations
 - Serialises all contract writes behind a single queue (the private-state store is single-writer)
 
-#### `ResponsesApi`
+#### `OutputCache`
 
-Public `GET /responses/{requestId}` helper serving each request's raw traced EVM output (a convenience, never an authority: clients recompute the digest from it and signature-verify).
+The in-memory twin of the MPC's output cache bucket: the Midnight monitor stores each attestation's exact bytes in it before posting, and the server serves them under the bucket's layout (a convenience, never an authority: clients signature-verify what they download).
 
 #### Output serialization
 
@@ -525,7 +515,8 @@ interface ServerConfig {
   midnightProofServerUrl?: string; // Proof server URL (default http://localhost:6300)
   midnightSignetContractAddress?: string; // Deployed signet contract (required for the Midnight leg)
   midnightWalletSeed?: string; // Responder wallet seed (defaults to the genesis account seed)
-  responsesApiPort?: number; // /responses/{requestId} helper API port (default 3040)
+  outputCachePort?: number; // output cache simulation port (default 3040)
+  outputCachePrefix?: string; // output cache object prefix (default 'v1/fakenet')
 }
 ```
 
@@ -703,7 +694,7 @@ interface SignatureRequestedEvent {
 6. On success:
    - Extract the mined call's return data (debug_traceTransaction)
    - Decode per outputDeserializationSchema, re-pack per respondSerializationSchema
-   - Sign the attestation digest keccak256(request_id + serialized_output)
+   - Sign the attestation digest upgradeFromTransient(transientHash([request_id, serialized_output]))
      with the per-caller response key
    - Post the signature-only respondBidirectional record on-chain
 7. On error:
@@ -749,25 +740,26 @@ Supported chain identifiers:
 
 Loaded from the repo-root `.env` (or the process environment) and validated at startup:
 
-| Variable                           | Required                       | Description                                                                                                                                     |
-| ---------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MPC_ROOT_KEY`                     | yes                            | Hex private key (`0x` + 64 hex chars) all chain keys derive from                                                                                 |
-| `EVM_RPC_URL`                      | yes                            | EVM JSON-RPC endpoint (credential in the URL if hosted). Must support `debug_traceTransaction`, checked at first use                             |
-| `SOLANA_RPC_URL`                   | no (default devnet)            | Solana RPC endpoint (default `https://api.devnet.solana.com`)                                                                                    |
-| `SOLANA_PRIVATE_KEY`               | unless `DISABLE_SOLANA`        | Server keypair in JSON array format                                                                                                              |
-| `PROGRAM_ID`                       | unless `DISABLE_SOLANA`        | Solana program ID of the chain signatures contract                                                                                               |
-| `DISABLE_SOLANA`                   | no                             | `true` or `1` skips the entire Solana leg, for Midnight-only runs                                                                                |
-| `VERBOSE`                          | no                             | `true` enables detailed logging                                                                                                                  |
-| `BITCOIN_NETWORK`                  | no (default `testnet`)         | `regtest` (Bitcoin Core RPC) or `testnet` (mempool.space testnet4 API)                                                                           |
-| `SUBSTRATE_WS_URL`                 | no                             | Substrate node WebSocket URL, enables the Substrate (signet pallet) leg                                                                          |
-| `MIDNIGHT_NETWORK_ID`              | no (default `undeployed`)      | Midnight network id                                                                                                                              |
-| `MIDNIGHT_INDEXER_URL`             | for the Midnight leg           | Midnight indexer GraphQL URL. The Midnight leg starts only when this and `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` are both set                         |
-| `MIDNIGHT_INDEXER_WS_URL`          | no                             | Indexer GraphQL WebSocket URL, derived from `MIDNIGHT_INDEXER_URL` (http to ws) when unset                                                       |
-| `MIDNIGHT_NODE_URL`                | no (default `localhost:9944`)  | Midnight node RPC URL                                                                                                                            |
-| `MIDNIGHT_PROOF_SERVER_URL`        | no (default `localhost:6300`)  | Midnight proof server URL                                                                                                                        |
-| `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` | for the Midnight leg           | Address of the deployed central signet contract the responder polls and posts to                                                                 |
-| `MIDNIGHT_WALLET_SEED`             | no (default genesis seed)      | Seed of the Midnight wallet the responder posts responses from                                                                                   |
-| `RESPONSES_API_PORT`               | no (default `3040`)            | TCP port of the public `/responses/{requestId}` helper API                                                                                       |
+| Variable                           | Required                      | Description                                                                                                              |
+| ---------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `MPC_ROOT_KEY`                     | yes                           | Hex private key (`0x` + 64 hex chars) all chain keys derive from                                                         |
+| `EVM_RPC_URL`                      | yes                           | EVM JSON-RPC endpoint (credential in the URL if hosted). Must support `debug_traceTransaction`, checked at first use     |
+| `SOLANA_RPC_URL`                   | no (default devnet)           | Solana RPC endpoint (default `https://api.devnet.solana.com`)                                                            |
+| `SOLANA_PRIVATE_KEY`               | unless `DISABLE_SOLANA`       | Server keypair in JSON array format                                                                                      |
+| `PROGRAM_ID`                       | unless `DISABLE_SOLANA`       | Solana program ID of the chain signatures contract                                                                       |
+| `DISABLE_SOLANA`                   | no                            | `true` or `1` skips the entire Solana leg, for Midnight-only runs                                                        |
+| `VERBOSE`                          | no                            | `true` enables detailed logging                                                                                          |
+| `BITCOIN_NETWORK`                  | no (default `testnet`)        | `regtest` (Bitcoin Core RPC) or `testnet` (mempool.space testnet4 API)                                                   |
+| `SUBSTRATE_WS_URL`                 | no                            | Substrate node WebSocket URL, enables the Substrate (signet pallet) leg                                                  |
+| `MIDNIGHT_NETWORK_ID`              | no (default `undeployed`)     | Midnight network id                                                                                                      |
+| `MIDNIGHT_INDEXER_URL`             | for the Midnight leg          | Midnight indexer GraphQL URL. The Midnight leg starts only when this and `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` are both set |
+| `MIDNIGHT_INDEXER_WS_URL`          | no                            | Indexer GraphQL WebSocket URL, derived from `MIDNIGHT_INDEXER_URL` (http to ws) when unset                               |
+| `MIDNIGHT_NODE_URL`                | no (default `localhost:9944`) | Midnight node RPC URL                                                                                                    |
+| `MIDNIGHT_PROOF_SERVER_URL`        | no (default `localhost:6300`) | Midnight proof server URL                                                                                                |
+| `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` | for the Midnight leg          | Address of the deployed central signet contract the responder polls and posts to                                         |
+| `MIDNIGHT_WALLET_SEED`             | no (default genesis seed)     | Seed of the Midnight wallet the responder posts responses from                                                           |
+| `OUTPUT_CACHE_PORT`                | no (default `3040`)           | TCP port the output cache simulation is served on                                                                        |
+| `OUTPUT_CACHE_PREFIX`              | no (default `v1/fakenet`)     | Object prefix of the output cache simulation, the MPC's `publisher.output_storage.prefix` twin                           |
 
 ### Transaction Monitoring
 
