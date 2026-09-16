@@ -101,8 +101,9 @@ export class OutputCacheStore {
 /**
  * Start the HTTP server serving the store's objects: GET /<object name>
  * answers 200 with the raw bytes (application/octet-stream), 404 for a
- * name the store does not hold (yet), and 405 for any other method, the
- * same answers a public bucket gives a client reading by URL.
+ * name the store does not hold (yet), 400 for a path that is not valid
+ * percent-encoding, and 405 for any other method, the same answers a public
+ * bucket gives a client reading by URL.
  *
  * @param store - The store the Midnight monitor writes into.
  * @param port - TCP port to listen on.
@@ -118,7 +119,15 @@ export function startOutputCacheApi(
       res.end('only GET is supported');
       return;
     }
-    let name = decodeURIComponent((req.url ?? '').split('?')[0] ?? '');
+    let name: string;
+    try {
+      name = decodeURIComponent((req.url ?? '').split('?')[0] ?? '');
+    } catch {
+      // A malformed escape throws URIError, which would crash the process.
+      res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end('malformed object name');
+      return;
+    }
     while (name.startsWith('/')) {
       name = name.slice(1);
     }
