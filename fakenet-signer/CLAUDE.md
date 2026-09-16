@@ -26,7 +26,7 @@ yarn release:patch      # Patch bump, build, publish
 
 ## Architecture
 
-This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification registry), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's is signature-only (the MPC's ECDSA signature over the keccak256 digest of `request_id || serialized_output`, with the digest itself off-chain too), so Midnight clients fetch the raw output themselves (e.g. from the public `/responses/{requestId}` helper API this server exposes), recompute the digest and verify the posted signature over it.
+This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification registry), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's is signature-only (the MPC's ECDSA signature over the Poseidon `transientHash` digest of `(request_id, serialized_output)`, with the digest itself off-chain too), so Midnight clients obtain the output bytes themselves (recomputed from the trace, or downloaded from the output cache this server simulates), recompute the digest and verify the posted signature over them.
 
 ### Core Flow
 
@@ -38,16 +38,16 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 
 ### Key Components
 
-| Component                    | Location                            | Purpose                                                                                              |
-| ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| ChainSignatureServer         | `src/server/`                       | Main orchestrator, event subscription, transaction lifecycle                                         |
-| CpiEventParser               | `src/events/`                       | Parses Anchor CPI events from Solana logs                                                            |
-| EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                               |
-| BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                            |
-| Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde) |
-| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract registry for requests, signs and posts signature-only attestations with the sender-scoped response key |
-| ResponsesApi                 | `src/server/`                       | Public `GET /responses/{requestId}` helper API serving each request's raw traced EVM output (a convenience, never an authority: clients recompute the digest from it and signature-verify) |
-| Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                          |
+| Component                    | Location                            | Purpose                                                                                                                                                                                  |
+| ---------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ChainSignatureServer         | `src/server/`                       | Main orchestrator, event subscription, transaction lifecycle                                                                                                                             |
+| CpiEventParser               | `src/events/`                       | Parses Anchor CPI events from Solana logs                                                                                                                                                |
+| EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                                                                                                                   |
+| BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                                                                                                                |
+| Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde)                                                                                     |
+| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract registry for requests, signs and posts signature-only attestations with the sender-scoped response key                                                |
+| OutputCache                  | `src/server/`                       | In-memory twin of the MPC's output cache bucket: each Midnight attestation's exact bytes, stored before posting and served under the bucket's layout (a convenience, never an authority) |
+| Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                                                                                                              |
 
 ### Two Workflows
 
@@ -68,7 +68,7 @@ Environment variables loaded from the repo-root `.env`:
 - `MPC_ROOT_KEY` (required)
 - `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
 - `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_WALLET_SEED` plus the `MIDNIGHT_*` endpoint overrides (`MIDNIGHT_NETWORK_ID`, `MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_INDEXER_WS_URL`, `MIDNIGHT_PROOF_SERVER_URL`) enable the Midnight leg (optional)
-- `RESPONSES_API_PORT` (optional, default 3040: TCP port of the public `/responses/{requestId}` helper API)
+- `OUTPUT_CACHE_PORT`, `OUTPUT_CACHE_PREFIX` (optional, defaults 3040 and `v1/fakenet`: where the output cache simulation is served)
 - `DISABLE_SOLANA`, `VERBOSE`, `BITCOIN_NETWORK` (optional)
 
 Runtime config in `src/config/Config.ts` includes polling intervals, timeouts, and key derivation settings.
