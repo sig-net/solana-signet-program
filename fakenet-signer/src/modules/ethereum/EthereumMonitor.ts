@@ -199,7 +199,11 @@ export class EthereumMonitor {
 
     const fetchRequest = new ethers.FetchRequest(url);
     fetchRequest.timeout = 30_000;
-    const provider = new ethers.JsonRpcProvider(fetchRequest);
+    // cacheTimeout -1: ethers shares identical requests for 250ms, so the
+    // receipt re-read that decides a replacement would repeat a stale null.
+    const provider = new ethers.JsonRpcProvider(fetchRequest, undefined, {
+      cacheTimeout: -1,
+    });
     this.providerCache.set(cacheKey, provider);
     return provider;
   }
