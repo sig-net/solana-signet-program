@@ -88,14 +88,13 @@ export class SignetRequestFeed {
   private async notificationPointers(): Promise<
     { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }[]
   > {
-    const events = await this.eventSource.querySignetEvents(
-      this.signetContractAddress
-    );
     const pointers = new Map<
       string,
       { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }
     >();
-    for (const event of events) {
+    for await (const event of this.eventSource.streamSignetEvents(
+      this.signetContractAddress
+    )) {
       if (!isSignetEventNamed(event, SignetEventName.SignBidirectionalEvent))
         continue;
       let pointer;

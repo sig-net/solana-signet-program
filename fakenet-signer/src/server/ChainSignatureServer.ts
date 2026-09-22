@@ -585,6 +585,7 @@ export class ChainSignatureServer {
                 this.handleCompletedTransaction(txHash, txInfo, {
                   success: result.success,
                   output: result.output,
+                  blockNumber: result.blockNumber,
                 }),
               'handleCompletedTransaction',
               true
@@ -598,7 +599,12 @@ export class ChainSignatureServer {
             const done = await this.executeWithRecovery(
               txHash,
               txInfo,
-              () => this.handleFailedTransaction(txHash, txInfo),
+              () =>
+                this.handleFailedTransaction(
+                  txHash,
+                  txInfo,
+                  result.blockNumber
+                ),
               'handleFailedTransaction',
               false // circular — can't send error response for a failed error response
             );
@@ -610,7 +616,7 @@ export class ChainSignatureServer {
             console.error(
               `Fatal error for transaction ${txHash}: ${result.reason}`
             );
-            await this.sendErrorResponse(txHash, txInfo);
+            await this.sendErrorResponse(txHash, txInfo, result.blockNumber);
             pendingTransactions.delete(txHash);
             break;
         }
@@ -631,7 +637,7 @@ export class ChainSignatureServer {
   private async handleCompletedTransaction(
     txHash: string,
     txInfo: PendingTransaction,
-    result: TransactionOutput
+    result: TransactionOutput & { blockNumber: number }
   ) {
     // Checkpoint 3 (still deserialised, serialisation happens below):
     // 'result.output' is the decoded field map from Checkpoint 2, i.e. the MPC's
@@ -666,6 +672,7 @@ export class ChainSignatureServer {
         );
         await this.midnightMonitor.signAndBroadcastResponse(
           requestIdBytes,
+          BigInt(result.blockNumber),
           serializedOutput,
           txInfo.sender
         );
@@ -946,7 +953,8 @@ export class ChainSignatureServer {
 
   private async handleFailedTransaction(
     txHash: string,
-    txInfo: PendingTransaction
+    txInfo: PendingTransaction,
+    blockNumber?: number
   ) {
     console.warn(`❌ Transaction failed: ${txHash}`);
 
@@ -968,6 +976,7 @@ export class ChainSignatureServer {
       // recompute the failure candidate without the receipt.
       await this.midnightMonitor.signAndBroadcastResponse(
         requestIdBytes,
+        BigInt(blockNumber ?? 0),
         MPC_FAILURE_OUTPUT,
         txInfo.sender
       );
@@ -1292,10 +1301,11 @@ export class ChainSignatureServer {
 
   private async sendErrorResponse(
     txHash: string,
-    txInfo: PendingTransaction
+    txInfo: PendingTransaction,
+    blockNumber?: number
   ): Promise<void> {
     try {
-      await this.handleFailedTransaction(txHash, txInfo);
+      await this.handleFailedTransaction(txHash, txInfo, blockNumber);
     } catch (error) {
       console.error(
         `⛔ Could not send error response for ${txHash}: ${

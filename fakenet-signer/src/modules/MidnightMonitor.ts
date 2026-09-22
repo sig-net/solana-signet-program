@@ -33,8 +33,9 @@ import {
 
 import {
   bytesToHex,
+  encodeAttestedOutput,
   formatSecp256k1PublicKey,
-  signetEventSourceFromPublicDataProvider,
+  signetEventSourceFromIndexer,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
   MPCSignatureAlgorithm,
@@ -96,7 +97,9 @@ export interface SignedResponse {
   requestId: string;
   /** The exact unpadded serialised output the attestation commits to, as hex. */
   serializedOutput: string;
-  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, output])), as hex. */
+  /** The height of the destination block the attestation commits to. */
+  blockHeight: string;
+  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, blockHeight, outputLength, output])), as hex. */
   attestationDigest: string;
   /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
   bigRx: string;
@@ -201,14 +204,15 @@ export class MidnightMonitor {
       subscriptionURL: this.config.indexerWsUrl,
     });
 
-    // The indexer provider serves both roles: the event source for discovery
-    // and the state source for the caller-ledger reads.
+    // The indexer serves both roles: its event route is the discovery source
+    // and its public data provider is the state source for the caller-ledger
+    // reads.
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
-      eventSource: signetEventSourceFromPublicDataProvider(
-        this.publicDataProvider
-      ),
+      eventSource: signetEventSourceFromIndexer({
+        queryUrl: this.config.indexerUrl,
+      }),
     });
 
     console.log(
@@ -583,6 +587,7 @@ export class MidnightMonitor {
    */
   async signAndBroadcastResponse(
     requestId: Uint8Array,
+    blockHeight: bigint,
     evmReturnData: Uint8Array,
     senderContractAddress: string
   ): Promise<SignedResponse> {
@@ -606,12 +611,13 @@ export class MidnightMonitor {
     // padding, no fixed field width. The output itself travels off-chain.
     const serializedOutput = evmReturnData;
 
-    // The Poseidon attestation digest over (requestId, output), matching the
-    // circuit clients verify against in-circuit
-    // (verifyRespondBidirectionalEvent). A mismatch here makes every response
-    // fail at claim time.
+    // The Poseidon attestation digest over (requestId, blockHeight,
+    // outputLength, output), matching the circuit clients verify against
+    // in-circuit (verifyRespondBidirectionalEvent). A mismatch here makes
+    // every response fail at claim time.
     const attestationDigest = calculateSignetAttestationDigest(
       requestId,
+      blockHeight,
       serializedOutput
     );
     const sig = signAttestationDigest(attestationDigest, responseSecretKey);
@@ -619,20 +625,21 @@ export class MidnightMonitor {
     // Only the signature goes on-chain: the verifier recomputes the digest.
     const respondBidirectionalEvent: RespondBidirectionalEvent = { signature };
 
-    // The exact attested bytes reach the output cache BEFORE the attestation
-    // is posted, as the MPC's publisher does: a client downloads them by
-    // request id and verifies the posted signature over them.
+    // The block height and the exact attested bytes reach the output cache
+    // BEFORE the attestation is posted, as the MPC's publisher does: a client
+    // downloads them by request id and verifies the posted signature over them.
     this.config.outputCache.ensureOutput(
       {
         networkId: this.config.networkId,
         signetContractAddress: this.config.signetContractAddress,
       },
       requestId,
-      serializedOutput
+      encodeAttestedOutput({ blockHeight, serializedOutput })
     );
 
     const response: SignedResponse = {
       requestId: requestIdHex,
+      blockHeight: blockHeight.toString(),
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
       attestationDigest: Buffer.from(attestationDigest).toString('hex'),
       bigRx: Buffer.from(signature.bigR.x).toString('hex'),

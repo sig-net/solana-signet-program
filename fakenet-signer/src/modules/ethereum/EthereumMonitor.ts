@@ -67,7 +67,11 @@ export class EthereumMonitor {
           console.log(
             `❌ EthereumMonitor: tx ${txHash} reverted (block=${receipt.blockNumber})`
           );
-          return { status: 'error', reason: 'reverted' };
+          return {
+            status: 'error',
+            reason: 'reverted',
+            blockNumber: receipt.blockNumber,
+          };
         }
 
         const tx = await provider.getTransaction(txHash);
@@ -97,6 +101,7 @@ export class EthereumMonitor {
             status: 'success',
             success: output.success,
             output: output.output,
+            blockNumber: receipt.blockNumber,
           };
         } catch (error) {
           // A missing debug_traceTransaction can never heal by retrying:
@@ -111,6 +116,7 @@ export class EthereumMonitor {
             return {
               status: 'fatal_error',
               reason: 'debug_trace_not_supported',
+              blockNumber: receipt.blockNumber,
             };
           }
 
@@ -128,7 +134,11 @@ export class EthereumMonitor {
               `EthereumMonitor: output extraction failed ${failures} times for ${txHash}, giving up`,
               error
             );
-            return { status: 'fatal_error', reason: 'extraction_failed' };
+            return {
+              status: 'fatal_error',
+              reason: 'extraction_failed',
+              blockNumber: receipt.blockNumber,
+            };
           }
           this.extractionFailureCounts.set(txHash, failures);
           console.error(
@@ -146,7 +156,11 @@ export class EthereumMonitor {
             console.log(
               `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} already used)`
             );
-            return { status: 'error', reason: 'replaced' };
+            return {
+              status: 'error',
+              reason: 'replaced',
+              blockNumber: await provider.getBlockNumber(),
+            };
           }
         }
 
