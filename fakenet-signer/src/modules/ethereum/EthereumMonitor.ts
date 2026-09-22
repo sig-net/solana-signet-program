@@ -185,7 +185,9 @@ export class EthereumMonitor {
 
     const fetchRequest = new ethers.FetchRequest(url);
     fetchRequest.timeout = 30_000;
-    const provider = new ethers.JsonRpcProvider(fetchRequest);
+    const provider = new ethers.JsonRpcProvider(fetchRequest, undefined, {
+      cacheTimeout: -1,
+    });
     this.providerCache.set(cacheKey, provider);
     return provider;
   }
