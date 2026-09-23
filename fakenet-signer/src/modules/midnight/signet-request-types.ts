@@ -40,7 +40,7 @@ export interface CalldataFields {
 export interface SigningRequest {
   /** Contract address — the predecessor (from ContractCall.address). Unforgeable. */
   predecessor: string;
-  /** Request ID — the Map key, computed as persistentHash of the full record. */
+  /** Request ID — the Map key, the transientHash of the record's identity fields (calculateRequestId). */
   requestId: Uint8Array;
   /** EVM gas/tx parameters. */
   evmParams: EvmGasParams;

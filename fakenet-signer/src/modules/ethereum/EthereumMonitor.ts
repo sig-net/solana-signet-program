@@ -70,7 +70,7 @@ export class EthereumMonitor {
           return {
             status: 'error',
             reason: 'reverted',
-            blockNumber: receipt.blockNumber,
+            blockHeight: BigInt(receipt.blockNumber),
           };
         }
 
@@ -101,7 +101,7 @@ export class EthereumMonitor {
             status: 'success',
             success: output.success,
             output: output.output,
-            blockNumber: receipt.blockNumber,
+            blockHeight: BigInt(receipt.blockNumber),
           };
         } catch (error) {
           // A missing debug_traceTransaction can never heal by retrying:
@@ -116,7 +116,6 @@ export class EthereumMonitor {
             return {
               status: 'fatal_error',
               reason: 'debug_trace_not_supported',
-              blockNumber: receipt.blockNumber,
             };
           }
 
@@ -134,11 +133,7 @@ export class EthereumMonitor {
               `EthereumMonitor: output extraction failed ${failures} times for ${txHash}, giving up`,
               error
             );
-            return {
-              status: 'fatal_error',
-              reason: 'extraction_failed',
-              blockNumber: receipt.blockNumber,
-            };
+            return { status: 'fatal_error', reason: 'extraction_failed' };
           }
           this.extractionFailureCounts.set(txHash, failures);
           console.error(
@@ -153,14 +148,15 @@ export class EthereumMonitor {
         if (currentNonce > nonce) {
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
-            console.log(
-              `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} already used)`
+            const blockHeight = await this.findNonceConsumedBlock(
+              provider,
+              fromAddress,
+              nonce
             );
-            return {
-              status: 'error',
-              reason: 'replaced',
-              blockNumber: await provider.getBlockNumber(),
-            };
+            console.log(
+              `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} taken in block ${blockHeight})`
+            );
+            return { status: 'error', reason: 'replaced', blockHeight };
           }
         }
 
@@ -174,6 +170,31 @@ export class EthereumMonitor {
     } catch {
       return { status: 'pending' };
     }
+  }
+
+  /**
+   * The first block at which `fromAddress` had spent `nonce`: the block that
+   * took the nonce from a replaced transaction, found by bisecting the
+   * account's transaction count over the chain height. The attestation of an
+   * unviable request commits to this height.
+   */
+  private static async findNonceConsumedBlock(
+    provider: ethers.JsonRpcProvider,
+    fromAddress: string,
+    nonce: number
+  ): Promise<bigint> {
+    let low = 0;
+    let high = await provider.getBlockNumber();
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      const count = await provider.getTransactionCount(fromAddress, mid);
+      if (count > nonce) {
+        high = mid;
+      } else {
+        low = mid + 1;
+      }
+    }
+    return BigInt(low);
   }
 
   private static getProvider(
@@ -199,6 +220,8 @@ export class EthereumMonitor {
 
     const fetchRequest = new ethers.FetchRequest(url);
     fetchRequest.timeout = 30_000;
+    // No result caching: a receipt read must be fresh, so a transaction is
+    // never declared replaced on a stale nonce or receipt.
     const provider = new ethers.JsonRpcProvider(fetchRequest, undefined, {
       cacheTimeout: -1,
     });

@@ -231,16 +231,35 @@ export interface TransactionOutput {
   output: TransactionOutputData;
 }
 
+/** A confirmed transaction's decoded output plus the block it is final at. */
+export interface CompletedTransaction extends TransactionOutput {
+  blockHeight: OutcomeBlockHeight;
+}
+
+/** Why a destination transaction produced no output, and where that became final. */
+export interface TransactionFailure {
+  reason: string;
+  blockHeight: OutcomeBlockHeight;
+}
+
+/**
+ * Height of the destination block an outcome is final at, in the chain's own
+ * numbering: the block holding the executed or reverted transaction, or the
+ * block that took a replaced transaction's nonce. Chains whose monitors carry
+ * no such height (Bitcoin) leave it undefined.
+ */
+export type OutcomeBlockHeight = bigint | undefined;
+
 export type TransactionStatus =
   | { status: 'pending' }
   | {
       status: 'success';
       success: boolean;
       output: TransactionOutputData;
-      blockNumber: number;
+      blockHeight: OutcomeBlockHeight;
     }
-  | { status: 'error'; reason: string; blockNumber: number }
-  | { status: 'fatal_error'; reason: string; blockNumber?: number };
+  | { status: 'error'; reason: string; blockHeight: OutcomeBlockHeight }
+  | { status: 'fatal_error'; reason: string };
 
 export interface SignatureResponse {
   bigR: { x: number[]; y: number[] };

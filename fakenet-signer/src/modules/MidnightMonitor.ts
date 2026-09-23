@@ -10,10 +10,12 @@
  *    SignBidirectionalEvent not served before
  * 3. Build ABI calldata + RLP transaction off-chain
  * 4. Post the MPC's ECDSA signature to the signet contract (respond)
- * 5. Once the EVM tx confirms, sign the attestation digest with the response
- *    key derived for the requesting contract and post the
- *    RespondBidirectionalEvent (respondBidirectional), which the client
- *    verifies before calling claimDeposit()
+ * 5. Once the EVM tx is final (executed, reverted, or its nonce taken by
+ *    another transaction), sign the attestation digest over the request id,
+ *    the destination block height, the outcome kind and the output with the
+ *    response key derived for the requesting contract, and post the
+ *    RespondBidirectionalEvent (respondBidirectional) carrying the signature,
+ *    the kind and the height, which the client verifies before settling
  */
 
 import { Buffer } from 'buffer';
@@ -33,12 +35,12 @@ import {
 
 import {
   bytesToHex,
-  encodeAttestedOutput,
   formatSecp256k1PublicKey,
   signetEventSourceFromIndexer,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
   MPCSignatureAlgorithm,
+  OutputKind,
   type RequestIdHex,
   type SignBidirectionalEvent,
   type SignatureRespondedEvent,
@@ -47,11 +49,9 @@ import {
 // The secret-taking helpers: the responder is the MPC's test double, so it
 // derives, signs and encodes through the SDK's minting surface.
 import {
-  calculateSignetAttestationDigest,
+  attestRespondBidirectional,
   deriveMidnightResponseSecretKey,
-  ecdsaSignatureToMpcSignature,
   secp256k1PublicKeyOf,
-  signAttestationDigest,
   signatureToSignatureRespondedEvent,
 } from '@sig-net/midnight/testing';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
@@ -95,11 +95,13 @@ export interface MidnightSigningRequest extends SigningRequest {
 
 export interface SignedResponse {
   requestId: string;
-  /** The exact unpadded serialised output the attestation commits to, as hex. */
+  /** The exact unpadded serialised output the attestation commits to, as hex (empty for a failed or unviable execution). */
   serializedOutput: string;
-  /** The height of the destination block the attestation commits to. */
+  /** Height of the finalised destination block the attestation commits to, as a decimal string. */
   blockHeight: string;
-  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, blockHeight, outputLength, output])), as hex. */
+  /** The MPC's verdict the attestation commits to: executed, failed or unviable. */
+  outputKind: keyof typeof OutputKind;
+  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, blockHeight, outputKind, outputLength, output])), as hex. */
   attestationDigest: string;
   /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
   bigRx: string;
@@ -204,9 +206,8 @@ export class MidnightMonitor {
       subscriptionURL: this.config.indexerWsUrl,
     });
 
-    // The indexer serves both roles: its event route is the discovery source
-    // and its public data provider is the state source for the caller-ledger
-    // reads.
+    // The indexer serves both roles: the event stream for discovery and, via
+    // the provider, the state source for the caller-ledger reads.
     this.feed = new SignetRequestFeed({
       signetContractAddress: this.config.signetContractAddress,
       source: this.publicDataProvider,
@@ -436,16 +437,13 @@ export class MidnightMonitor {
   }
 
   /** Post an MPC signature response on-chain via the joined signet contract. */
-  async postSignatureResponse(
-    requestId: Uint8Array,
-    signatureResponse: SignatureRespondedEvent
-  ) {
+  async postSignatureResponse(signatureResponse: SignatureRespondedEvent) {
     // Resolve the contract outside the timer: the first call builds the wallet
     // and joins the contract, whose one-off cost would skew the benchmark.
     const contract = await this.responderContract();
     return this.serializeWrite(
-      `respond(0x${Buffer.from(requestId).toString('hex')})`,
-      () => contract.callTx.respond(requestId, signatureResponse)
+      `respond(0x${Buffer.from(signatureResponse.requestId).toString('hex')})`,
+      () => contract.callTx.respond(signatureResponse)
     );
   }
 
@@ -454,14 +452,12 @@ export class MidnightMonitor {
    * signet contract.
    */
   async postRespondBidirectional(
-    requestId: Uint8Array,
     respondBidirectional: RespondBidirectionalEvent
   ) {
     const contract = await this.responderContract();
     return this.serializeWrite(
-      `respondBidirectional(0x${Buffer.from(requestId).toString('hex')})`,
-      () =>
-        contract.callTx.respondBidirectional(requestId, respondBidirectional)
+      `respondBidirectional(0x${Buffer.from(respondBidirectional.requestId).toString('hex')})`,
+      () => contract.callTx.respondBidirectional(respondBidirectional)
     );
   }
 
@@ -550,7 +546,7 @@ export class MidnightMonitor {
           : undefined,
         words,
       },
-      caip2Id: decodePaddedString(signetRequest.caip2Id),
+      caip2Id: decodePaddedString(signetRequest.executionDest),
       keyVersion: Number(signetRequest.keyVersion),
       path: signetRequest.path,
       // Compact enums arrive as 0-based variant indices, labelled for logging.
@@ -559,9 +555,9 @@ export class MidnightMonitor {
           ? 'ecdsa'
           : `unknown(${signetRequest.algo})`,
       dest:
-        signetRequest.dest === MPCDestination.unused
+        signetRequest.signatureDest === MPCDestination.unused
           ? 'unused'
-          : `unknown(${signetRequest.dest})`,
+          : `unknown(${signetRequest.signatureDest})`,
       params: signetRequest.params,
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
       respondSerializationSchema: signetRequest.respondSerializationSchema,
@@ -579,16 +575,19 @@ export class MidnightMonitor {
   }
 
   /**
-   * Sign and post the respond-bidirectional response for a completed or failed
-   * remote execution. The response key is derived from
-   * `senderContractAddress`, mirroring the MPC's sender-scoped
-   * `tx.epsilon(path)` derivation.
+   * Sign and post the respond-bidirectional response for a remote execution
+   * that is final: executed (the serialised output), reverted or unviable
+   * (an empty output under that kind). `blockHeight` is the destination block
+   * the outcome is final at, which the attestation commits to. The response
+   * key is derived from `senderContractAddress`, mirroring the MPC's
+   * sender-scoped `tx.epsilon(path)` derivation.
    */
   async signAndBroadcastResponse(
     requestId: Uint8Array,
+    serializedOutput: Uint8Array,
+    senderContractAddress: string,
     blockHeight: bigint,
-    evmReturnData: Uint8Array,
-    senderContractAddress: string
+    outputKind: OutputKind
   ): Promise<SignedResponse> {
     const mpcRootKeyBytes = this.mpcRootKeyBytes;
     if (!mpcRootKeyBytes) {
@@ -607,49 +606,43 @@ export class MidnightMonitor {
     );
 
     // The attestation commits to the output at its exact unpadded length: no
-    // padding, no fixed field width. The output itself travels off-chain.
-    const serializedOutput = evmReturnData;
-
-    // The Poseidon attestation digest over (requestId, blockHeight,
-    // outputLength, output), matching the circuit clients verify against
-    // in-circuit (verifyRespondBidirectionalEvent). A mismatch here makes
-    // every response fail at claim time.
-    const attestationDigest = calculateSignetAttestationDigest(
-      requestId,
-      blockHeight,
-      serializedOutput
+    // padding, no fixed field width. The output itself travels off-chain; the
+    // record the SDK mints carries everything else the digest commits to,
+    // plus the digest and the signature over it.
+    const respondBidirectionalEvent = attestRespondBidirectional(
+      { requestId, blockHeight, outputKind, serializedOutput },
+      responseSecretKey
     );
-    const sig = signAttestationDigest(attestationDigest, responseSecretKey);
-    const signature = ecdsaSignatureToMpcSignature(sig);
-    // Only the signature goes on-chain: the verifier recomputes the digest.
-    const respondBidirectionalEvent: RespondBidirectionalEvent = { signature };
+    const { digest, signature } = respondBidirectionalEvent;
 
-    // The block height and the exact attested bytes reach the output cache
-    // BEFORE the attestation is posted, as the MPC's publisher does: a client
-    // downloads them by request id and verifies the posted signature over them.
+    // The exact attested bytes reach the output cache BEFORE the attestation
+    // is posted, as the MPC's publisher does: a client downloads them by
+    // request id and verifies the posted signature over them.
     this.config.outputCache.ensureOutput(
       {
         networkId: this.config.networkId,
         signetContractAddress: this.config.signetContractAddress,
       },
       requestId,
-      encodeAttestedOutput({ blockHeight, serializedOutput })
+      serializedOutput
     );
 
     const response: SignedResponse = {
       requestId: requestIdHex,
-      blockHeight: blockHeight.toString(),
       serializedOutput: Buffer.from(serializedOutput).toString('hex'),
-      attestationDigest: Buffer.from(attestationDigest).toString('hex'),
+      blockHeight: blockHeight.toString(),
+      outputKind: OutputKind[outputKind] as keyof typeof OutputKind,
+      attestationDigest: Buffer.from(digest).toString('hex'),
       bigRx: Buffer.from(signature.bigR.x).toString('hex'),
       bigRy: Buffer.from(signature.bigR.y).toString('hex'),
       s: Buffer.from(signature.s).toString('hex'),
-      recoveryId: sig.recoveryId,
+      recoveryId: Number(signature.recoveryId),
     };
 
-    await this.postRespondBidirectional(requestId, respondBidirectionalEvent);
+    await this.postRespondBidirectional(respondBidirectionalEvent);
     console.log(
-      `MidnightMonitor: posted respond-bidirectional response for ${requestIdHex}`
+      `MidnightMonitor: posted respond-bidirectional response for ${requestIdHex}` +
+        ` (${OutputKind[outputKind]} at block ${blockHeight})`
     );
 
     return response;
@@ -672,14 +665,15 @@ export class MidnightMonitor {
         `broadcastSignedTransaction: transaction for ${data.requestId} carries no signature`
       );
     }
-    const signatureResponse = signatureToSignatureRespondedEvent(sig);
-
-    const requestId = ethers.getBytes(data.requestId);
+    const signatureResponse = signatureToSignatureRespondedEvent(
+      ethers.getBytes(data.requestId),
+      sig
+    );
 
     console.log(
       `MidnightMonitor: posting signature response for ${data.requestId} (tx ${data.txHash})...`
     );
-    await this.postSignatureResponse(requestId, signatureResponse);
+    await this.postSignatureResponse(signatureResponse);
     console.log(
       `MidnightMonitor: posted signature response for ${data.requestId}`
     );

@@ -58,7 +58,7 @@ export class BitcoinMonitor {
           return {
             status: 'error',
             reason: 'inputs_spent',
-            blockNumber: await adapter.getCurrentBlockHeight(),
+            blockHeight: undefined,
           };
         }
         return { status: 'pending' };
@@ -77,7 +77,7 @@ export class BitcoinMonitor {
         status: 'success',
         success: true,
         output,
-        blockNumber: await adapter.getCurrentBlockHeight(),
+        blockHeight: undefined,
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
@@ -89,7 +89,7 @@ export class BitcoinMonitor {
           return {
             status: 'error',
             reason: 'inputs_spent',
-            blockNumber: await adapter.getCurrentBlockHeight(),
+            blockHeight: undefined,
           };
         }
         return { status: 'pending' };

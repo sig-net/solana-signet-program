@@ -46,8 +46,8 @@ export interface SignetRequestFeedConfig {
    */
   readonly source: SignetPublicStateSource;
   /**
-   * Source of the signet contract's emitted events (discovery). Adapt a full
-   * provider with `signetEventSourceFromPublicDataProvider`.
+   * Source of the signet contract's emitted events (discovery), such as
+   * `signetEventSourceFromIndexer`.
    */
   readonly eventSource: SignetEventSource;
 }

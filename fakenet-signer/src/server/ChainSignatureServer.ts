@@ -6,7 +6,9 @@ import { ethers } from 'ethers';
 import type {
   SignBidirectionalEvent,
   SignatureRequestedEvent,
+  CompletedTransaction,
   PendingTransaction,
+  TransactionFailure,
   TransactionOutput,
   TransactionOutputData,
   BorshSchema,
@@ -37,7 +39,7 @@ import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 // schema-driven packed bytes clients recompute at claim time.
 import {
   deriveEpsilon,
-  MPC_FAILURE_OUTPUT,
+  OutputKind,
   serializeRespondOutput,
   type AbiDecodedOutput,
 } from '@sig-net/midnight';
@@ -585,7 +587,7 @@ export class ChainSignatureServer {
                 this.handleCompletedTransaction(txHash, txInfo, {
                   success: result.success,
                   output: result.output,
-                  blockNumber: result.blockNumber,
+                  blockHeight: result.blockHeight,
                 }),
               'handleCompletedTransaction',
               true
@@ -600,11 +602,10 @@ export class ChainSignatureServer {
               txHash,
               txInfo,
               () =>
-                this.handleFailedTransaction(
-                  txHash,
-                  txInfo,
-                  result.blockNumber
-                ),
+                this.handleFailedTransaction(txHash, txInfo, {
+                  reason: result.reason,
+                  blockHeight: result.blockHeight,
+                }),
               'handleFailedTransaction',
               false // circular — can't send error response for a failed error response
             );
@@ -616,7 +617,7 @@ export class ChainSignatureServer {
             console.error(
               `Fatal error for transaction ${txHash}: ${result.reason}`
             );
-            await this.sendErrorResponse(txHash, txInfo, result.blockNumber);
+            await this.sendErrorResponse(txHash, txInfo, result.reason);
             pendingTransactions.delete(txHash);
             break;
         }
@@ -637,7 +638,7 @@ export class ChainSignatureServer {
   private async handleCompletedTransaction(
     txHash: string,
     txInfo: PendingTransaction,
-    result: TransactionOutput & { blockNumber: number }
+    result: CompletedTransaction
   ) {
     // Checkpoint 3 (still deserialised, serialisation happens below):
     // 'result.output' is the decoded field map from Checkpoint 2, i.e. the MPC's
@@ -664,6 +665,11 @@ export class ChainSignatureServer {
           throw new Error(`Midnight monitor unavailable for tx ${txHash}`);
         }
 
+        if (result.blockHeight === undefined) {
+          throw new Error(
+            `Midnight: no block height for the executed tx ${txHash}, the attestation commits to it`
+          );
+        }
         // Midnight: ECDSA-sign the serialized output on-chain; the user
         // polls the signet contract and claims.
         const serializedOutput = this.serializeMidnightRespondOutput(
@@ -672,9 +678,10 @@ export class ChainSignatureServer {
         );
         await this.midnightMonitor.signAndBroadcastResponse(
           requestIdBytes,
-          BigInt(result.blockNumber),
           serializedOutput,
-          txInfo.sender
+          txInfo.sender,
+          result.blockHeight,
+          OutputKind.executed
         );
         console.log(`✓ Midnight: response posted for ${txHash}`);
         return;
@@ -954,9 +961,9 @@ export class ChainSignatureServer {
   private async handleFailedTransaction(
     txHash: string,
     txInfo: PendingTransaction,
-    blockNumber?: number
+    failure: TransactionFailure
   ) {
-    console.warn(`❌ Transaction failed: ${txHash}`);
+    console.warn(`❌ Transaction failed: ${txHash} (${failure.reason})`);
 
     const requestId = txInfo.requestId;
     if (!requestId) {
@@ -970,17 +977,29 @@ export class ChainSignatureServer {
       if (!this.midnightMonitor) {
         throw new Error(`Midnight monitor unavailable for tx ${txHash}`);
       }
-      // Midnight: the schema-independent 5-byte failure output (deadbeef
-      // sentinel + 0x01), one fixed width for every respond schema so client
-      // refund circuits can take it as a Bytes<5> argument and clients can
-      // recompute the failure candidate without the receipt.
+      if (failure.blockHeight === undefined) {
+        // The protocol attests only outcomes that are final on the
+        // destination chain, and every attestation commits to that block.
+        // A tooling failure has no such block, so the request stays
+        // unanswered.
+        console.error(
+          `⛔ Midnight: no attestable outcome for ${txHash} (${failure.reason}): the request stays unanswered`
+        );
+        return;
+      }
+      // Midnight: a failed execution is attested as an EMPTY output under
+      // the kind that says why. The height is the reverted transaction's
+      // block, or the block that took the nonce of a replaced one.
       await this.midnightMonitor.signAndBroadcastResponse(
         requestIdBytes,
-        BigInt(blockNumber ?? 0),
-        MPC_FAILURE_OUTPUT,
-        txInfo.sender
+        new Uint8Array(0),
+        txInfo.sender,
+        failure.blockHeight,
+        failure.reason === 'replaced' ? OutputKind.unviable : OutputKind.failed
       );
-      console.log(`✓ Midnight: error response posted for ${txHash}`);
+      console.log(
+        `✓ Midnight: ${failure.reason} attested for ${txHash} at block ${failure.blockHeight}`
+      );
       return;
     }
 
@@ -1302,10 +1321,13 @@ export class ChainSignatureServer {
   private async sendErrorResponse(
     txHash: string,
     txInfo: PendingTransaction,
-    blockNumber?: number
+    reason: string
   ): Promise<void> {
     try {
-      await this.handleFailedTransaction(txHash, txInfo, blockNumber);
+      await this.handleFailedTransaction(txHash, txInfo, {
+        reason,
+        blockHeight: undefined,
+      });
     } catch (error) {
       console.error(
         `⛔ Could not send error response for ${txHash}: ${
@@ -1336,7 +1358,7 @@ export class ChainSignatureServer {
           `⛔ Unrecoverable error in ${label} for ${txHash}: ${errorMsg}`
         );
         if (sendErrorOnFailure) {
-          await this.sendErrorResponse(txHash, txInfo);
+          await this.sendErrorResponse(txHash, txInfo, errorMsg);
         }
         return true;
       }

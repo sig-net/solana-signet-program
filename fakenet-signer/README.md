@@ -377,18 +377,18 @@ For each discovered request the responder rebuilds the unsigned EVM transaction 
 
 ### Signature-only respond path
 
-Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature alone:
+Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature, its verdict on the execution (the output kind) and the destination block height, never the output:
 
 1. After the EVM transaction confirms, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). Extraction treats a missing method as an immediate error response with a log line naming the fix, never an endless retry.
 2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
-3. The responder computes the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signature is posted on-chain via `respondBidirectional`, and neither the digest nor the output itself travels on-chain.
-4. A failed execution (revert or replacement) is attested the same way over the fixed 5-byte failure output (the `0xDEADBEEF` sentinel plus `0x01`), one width for every respond schema, so client refund circuits can verify it without the receipt.
+3. The responder computes the attestation digest `upgradeFromTransient(transientHash([requestId, blockHeight, outputKind, serializedOutputLength, serializedOutput]))`, where `blockHeight` is the finalised EVM block holding the transaction and `outputKind` is `executed`, and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signature is posted on-chain via `respondBidirectional`, and neither the digest nor the output itself travels on-chain.
+4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
 
 Clients obtain the output bytes off-chain (recomputed from the mined transaction's trace, or downloaded from the output cache below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
 
 ### The output cache
 
-The real MPC, when configured with output storage, uploads the exact bytes each attestation commits to into a public bucket before it posts the attestation, one object per request under `<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin`. The fakenet simulates that bucket in memory and serves it over HTTP on `OUTPUT_CACHE_PORT` (default 3040) under `OUTPUT_CACHE_PREFIX` (default `v1/fakenet`): `GET /v1/fakenet/<networkId>/<signetContractAddress>/<requestId>.bin` answers the raw bytes as `application/octet-stream`, and 404 while the responder has not attested the request yet. A failed execution stores the fixed 5-byte failure output, exactly what its attestation commits to.
+The real MPC, when configured with output storage, uploads the exact bytes each attestation commits to into a public bucket before it posts the attestation, one object per request under `<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin`. The fakenet simulates that bucket in memory and serves it over HTTP on `OUTPUT_CACHE_PORT` (default 3040) under `OUTPUT_CACHE_PREFIX` (default `v1/fakenet`): `GET /v1/fakenet/<networkId>/<signetContractAddress>/<requestId>.bin` answers the raw bytes as `application/octet-stream`, and 404 while the responder has not attested the request yet. A failed or unviable execution stores an empty object, exactly what its attestation commits to.
 
 Point a client's `MpcOutputCacheReader` (`@sig-net/midnight`) at `http://<host>:3040/v1/fakenet` and it reads the fakenet exactly as it reads a real MPC's bucket. The cache is a CONVENIENCE, never an authority: the bytes are unauthenticated, and a client must verify the MPC's posted signature over them before trusting them.
 
@@ -694,11 +694,13 @@ interface SignatureRequestedEvent {
 6. On success:
    - Extract the mined call's return data (debug_traceTransaction)
    - Decode per outputDeserializationSchema, re-pack per respondSerializationSchema
-   - Sign the attestation digest upgradeFromTransient(transientHash([request_id, serialized_output]))
+   - Sign the attestation digest
+     upgradeFromTransient(transientHash([request_id, block_height, output_kind, output_length, serialized_output]))
      with the per-caller response key
-   - Post the signature-only respondBidirectional record on-chain
+   - Post the respondBidirectional record (signature, output kind, block height) on-chain
 7. On error:
-   - Attest the fixed 5-byte failure output (0xDEADBEEF + 0x01) the same way
+   - Attest an EMPTY output the same way: kind `failed` at the reverted transaction's block, or
+     `unviable` at the block that took its nonce
 ```
 
 See the [Midnight](#midnight) section for the full detail.
