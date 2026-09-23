@@ -535,7 +535,6 @@ export class MidnightMonitor {
     return {
       predecessor,
       requestId: new Uint8Array(Buffer.from(requestId, 'hex')),
-      nonce: signetRequest.requestNonce,
       evmParams: {
         evmTo: txParams.to,
         evmChainId: txParams.chainId,
