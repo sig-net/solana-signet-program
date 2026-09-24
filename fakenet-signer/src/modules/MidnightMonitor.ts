@@ -230,7 +230,7 @@ export class MidnightMonitor {
     console.log('MidnightMonitor: Starting polling...');
     console.log(`  Indexer: ${this.config.indexerUrl}`);
     console.log(
-      `  Signet contract (notification registry): ${this.config.signetContractAddress}`
+      `  Signet contract (notification events): ${this.config.signetContractAddress}`
     );
 
     this.pollIntervalId = setInterval(async () => {

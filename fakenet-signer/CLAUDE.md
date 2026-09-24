@@ -26,7 +26,7 @@ yarn release:patch      # Patch bump, build, publish
 
 ## Architecture
 
-This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification registry), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's is signature-only (the MPC's ECDSA signature over the Poseidon `transientHash` digest of `(request_id, serialized_output)`, with the digest itself off-chain too), so Midnight clients obtain the output bytes themselves (recomputed from the trace, or downloaded from the output cache this server simulates), recompute the digest and verify the posted signature over them.
+This is a multi-chain signature orchestrator for Solana and Midnight. It listens for signature requests on the source chain (Solana CPI events, or the Midnight signet contract's notification events), executes transactions on target chains (Ethereum, Bitcoin), monitors completion, and returns results to the source chain. The respond shapes differ: Solana's `RespondBidirectionalEvent` carries the full serialized output on-chain, while Midnight's carries the attestation without the output (the request id, the destination block height, the output kind, the output's byte width, the Poseidon `transientHash` digest over those and the serialized output, and the MPC's ECDSA signature over that digest), so Midnight clients obtain the output bytes themselves (recomputed from the trace, or downloaded from the output cache this server simulates), recompute the digest and verify the posted signature over them.
 
 ### Core Flow
 
@@ -34,7 +34,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 2. **ChainSignatureServer**: Main orchestrator that processes signature requests and manages the transaction lifecycle
 3. **Chain Processors**: Sign transactions for target chains (Ethereum: EIP-1559/Legacy, Bitcoin: PSBT)
 4. **Monitors**: Track transaction confirmations with exponential backoff polling
-5. **Bidirectional Handlers**: For sign-and-respond flows that write results back to the source chain (full output to Solana, signature-only attestation to Midnight)
+5. **Bidirectional Handlers**: For sign-and-respond flows that write results back to the source chain (full output to Solana, an attestation without the output to Midnight)
 
 ### Key Components
 
@@ -45,7 +45,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 | EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                                                                                                                   |
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                                                                                                                |
 | Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde)                                                                                     |
-| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract registry for requests, signs and posts signature-only attestations with the sender-scoped response key                                                |
+| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract's notification events for requests, signs and posts attestations with the sender-scoped response key                                                  |
 | OutputCache                  | `src/server/`                       | In-memory twin of the MPC's output cache bucket: each Midnight attestation's exact bytes, stored before posting and served under the bucket's layout (a convenience, never an authority) |
 | Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                                                                                                              |
 

@@ -1508,28 +1508,28 @@
     "@noble/curves" "~1.9.2"
     "@noble/hashes" "~1.8.0"
 
-"@sig-net/midnight-contract@0.24.0-rc.2":
-  version "0.24.0-rc.2"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.24.0-rc.2.tgz#20698be7c36c5c1b6732c7f87481f61514c14707"
-  integrity sha512-SVBElxwUggOAN6dFcS3ePZPVimdJa0OkQ/dnwqXM9vQBPpDxfNlqGwbZS0AUUsBn03i45vBL6dqhp0UbtLkyNw==
+"@sig-net/midnight-contract@0.24.0-rc.3":
+  version "0.24.0-rc.3"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.24.0-rc.3.tgz#e814f457cd6475b4198ee1ce80e94ac04bbfe1c9"
+  integrity sha512-hBosAa6zbpumSYtoErYiScbrxB8kbU0y3BBPF5JUNp2Z+UQwksyDmAYj4j4INODFeWtU+Y9cDSm5kZhIT5zBLQ==
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js" "5.0.0-beta.6"
 
-"@sig-net/midnight-serde@^0.24.0-rc.2":
-  version "0.24.0-rc.2"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-serde/-/midnight-serde-0.24.0-rc.2.tgz#6188067800f7deb6f850c67b8d8820f2192c4afb"
-  integrity sha512-uPFqxrO+7e28lNgXYq5zHaOwuBPWAaqkCF99yyH2plY6BKOA75RK5f91DlVxPiKS4W71pAoJkAJ64euwXek4Pw==
+"@sig-net/midnight-serde@^0.24.0-rc.3":
+  version "0.24.0-rc.3"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-serde/-/midnight-serde-0.24.0-rc.3.tgz#bea31686a5406adc3eb7f339dce98a613e3e90f4"
+  integrity sha512-xNegKGd8vmNW/cc3vShdHcjLTZQxVPXpWFcxBpkHwDEV66BWl0jbiKd07xa+Sb5yMxnRhMUSYvbRfrAjSjS4Kw==
 
-"@sig-net/midnight@0.24.0-rc.2":
-  version "0.24.0-rc.2"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.24.0-rc.2.tgz#d1ee2ff97f274648b8cf9b7621a9a7fa26553999"
-  integrity sha512-T1yJxnqnNfOEguQvS+n8jnVZFYt0FRSMkcCwJYTLsaOy4hyKO0eTqKPsS48wxvyN4C1xvTkzv2CRmBsh91D2rw==
+"@sig-net/midnight@0.24.0-rc.3":
+  version "0.24.0-rc.3"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.24.0-rc.3.tgz#fe08b63c764f838c0e05ea4276b6186145e1ea33"
+  integrity sha512-JLwZzdyCo4XhGVBUnp93b8MDcUZXQkwGqBhH36zcdN6TC/kjXb8UfXTEJwPZS5h6St7/2Wl6WtnYyqP44/1/cA==
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js-types" "5.0.0-beta.6"
     "@noble/curves" "^2.2.0"
-    "@sig-net/midnight-serde" "^0.24.0-rc.2"
+    "@sig-net/midnight-serde" "^0.24.0-rc.3"
     ethers "^6.17.0"
 
 "@solana/buffer-layout@^4.0.1":
