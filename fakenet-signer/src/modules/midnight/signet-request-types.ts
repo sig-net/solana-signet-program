@@ -42,8 +42,6 @@ export interface SigningRequest {
   predecessor: string;
   /** Request ID — the Map key, computed as persistentHash of the full record. */
   requestId: Uint8Array;
-  /** Per-request nonce value — ensures identical txs produce different request IDs. */
-  nonce: bigint;
   /** EVM gas/tx parameters. */
   evmParams: EvmGasParams;
   /** Calldata fields (selector + words). */

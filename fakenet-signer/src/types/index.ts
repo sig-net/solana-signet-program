@@ -237,9 +237,10 @@ export type TransactionStatus =
       status: 'success';
       success: boolean;
       output: TransactionOutputData;
+      blockNumber: number;
     }
-  | { status: 'error'; reason: string }
-  | { status: 'fatal_error'; reason: string };
+  | { status: 'error'; reason: string; blockNumber: number }
+  | { status: 'fatal_error'; reason: string; blockNumber?: number };
 
 export interface SignatureResponse {
   bigR: { x: number[]; y: number[] };

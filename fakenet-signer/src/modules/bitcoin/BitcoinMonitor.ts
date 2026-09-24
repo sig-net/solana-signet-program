@@ -55,7 +55,11 @@ export class BitcoinMonitor {
           console.log(
             `❌ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} input ${conflicted.txid}:${conflicted.vout} spent elsewhere`
           );
-          return { status: 'error', reason: 'inputs_spent' };
+          return {
+            status: 'error',
+            reason: 'inputs_spent',
+            blockNumber: await adapter.getCurrentBlockHeight(),
+          };
         }
         return { status: 'pending' };
       }
@@ -73,6 +77,7 @@ export class BitcoinMonitor {
         status: 'success',
         success: true,
         output,
+        blockNumber: await adapter.getCurrentBlockHeight(),
       };
     } catch (error) {
       if (error instanceof Error && error.message.includes('not found')) {
@@ -81,7 +86,11 @@ export class BitcoinMonitor {
           console.log(
             `❌ BitcoinMonitor: ${config.bitcoinNetwork} tx ${txid} input ${conflicted.txid}:${conflicted.vout} spent elsewhere`
           );
-          return { status: 'error', reason: 'inputs_spent' };
+          return {
+            status: 'error',
+            reason: 'inputs_spent',
+            blockNumber: await adapter.getCurrentBlockHeight(),
+          };
         }
         return { status: 'pending' };
       }
