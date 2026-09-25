@@ -17,7 +17,11 @@ import type {
   CpiEventData,
   SignatureResponse,
 } from '../types';
-import { isSignBidirectionalEvent, isSignatureRequestedEvent } from '../types';
+import {
+  TransactionFailureReason,
+  isSignBidirectionalEvent,
+  isSignatureRequestedEvent,
+} from '../types';
 import {
   DEFAULT_TICK_GUARD_RELEASE_MS,
   runTickWithGuardRelease,
@@ -388,6 +392,18 @@ export class ChainSignatureServer {
     // Parse the unsigned tx and sign it properly with ethers
     const unsignedTx = ethers.Transaction.from(ethers.hexlify(unsignedTxBytes));
     const wallet = new ethers.Wallet(derivedPrivateKey);
+    const signedAtBlock = await EthereumMonitor.getSigningBlock(
+      request.caip2Id,
+      wallet.address,
+      unsignedTx.nonce,
+      this.config
+    );
+    if (signedAtBlock === undefined) {
+      console.warn(
+        'Midnight: refusing EVM request with a nonce already spent at finality'
+      );
+      return;
+    }
     const signedTxHex = await wallet.signTransaction(unsignedTx);
     const signedTx = ethers.Transaction.from(signedTxHex);
     const signedTxHash = signedTx.hash;
@@ -422,6 +438,7 @@ export class ChainSignatureServer {
       ),
       fromAddress: wallet.address,
       nonce: Number(unsignedTx.nonce),
+      signedAtBlock,
       checkCount: 0,
       namespace: request.caip2Id.split(':')[0] ?? 'eip155',
       prevouts: [],
@@ -569,6 +586,7 @@ export class ChainSignatureServer {
                 txInfo.outputDeserializationSchema,
                 txInfo.fromAddress,
                 txInfo.nonce,
+                txInfo.signedAtBlock,
                 this.config
               );
         this.log(`  📋 Result for ${txHash}: ${result.status}`);
@@ -995,7 +1013,11 @@ export class ChainSignatureServer {
         new Uint8Array(0),
         txInfo.sender,
         failure.blockHeight,
-        failure.reason === 'replaced' ? OutputKind.unviable : OutputKind.failed
+        {
+          [TransactionFailureReason.Reverted]: OutputKind.failed,
+          [TransactionFailureReason.Replaced]: OutputKind.unviable,
+          [TransactionFailureReason.InputsSpent]: OutputKind.unviable,
+        }[failure.reason]
       );
       console.log(
         `✓ Midnight: ${failure.reason} attested for ${txHash} at block ${failure.blockHeight}`

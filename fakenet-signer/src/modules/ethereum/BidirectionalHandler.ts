@@ -1,5 +1,7 @@
 import { contracts } from 'signet.js';
 const { getRequestIdBidirectional } = contracts.solana;
+import { ethers } from 'ethers';
+import { EthereumMonitor } from './EthereumMonitor';
 import { EthereumTransactionProcessor } from './EthereumTransactionProcessor';
 import type { SignBidirectionalEvent } from '../../types';
 import type { BidirectionalHandlerContext } from '../shared/BidirectionalContext';
@@ -21,6 +23,22 @@ export async function handleEthereumBidirectional(
     dest: event.dest,
     params: event.params,
   });
+
+  const unsignedTx = ethers.Transaction.from(
+    ethers.hexlify(event.serializedTransaction)
+  );
+  const signedAtBlock = await EthereumMonitor.getSigningBlock(
+    event.caip2Id,
+    new ethers.Wallet(derivedPrivateKey).address,
+    unsignedTx.nonce,
+    context.config
+  );
+  if (signedAtBlock === undefined) {
+    console.warn(
+      `Refusing EVM request ${requestId}: nonce already spent at finality`
+    );
+    return;
+  }
 
   const result =
     await EthereumTransactionProcessor.processTransactionForSigning(
@@ -49,6 +67,7 @@ export async function handleEthereumBidirectional(
     respondSerializationSchema: Buffer.from(event.respondSerializationSchema),
     fromAddress: result.fromAddress,
     nonce: result.nonce,
+    signedAtBlock,
     checkCount: 0,
     namespace: 'eip155',
     prevouts: [],

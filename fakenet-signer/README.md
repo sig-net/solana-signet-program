@@ -379,7 +379,7 @@ For each discovered request the responder rebuilds the unsigned EVM transaction 
 
 Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature, its verdict on the execution (the output kind), the destination block height, the output's byte width and the attestation digest, never the output itself:
 
-1. After the EVM transaction confirms, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). Extraction treats a missing method as an immediate error response with a log line naming the fix, never an endless retry.
+1. After the EVM transaction reaches a finalised block, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). An unsupported trace method stops monitoring and logs the required RPC capability. On Midnight this leaves the request unanswered, since no execution output can be attested.
 2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
 3. The responder computes the attestation digest `upgradeFromTransient(transientHash([HashDomain.attestationDigest, requestId, blockHeight, outputKind, serializedOutputLength, serializedOutput]))`, where `blockHeight` is the finalised EVM block holding the transaction and `outputKind` is `executed`, and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The digest, the kind, the height, the output width and the signature are posted on-chain via `respondBidirectional`. The output itself never travels on-chain.
 4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
@@ -433,7 +433,9 @@ Signs and prepares transactions:
 
 Monitors Ethereum transaction lifecycle:
 
-- Polls for transaction receipts
+- Waits for receipts to reach the finalised destination height
+- Refuses EVM requests whose nonce is spent at the finalised admission block
+- Bounds replacement lookup to blocks after admission. The RPC must retain account state over that interval, so long-pending requests can still require archive access
 - Detects: pending, success, reverted, replaced states
 - Extracts return values from contract calls
 - Provider caching for efficiency
@@ -546,6 +548,7 @@ await EthereumMonitor.waitForTransactionAndGetOutput(
   schema,
   fromAddress,
   nonce,
+  signedAtBlock,
   config
 );
 

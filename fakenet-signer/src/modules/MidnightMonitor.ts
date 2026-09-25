@@ -93,26 +93,6 @@ export interface MidnightSigningRequest extends SigningRequest {
   signetRequest: SignBidirectionalEvent;
 }
 
-export interface SignedResponse {
-  requestId: string;
-  /** The exact unpadded serialised output the attestation commits to, as hex (empty for a failed or unviable execution). */
-  serializedOutput: string;
-  /** Height of the finalised destination block the attestation commits to, as a decimal string. */
-  blockHeight: string;
-  /** The MPC's verdict the attestation commits to: executed, failed or unviable. */
-  outputKind: keyof typeof OutputKind;
-  /** The signed attestation digest upgradeFromTransient(transientHash([HashDomain.attestationDigest, requestId, blockHeight, outputKind, outputLength, output])), as hex. */
-  attestationDigest: string;
-  /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
-  bigRx: string;
-  /** Signature nonce point R.y as hex (32 big-endian bytes, ledger form). */
-  bigRy: string;
-  /** ECDSA signature scalar s as hex (32 big-endian bytes, ledger form). */
-  s: string;
-  /** Recovery id (parity of R.y). */
-  recoveryId: number;
-}
-
 export interface MidnightMonitorConfig {
   networkId: NetworkId;
   indexerUrl: string;
@@ -588,7 +568,7 @@ export class MidnightMonitor {
     senderContractAddress: string,
     blockHeight: bigint,
     outputKind: OutputKind
-  ): Promise<SignedResponse> {
+  ): Promise<void> {
     const mpcRootKeyBytes = this.mpcRootKeyBytes;
     if (!mpcRootKeyBytes) {
       throw new Error('MidnightMonitor: not initialized (no root key)');
@@ -613,7 +593,6 @@ export class MidnightMonitor {
       { requestId, blockHeight, outputKind, serializedOutput },
       responseSecretKey
     );
-    const { digest, signature } = respondBidirectionalEvent;
 
     // The exact attested bytes reach the output cache BEFORE the attestation
     // is posted, as the MPC's publisher does: a client downloads them by
@@ -627,25 +606,11 @@ export class MidnightMonitor {
       serializedOutput
     );
 
-    const response: SignedResponse = {
-      requestId: requestIdHex,
-      serializedOutput: Buffer.from(serializedOutput).toString('hex'),
-      blockHeight: blockHeight.toString(),
-      outputKind: OutputKind[outputKind] as keyof typeof OutputKind,
-      attestationDigest: Buffer.from(digest).toString('hex'),
-      bigRx: Buffer.from(signature.bigR.x).toString('hex'),
-      bigRy: Buffer.from(signature.bigR.y).toString('hex'),
-      s: Buffer.from(signature.s).toString('hex'),
-      recoveryId: Number(signature.recoveryId),
-    };
-
     await this.postRespondBidirectional(respondBidirectionalEvent);
     console.log(
       `MidnightMonitor: posted respond-bidirectional response for ${requestIdHex}` +
         ` (${OutputKind[outputKind]} at block ${blockHeight})`
     );
-
-    return response;
   }
 
   /**

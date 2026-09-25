@@ -27,7 +27,7 @@
     "build:watch": "tsdown --watch",
     "start": "tsx src/cli/Run.ts",
     "prepublishOnly": "yarn build",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx --test tests/*.test.ts",
     "release:patch": "yarn version --patch --no-git-tag-version && yarn build && yarn publish",
     "release:minor": "yarn version --minor --no-git-tag-version && yarn build && yarn publish",
     "release:major": "yarn version --major --no-git-tag-version && yarn build && yarn publish",

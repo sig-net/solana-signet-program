@@ -1,3 +1,4 @@
+import { TransactionFailureReason } from '../../types';
 import type {
   TransactionStatus,
   TransactionOutputData,
@@ -57,7 +58,7 @@ export class BitcoinMonitor {
           );
           return {
             status: 'error',
-            reason: 'inputs_spent',
+            reason: TransactionFailureReason.InputsSpent,
             blockHeight: undefined,
           };
         }
@@ -88,7 +89,7 @@ export class BitcoinMonitor {
           );
           return {
             status: 'error',
-            reason: 'inputs_spent',
+            reason: TransactionFailureReason.InputsSpent,
             blockHeight: undefined,
           };
         }
