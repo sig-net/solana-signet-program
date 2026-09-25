@@ -101,7 +101,7 @@ export interface SignedResponse {
   blockHeight: string;
   /** The MPC's verdict the attestation commits to: executed, failed or unviable. */
   outputKind: keyof typeof OutputKind;
-  /** The signed attestation digest upgradeFromTransient(transientHash([requestId, blockHeight, outputKind, outputLength, output])), as hex. */
+  /** The signed attestation digest upgradeFromTransient(transientHash([HashDomain.attestationDigest, requestId, blockHeight, outputKind, outputLength, output])), as hex. */
   attestationDigest: string;
   /** Signature nonce point R.x as hex (32 big-endian bytes, ledger form). */
   bigRx: string;
