@@ -5,13 +5,13 @@ import { deserializeEvmOutput } from '@sig-net/midnight';
 import {
   TransactionOutput,
   TransactionStatus,
+  TransactionFailureReason,
   ServerConfig,
 } from '../../types';
 import { getNamespaceFromCaip2 } from '../ChainUtils';
 
-// Give up on a confirmed tx after this many consecutive output-extraction
-// failures: the source chain then gets an error response instead of the
-// request hanging forever on a permanently-failing trace.
+// Stop monitoring after this many consecutive output-extraction failures.
+// Midnight requests remain unanswered when their output cannot be recovered.
 const MAX_EXTRACTION_FAILURES = 5;
 
 export class EthereumMonitor {
@@ -43,14 +43,40 @@ export class EthereumMonitor {
     );
   }
 
+  /**
+   * Establish the earliest block used to look for nonce consumption.
+   * @param caip2Id Destination chain identifier.
+   * @param fromAddress Derived transaction sender.
+   * @param nonce Requested transaction nonce.
+   * @param config RPC configuration.
+   * @returns The finalised height, or undefined if the nonce is already spent.
+   * @throws If finalised state cannot be read from the RPC.
+   */
+  static async getSigningBlock(
+    caip2Id: string,
+    fromAddress: string,
+    nonce: number,
+    config: ServerConfig
+  ): Promise<number | undefined> {
+    const provider = this.getProvider(caip2Id, config);
+    const block = await provider.getBlock('finalized');
+    if (!block) throw new Error('Finalised EVM block unavailable');
+    const count = await provider.getTransactionCount(fromAddress, block.number);
+    return count > nonce ? undefined : block.number;
+  }
+
   static async waitForTransactionAndGetOutput(
     txHash: string,
     caip2Id: string,
     outputDeserializationSchema: Buffer | number[],
     fromAddress: string,
     nonce: number,
+    signedAtBlock: number | undefined,
     config: ServerConfig
   ): Promise<TransactionStatus> {
+    if (signedAtBlock === undefined) {
+      return { status: 'fatal_error', reason: 'missing_signing_block' };
+    }
     let provider: ethers.JsonRpcProvider;
 
     try {
@@ -60,17 +86,23 @@ export class EthereumMonitor {
     }
 
     try {
+      const finalisedBlock = await provider.getBlock('finalized');
+      if (!finalisedBlock || finalisedBlock.number < signedAtBlock) {
+        return { status: 'pending' };
+      }
       const receipt = await provider.getTransactionReceipt(txHash);
 
       if (receipt) {
+        if (receipt.blockNumber > finalisedBlock.number)
+          return { status: 'pending' };
         if (receipt.status === 0) {
           console.log(
             `❌ EthereumMonitor: tx ${txHash} reverted (block=${receipt.blockNumber})`
           );
           return {
             status: 'error',
-            reason: 'reverted',
-            blockNumber: receipt.blockNumber,
+            reason: TransactionFailureReason.Reverted,
+            blockHeight: BigInt(receipt.blockNumber),
           };
         }
 
@@ -101,12 +133,10 @@ export class EthereumMonitor {
             status: 'success',
             success: output.success,
             output: output.output,
-            blockNumber: receipt.blockNumber,
+            blockHeight: BigInt(receipt.blockNumber),
           };
         } catch (error) {
-          // A missing debug_traceTransaction can never heal by retrying:
-          // fail the request immediately so the source chain gets an error
-          // response instead of an endless pending loop.
+          // An unsupported trace method cannot supply an attestable output.
           if (this.isMethodNotSupportedError(error)) {
             this.extractionFailureCounts.delete(txHash);
             console.error(
@@ -116,17 +146,10 @@ export class EthereumMonitor {
             return {
               status: 'fatal_error',
               reason: 'debug_trace_not_supported',
-              blockNumber: receipt.blockNumber,
             };
           }
 
-          // On a transient extraction failure the MPC emits no event and the
-          // execution watcher retries on the next block
-          // (execution_confirmed_event returns None,
-          // chain-ethereum/src/indexer.rs:332). Report pending so the poll
-          // loop retries, but cap the consecutive failures so a permanently
-          // failing extraction eventually produces an error response instead
-          // of hanging the request forever.
+          // Retry transient extraction failures up to the monitoring limit.
           const failures = (this.extractionFailureCounts.get(txHash) ?? 0) + 1;
           if (failures >= MAX_EXTRACTION_FAILURES) {
             this.extractionFailureCounts.delete(txHash);
@@ -134,11 +157,7 @@ export class EthereumMonitor {
               `EthereumMonitor: output extraction failed ${failures} times for ${txHash}, giving up`,
               error
             );
-            return {
-              status: 'fatal_error',
-              reason: 'extraction_failed',
-              blockNumber: receipt.blockNumber,
-            };
+            return { status: 'fatal_error', reason: 'extraction_failed' };
           }
           this.extractionFailureCounts.set(txHash, failures);
           console.error(
@@ -149,17 +168,33 @@ export class EthereumMonitor {
         }
       } else {
         // No receipt - check if replaced
-        const currentNonce = await provider.getTransactionCount(fromAddress);
+        const currentNonce = await provider.getTransactionCount(
+          fromAddress,
+          finalisedBlock.number
+        );
         if (currentNonce > nonce) {
           const receiptCheck = await provider.getTransactionReceipt(txHash);
           if (!receiptCheck) {
+            const blockHeight = await this.findNonceConsumedBlock(
+              provider,
+              fromAddress,
+              nonce,
+              signedAtBlock,
+              finalisedBlock.number
+            );
+            if (blockHeight === undefined) {
+              return {
+                status: 'fatal_error',
+                reason: 'nonce_spent_before_signing',
+              };
+            }
             console.log(
-              `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} already used)`
+              `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} taken in block ${blockHeight})`
             );
             return {
               status: 'error',
-              reason: 'replaced',
-              blockNumber: await provider.getBlockNumber(),
+              reason: TransactionFailureReason.Replaced,
+              blockHeight,
             };
           }
         }
@@ -174,6 +209,38 @@ export class EthereumMonitor {
     } catch {
       return { status: 'pending' };
     }
+  }
+
+  /**
+   * The first block at which `fromAddress` had spent `nonce`: the block that
+   * took the nonce from a replaced transaction, found by bisecting the
+   * account's transaction count after admission. The attestation of an
+   * unviable request commits to this height.
+   */
+  private static async findNonceConsumedBlock(
+    provider: ethers.JsonRpcProvider,
+    fromAddress: string,
+    nonce: number,
+    signedAtBlock: number,
+    finalisedHeight: number
+  ): Promise<bigint | undefined> {
+    if (
+      (await provider.getTransactionCount(fromAddress, signedAtBlock)) > nonce
+    ) {
+      return undefined;
+    }
+    let low = signedAtBlock + 1;
+    let high = finalisedHeight;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      const count = await provider.getTransactionCount(fromAddress, mid);
+      if (count > nonce) {
+        high = mid;
+      } else {
+        low = mid + 1;
+      }
+    }
+    return BigInt(low);
   }
 
   private static getProvider(
@@ -199,6 +266,8 @@ export class EthereumMonitor {
 
     const fetchRequest = new ethers.FetchRequest(url);
     fetchRequest.timeout = 30_000;
+    // No result caching: a receipt read must be fresh, so a transaction is
+    // never declared replaced on a stale nonce or receipt.
     const provider = new ethers.JsonRpcProvider(fetchRequest, undefined, {
       cacheTimeout: -1,
     });

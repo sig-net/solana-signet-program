@@ -3,13 +3,13 @@
 [![npm version](https://img.shields.io/npm/v/fakenet-signer.svg)](https://www.npmjs.com/package/fakenet-signer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Multi-chain signature orchestrator that bridges blockchain networks through MPC-based chain signatures. Listens for signature requests on a source chain (Solana CPI events, the Midnight signet contract's notification registry, or a Substrate signet pallet), executes transactions on target chains (Ethereum, Bitcoin), monitors their completion, and returns results back to the source chain.
+Multi-chain signature orchestrator that bridges blockchain networks through MPC-based chain signatures. Listens for signature requests on a source chain (Solana CPI events, the Midnight signet contract's notification events, or a Substrate signet pallet), executes transactions on target chains (Ethereum, Bitcoin), monitors their completion, and returns results back to the source chain.
 
 ## Features
 
 - 🔐 **MPC-Based Key Derivation** - Hierarchical deterministic key derivation from a single root key
 - 🌉 **Multi-Chain Support** - Execute transactions on Ethereum (EIP-1559 & Legacy) and Bitcoin (PSBT), with extensible architecture for more chains
-- 🌙 **Midnight Support**: Polls the signet contract's notification registry, signs requests with per-contract derived keys, and posts signature-only respond-bidirectional attestations
+- 🌙 **Midnight Support**: Polls the signet contract's notification events, signs requests with per-contract derived keys, and posts respond-bidirectional attestations
 - ₿ **Bitcoin Adapters** - Unified interface for Bitcoin operations with mempool.space API and Bitcoin Core RPC support
 - 📡 **Event-Driven Architecture** - Subscribes to Solana CPI events for real-time request processing
 - ⚡ **Transaction Monitoring** - Intelligent polling with exponential backoff for transaction confirmation
@@ -369,26 +369,26 @@ The server can act as the MPC responder for Midnight signet contracts. The leg s
 
 ### Request discovery
 
-The responder needs only the central signet contract's address. It polls that contract's notification registry through the Midnight GraphQL indexer (the `SignetRequestFeed` from `@sig-net/midnight`): every requester contract registers a notification naming the ledger field where its request map lives, and the feed resolves each notification to an authenticated `SignBidirectionalEvent` read from the requester's own ledger. Forged or not-yet-indexed notifications are dropped and retried, so no requester contract list, compiled caller contract, or ZK keys are needed to read state. On restart, requests that already have a respond-bidirectional response on the signet contract are skipped rather than re-signed.
+The responder needs only the central signet contract's address. It polls that contract's notification events through the Midnight GraphQL indexer (the `SignetRequestFeed` from `@sig-net/midnight`): every requester contract emits a notification through it naming the ledger field where its request map lives, and the feed resolves each notification to an authenticated `SignBidirectionalEvent` read from the requester's own ledger. Forged or not-yet-indexed notifications are dropped and retried, so no requester contract list, compiled caller contract, or ZK keys are needed to read state. On restart, requests that already have a respond-bidirectional response on the signet contract are skipped rather than re-signed.
 
 ### Request signing
 
 For each discovered request the responder rebuilds the unsigned EVM transaction from the on-ledger, contract-controlled parameters, derives the signing key from the MPC root key using the requesting contract's address and the request's 32-byte path (the signet library's v2 epsilon derivation, so clients derive the same expected signer), signs it, and posts the ECDSA signature record on-chain via the signet contract's `respond` circuit. The client polls the contract for the signature and broadcasts the EVM transaction itself.
 
-### Signature-only respond path
+### Attestation respond path
 
-Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature alone:
+Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature, its verdict on the execution (the output kind), the destination block height, the output's byte width and the attestation digest, never the output itself:
 
-1. After the EVM transaction confirms, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). Extraction treats a missing method as an immediate error response with a log line naming the fix, never an endless retry.
+1. After the EVM transaction reaches a finalised block, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). An unsupported trace method stops monitoring and logs the required RPC capability. On Midnight this leaves the request unanswered, since no execution output can be attested.
 2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
-3. The responder computes the attestation digest `upgradeFromTransient(transientHash([requestId, serializedOutput]))` and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The signature is posted on-chain via `respondBidirectional`, and neither the digest nor the output itself travels on-chain.
-4. A failed execution (revert or replacement) is attested the same way over the fixed 5-byte failure output (the `0xDEADBEEF` sentinel plus `0x01`), one width for every respond schema, so client refund circuits can verify it without the receipt.
+3. The responder computes the attestation digest `upgradeFromTransient(transientHash([HashDomain.attestationDigest, requestId, blockHeight, outputKind, serializedOutputLength, serializedOutput]))`, where `blockHeight` is the finalised EVM block holding the transaction and `outputKind` is `executed`, and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The digest, the kind, the height, the output width and the signature are posted on-chain via `respondBidirectional`. The output itself never travels on-chain.
+4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
 
 Clients obtain the output bytes off-chain (recomputed from the mined transaction's trace, or downloaded from the output cache below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
 
 ### The output cache
 
-The real MPC, when configured with output storage, uploads the exact bytes each attestation commits to into a public bucket before it posts the attestation, one object per request under `<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin`. The fakenet simulates that bucket in memory and serves it over HTTP on `OUTPUT_CACHE_PORT` (default 3040) under `OUTPUT_CACHE_PREFIX` (default `v1/fakenet`): `GET /v1/fakenet/<networkId>/<signetContractAddress>/<requestId>.bin` answers the raw bytes as `application/octet-stream`, and 404 while the responder has not attested the request yet. A failed execution stores the fixed 5-byte failure output, exactly what its attestation commits to.
+The real MPC, when configured with output storage, uploads the exact bytes each attestation commits to into a public bucket before it posts the attestation, one object per request under `<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin`. The fakenet simulates that bucket in memory and serves it over HTTP on `OUTPUT_CACHE_PORT` (default 3040) under `OUTPUT_CACHE_PREFIX` (default `v1/fakenet`): `GET /v1/fakenet/<networkId>/<signetContractAddress>/<requestId>.bin` answers the raw bytes as `application/octet-stream`, and 404 while the responder has not attested the request yet. A failed or unviable execution stores an empty object, exactly what its attestation commits to.
 
 Point a client's `MpcOutputCacheReader` (`@sig-net/midnight`) at `http://<host>:3040/v1/fakenet` and it reads the fakenet exactly as it reads a real MPC's bucket. The cache is a CONVENIENCE, never an authority: the bytes are unauthenticated, and a client must verify the MPC's posted signature over them before trusting them.
 
@@ -433,7 +433,9 @@ Signs and prepares transactions:
 
 Monitors Ethereum transaction lifecycle:
 
-- Polls for transaction receipts
+- Waits for receipts to reach the finalised destination height
+- Refuses EVM requests whose nonce is spent at the finalised admission block
+- Bounds replacement lookup to blocks after admission. The RPC must retain account state over that interval, so long-pending requests can still require archive access
 - Detects: pending, success, reverted, replaced states
 - Extracts return values from contract calls
 - Provider caching for efficiency
@@ -461,9 +463,9 @@ Monitors Bitcoin transaction lifecycle:
 
 Runs the Midnight leg end to end:
 
-- Polls the signet contract's notification registry via the GraphQL indexer
+- Polls the signet contract's notification events via the GraphQL indexer
 - Resolves notifications to authenticated requests from each requester's ledger
-- Posts signature responses and signature-only respond-bidirectional attestations
+- Posts signature responses and respond-bidirectional attestations
 - Serialises all contract writes behind a single queue (the private-state store is single-writer)
 
 #### `OutputCache`
@@ -546,6 +548,7 @@ await EthereumMonitor.waitForTransactionAndGetOutput(
   schema,
   fromAddress,
   nonce,
+  signedAtBlock,
   config
 );
 
@@ -686,7 +689,7 @@ interface SignatureRequestedEvent {
 ### Bidirectional Sign & Respond (Midnight)
 
 ```
-1. Discover the request via the signet contract's notification registry (indexer poll)
+1. Discover the request via the signet contract's notification events (indexer poll)
 2. Resolve it to an authenticated SignBidirectionalEvent from the requester's ledger
 3. Derive the signing key from the requesting contract + path (v2 epsilon derivation)
 4. Sign the EVM transaction, post the signature record on-chain (respond circuit)
@@ -694,11 +697,13 @@ interface SignatureRequestedEvent {
 6. On success:
    - Extract the mined call's return data (debug_traceTransaction)
    - Decode per outputDeserializationSchema, re-pack per respondSerializationSchema
-   - Sign the attestation digest upgradeFromTransient(transientHash([request_id, serialized_output]))
+   - Sign the attestation digest
+     upgradeFromTransient(transientHash([HashDomain.attestationDigest, request_id, block_height, output_kind, output_length, serialized_output]))
      with the per-caller response key
-   - Post the signature-only respondBidirectional record on-chain
+   - Post the respondBidirectional record (request id, block height, output kind, output width, digest, signature) on-chain
 7. On error:
-   - Attest the fixed 5-byte failure output (0xDEADBEEF + 0x01) the same way
+   - Attest an EMPTY output the same way: kind `failed` at the reverted transaction's block, or
+     `unviable` at the block that took its nonce
 ```
 
 See the [Midnight](#midnight) section for the full detail.

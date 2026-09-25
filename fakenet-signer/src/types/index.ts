@@ -174,6 +174,9 @@ export interface PendingTransaction {
   /** Nonce used for the EVM transaction (0 for Bitcoin). */
   nonce: number;
 
+  /** Finalised EVM admission height at which the request nonce was unspent. */
+  signedAtBlock?: number;
+
   /** Number of poll attempts already performed; drives backoff. */
   checkCount: number;
 
@@ -231,16 +234,45 @@ export interface TransactionOutput {
   output: TransactionOutputData;
 }
 
+/** A confirmed transaction's decoded output plus the block it is final at. */
+export interface CompletedTransaction extends TransactionOutput {
+  blockHeight: OutcomeBlockHeight;
+}
+
+/** Attestable destination failures across EVM and Bitcoin monitors. */
+export enum TransactionFailureReason {
+  Reverted = 'reverted',
+  Replaced = 'replaced',
+  InputsSpent = 'inputs_spent',
+}
+
+/** Why a destination transaction produced no output, and where that became final. */
+export type TransactionFailure =
+  | { reason: TransactionFailureReason; blockHeight: OutcomeBlockHeight }
+  | { reason: string; blockHeight: undefined };
+
+/**
+ * Height of the destination block an outcome is final at, in the chain's own
+ * numbering: the block holding the executed or reverted transaction, or the
+ * block that took a replaced transaction's nonce. Chains whose monitors carry
+ * no such height (Bitcoin) leave it undefined.
+ */
+export type OutcomeBlockHeight = bigint | undefined;
+
 export type TransactionStatus =
   | { status: 'pending' }
   | {
       status: 'success';
       success: boolean;
       output: TransactionOutputData;
-      blockNumber: number;
+      blockHeight: OutcomeBlockHeight;
     }
-  | { status: 'error'; reason: string; blockNumber: number }
-  | { status: 'fatal_error'; reason: string; blockNumber?: number };
+  | {
+      status: 'error';
+      reason: TransactionFailureReason;
+      blockHeight: OutcomeBlockHeight;
+    }
+  | { status: 'fatal_error'; reason: string };
 
 export interface SignatureResponse {
   bigR: { x: number[]; y: number[] };
