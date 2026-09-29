@@ -1,8 +1,13 @@
 import { ethers } from 'ethers';
-// The EVM output decoding comes from the signet protocol library, the same
-// schema-driven ABI decode clients run to recompute the respond bytes.
-import { deserializeEvmOutput } from '@sig-net/midnight';
 import {
+  deserializeEvmOutput,
+  evmTraceOutputFromCallFrame,
+  EvmTraceOutputKind,
+  isEvmContractCall,
+  type JsonValue,
+} from '@sig-net/midnight';
+import {
+  EvmExecution,
   TransactionOutput,
   TransactionStatus,
   TransactionFailureReason,
@@ -112,9 +117,9 @@ export class EthereumMonitor {
         }
 
         try {
-          const output = await this.extractTransactionOutput(
-            tx,
-            provider,
+          const evmExecution = await this.readEvmExecution(tx, provider);
+          const output = this.decodeTransactionOutput(
+            evmExecution,
             outputDeserializationSchema
           );
           this.extractionFailureCounts.delete(txHash);
@@ -122,17 +127,11 @@ export class EthereumMonitor {
             `✅ EthereumMonitor: tx ${txHash} confirmed (block=${receipt.blockNumber})`
           );
 
-          // Checkpoint 2 (post-deserialisation): 'output' here must match
-          // 'transaction_output' in build_serialized_output at
-          // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:122
-          // (built by TransactionOutput::from_call_result): the raw return
-          // bytes already ABI-decoded per the output deserialization schema,
-          // or the synthesized non-contract-call default.
-
           return {
             status: 'success',
             success: output.success,
             output: output.output,
+            evmExecution,
             blockHeight: BigInt(receipt.blockNumber),
           };
         } catch (error) {
@@ -276,19 +275,25 @@ export class EthereumMonitor {
   }
 
   /**
-   * The top call frame of the mined transaction, read with the SAME RPC
-   * method the real MPC uses (debug_traceTransaction with the callTracer,
-   * top call only, github.com/sig-net/mpc
-   * chain-signatures/chain-ethereum/src/indexer.rs). The frame's `output`
-   * is the call's actual return data as mined (absent for a plain
-   * transfer).
+   * The MPC's extraction inputs for a mined transaction
+   * (fetch_extraction_inputs in github.com/sig-net/mpc
+   * chain-signatures/chain-ethereum/src/execution_watcher.rs): whether it is
+   * a contract call and, for a contract call only, its top call frame read
+   * with the MPC's own debug_traceTransaction request.
    */
-  private static async traceTopCallOutput(
-    txHash: string,
+  private static async readEvmExecution(
+    tx: ethers.TransactionResponse,
     provider: ethers.JsonRpcProvider
-  ): Promise<string> {
-    const callFrame = (await provider.send('debug_traceTransaction', [
-      txHash,
+  ): Promise<EvmExecution> {
+    const isContractCall = isEvmContractCall(tx.data);
+    if (!isContractCall) {
+      return {
+        isContractCall,
+        trace: { kind: EvmTraceOutputKind.NotTraced },
+      };
+    }
+    const callFrame: JsonValue = await provider.send('debug_traceTransaction', [
+      tx.hash,
       {
         tracer: 'callTracer',
         tracerConfig: {
@@ -296,43 +301,22 @@ export class EthereumMonitor {
         },
         timeout: '5s',
       },
-    ])) as { output?: string };
-    return callFrame?.output ?? '0x';
+    ]);
+    return { isContractCall, trace: evmTraceOutputFromCallFrame(callFrame) };
   }
 
-  private static async extractTransactionOutput(
-    tx: ethers.TransactionResponse,
-    provider: ethers.JsonRpcProvider,
+  /**
+   * The decoded output map the Borsh responders (Solana, Substrate)
+   * serialise: a contract call's return data ABI-decoded per the output
+   * deserialisation schema, or the non-contract-call marker their
+   * serialiser fills with schema defaults. Midnight responds from
+   * {@link EvmExecution} itself.
+   */
+  private static decodeTransactionOutput(
+    evmExecution: EvmExecution,
     outputDeserializationSchema: Buffer | number[]
-  ): Promise<TransactionOutput> {
-    // Contract call = calldata longer than 2 bytes, matching is_contract_call
-    // in github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/event_parsing.rs:19
-    const isContractCall = ethers.dataLength(tx.data) > 2;
-
-    // Checkpoint 1 (pre-deserialisation): 'rawOutput' must match the raw
-    // 'trace_output' bytes in
-    // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/indexer.rs:280.
-    // Same method as the MPC (debug_traceTransaction, callTracer, top call
-    // only), so this is the mined call's ACTUAL return data.
-    const rawOutput = await this.traceTopCallOutput(tx.hash, provider);
-
-    // This is the Ethereum monitor, so the output deserialisation format is
-    // always ABI: the MPC hardcodes it as OUTPUT_DESERIALIZATION_FORMAT in
-    // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:10
-    // and its decode gate is `SerDeserFormat::Abi if is_contract_call`
-    // (respond_bidirectional.rs:122), which reduces to just is_contract_call.
-    if (isContractCall) {
-      // Schema-driven ABI decode via the signet library (mirrors the MPC's
-      // delegation to alloy). Accepts the raw NUL-padded on-chain schema
-      // bytes and throws on an empty/malformed schema, which the caller
-      // reports as pending so the poll loop retries.
-      const decodedOutput = deserializeEvmOutput(
-        Uint8Array.from(outputDeserializationSchema),
-        rawOutput
-      );
-
-      return { success: true, output: decodedOutput };
-    } else {
+  ): TransactionOutput {
+    if (!evmExecution.isContractCall) {
       return {
         success: true,
         output: {
@@ -341,5 +325,14 @@ export class EthereumMonitor {
         },
       };
     }
+    const { trace } = evmExecution;
+    return {
+      success: true,
+      // A frame without an `output` decodes as empty return data.
+      output: deserializeEvmOutput(
+        Uint8Array.from(outputDeserializationSchema),
+        trace.kind === EvmTraceOutputKind.Output ? trace.returnData : '0x'
+      ),
+    };
   }
 }

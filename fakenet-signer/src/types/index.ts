@@ -1,4 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
+import type { EvmTraceOutput } from '@sig-net/midnight';
 import { z } from 'zod';
 
 export type BitcoinNetwork = 'regtest' | 'testnet';
@@ -209,9 +210,9 @@ export interface BorshSchema {
   enum?: Array<{ [key: string]: BorshStructField | string }>;
 }
 
-// ABI schemas need no local types: both the EVM output decode
-// (deserializeEvmOutput) and the schema-driven packed respond encoding
-// (serializeRespondOutput) come from @sig-net/midnight's abi-serde, backed
+// ABI schemas need no local types: the EVM output decode
+// (deserializeEvmOutput) and the Midnight respond output
+// (executedEvmRespondOutput) come from @sig-net/midnight's abi-serde, backed
 // by @sig-net/midnight-serde.
 
 // Serialization output types
@@ -234,8 +235,22 @@ export interface TransactionOutput {
   output: TransactionOutputData;
 }
 
-/** A confirmed transaction's decoded output plus the block it is final at. */
+/**
+ * What an executed EVM transaction's respond output is built from, as the
+ * MPC reads it: whether the transaction is a contract call, and its traced
+ * top call frame (never traced for a plain transfer).
+ */
+export interface EvmExecution {
+  isContractCall: boolean;
+  trace: EvmTraceOutput;
+}
+
+/**
+ * A confirmed transaction's decoded output, its EVM execution (undefined
+ * off EVM, as for Bitcoin) and the block it is final at.
+ */
 export interface CompletedTransaction extends TransactionOutput {
+  evmExecution: EvmExecution | undefined;
   blockHeight: OutcomeBlockHeight;
 }
 
@@ -265,6 +280,7 @@ export type TransactionStatus =
       status: 'success';
       success: boolean;
       output: TransactionOutputData;
+      evmExecution: EvmExecution | undefined;
       blockHeight: OutcomeBlockHeight;
     }
   | {
