@@ -382,7 +382,7 @@ Unlike Solana, where the full serialized output travels on-chain in the `Respond
 1. After the EVM transaction reaches a finalised block, the responder reads a contract call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same request the real MPC sends, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled) and reads the returned call frame by the MPC's rules (`evmTraceOutputFromCallFrame` in `@sig-net/midnight`). A plain transfer (at most two bytes of input) is not traced. A frame reporting an `error` is refused and retried, and repeated refusals leave the request unanswered. An unsupported trace method stops monitoring and logs the required RPC capability. On Midnight this also leaves the request unanswered, since no execution output can be attested.
 2. The attested bytes are `executedEvmRespondOutput` (`@sig-net/midnight`, abi-serde) over the request's two schemas, the MPC's own rule for a Midnight respond output: a contract call's return data is ABI-decoded per the request's `outputDeserializationSchema` and packed per its `respondSerializationSchema`. A plain transfer, or a void call under an empty output schema, has no output to decode, so schema-typed success defaults are synthesised instead (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error). The result is the exact unpadded byte string clients recompute at claim time.
 3. The responder computes the attestation digest `upgradeFromTransient(transientHash([HashDomain.attestationDigest, requestId, blockHeight, outputKind, serializedOutputLength, serializedOutput]))`, where `blockHeight` is the finalised EVM block holding the transaction and `outputKind` is `executed`, and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The digest, the kind, the height, the output width and the signature are posted on-chain via `respondBidirectional`. The output itself never travels on-chain.
-4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
+4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. A replacement is attested only as the MPC attests it: the nonce is taken by a sibling, another transaction this responder signed (broadcast or not) from the same account at the same nonce over different unsigned bytes, mined after the request was signed. A nonce taken any other way leaves the request unanswered. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
 
 Clients obtain the output bytes off-chain (recomputed from the mined transaction's trace, or downloaded from the output cache below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
 
@@ -436,6 +436,8 @@ Monitors Ethereum transaction lifecycle:
 - Waits for receipts to reach the finalised destination height
 - Signs every EVM request whatever its nonce, as the MPC does. A nonce already spent at the finalised signing block leaves a Midnight request unanswered and gets a Solana or Substrate request the signed error response
 - Bounds replacement lookup to blocks after the signing block. The RPC must retain account state over that interval, so long-pending requests can still require archive access
+- Records every transaction it signs, broadcast or not, so a request whose nonce a sibling takes (another signed transaction from the same account at the same nonce, over different unsigned bytes) resolves as replaced at the sibling's block
+- Resolves any other consumer of the nonce as the MPC does: no attestation for Midnight, the signed error response for Solana and Substrate
 - Detects: pending, success, reverted, replaced states
 - Extracts return values from contract calls
 - Provider caching for efficiency
@@ -703,7 +705,8 @@ interface SignatureRequestedEvent {
    - Post the respondBidirectional record (request id, block height, output kind, output width, digest, signature) on-chain
 7. On error:
    - Attest an EMPTY output the same way: kind `failed` at the reverted transaction's block, or
-     `unviable` at the block that took its nonce
+     `unviable` at the block where a sibling this responder signed took its nonce
+   - Attest nothing when any other transaction took the nonce
 ```
 
 See the [Midnight](#midnight) section for the full detail.

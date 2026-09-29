@@ -98,3 +98,21 @@ The exact check already exists where it matters: output extraction in
 an immediate `fatal_error` (`debug_trace_not_supported`) with a log line
 naming the fix, and the source chain gets an error response, a designed-for
 outcome clients handle with refund branches.
+
+## Nonce verdicts follow the MPC's sibling rule
+
+Never attest a Midnight request `unviable` merely because its nonce was
+consumed. The real MPC (`resolve_replaced_siblings` and
+`consumed_nonce_fallback` in chain-ethereum's `execution_watcher.rs`)
+attests Unviable only when a watched sibling takes the nonce: another
+transaction it signed from the same account at the same nonce, over
+different unsigned bytes, mined after the request was signed. Any other
+consumer gets no Midnight attestation at all, and Failed for Solana and
+Substrate (the fakenet's signed error response). So:
+
+- Never refuse to sign a request because its nonce is already spent: the
+  MPC signs whatever nonce a request declares.
+- Record every signed EVM transaction with
+  `EthereumMonitor.recordSignedTransaction`, broadcast or not. A signing
+  path that skips it silently turns every replacement of its requests into
+  an unanswered request.

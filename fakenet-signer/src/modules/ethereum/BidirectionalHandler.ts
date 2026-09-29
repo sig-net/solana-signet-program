@@ -1,5 +1,6 @@
 import { contracts } from 'signet.js';
 const { getRequestIdBidirectional } = contracts.solana;
+import { ethers } from 'ethers';
 import { EthereumMonitor } from './EthereumMonitor';
 import { EthereumTransactionProcessor } from './EthereumTransactionProcessor';
 import type { SignBidirectionalEvent } from '../../types';
@@ -33,6 +34,12 @@ export async function handleEthereumBidirectional(
       new Uint8Array(event.serializedTransaction),
       derivedPrivateKey
     );
+  EthereumMonitor.recordSignedTransaction({
+    hash: result.signedTxHash,
+    from: result.fromAddress,
+    nonce: result.nonce,
+    unsignedTransaction: ethers.hexlify(event.serializedTransaction),
+  });
 
   const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
   const requestIds = result.signature.map(() => requestIdBytes);

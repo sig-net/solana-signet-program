@@ -19,8 +19,21 @@ import { getNamespaceFromCaip2 } from '../ChainUtils';
 // Midnight requests remain unanswered when their output cannot be recovered.
 const MAX_EXTRACTION_FAILURES = 5;
 
+/** An EVM transaction this responder signed, as the MPC's watcher records it. */
+export interface SignedEvmTransaction {
+  hash: string;
+  from: string;
+  nonce: number;
+  /** The request's unsigned serialized transaction, as hex. */
+  unsignedTransaction: string;
+}
+
 export class EthereumMonitor {
   private static providerCache = new Map<string, ethers.JsonRpcProvider>();
+  // Every signed transaction, broadcast or not, by lowercase hash: the MPC's
+  // execution watchers. Kept after a transaction resolves, as a request still
+  // pending at the same nonce may resolve later against it.
+  private static signedTransactions = new Map<string, SignedEvmTransaction>();
   // Consecutive extractTransactionOutput failures per tx hash.
   private static extractionFailureCounts = new Map<string, number>();
 
@@ -65,6 +78,20 @@ export class EthereumMonitor {
     const block = await provider.getBlock('finalized');
     if (!block) throw new Error('Finalised EVM block unavailable');
     return block.number;
+  }
+
+  /**
+   * Record a transaction this responder signed, so a request its mining
+   * displaces resolves as the MPC's watched sibling rule decides.
+   * @param tx The signed transaction and the unsigned bytes it was signed over.
+   */
+  static recordSignedTransaction(tx: SignedEvmTransaction): void {
+    this.signedTransactions.set(tx.hash.toLowerCase(), {
+      hash: tx.hash.toLowerCase(),
+      from: ethers.getAddress(tx.from),
+      nonce: tx.nonce,
+      unsignedTransaction: tx.unsignedTransaction.toLowerCase(),
+    });
   }
 
   static async waitForTransactionAndGetOutput(
@@ -184,6 +211,21 @@ export class EthereumMonitor {
                 reason: 'nonce_spent_before_signing',
               };
             }
+            if (
+              !(await this.displacingSiblingMinedAt(
+                provider,
+                txHash,
+                blockHeight
+              ))
+            ) {
+              console.log(
+                `❌ EthereumMonitor: tx ${txHash} nonce=${nonce} taken in block ${blockHeight} by no displacing sibling`
+              );
+              return {
+                status: 'fatal_error',
+                reason: 'nonce_consumed_without_sibling',
+              };
+            }
             console.log(
               `❌ EthereumMonitor: tx ${txHash} replaced (nonce=${nonce} taken in block ${blockHeight})`
             );
@@ -210,8 +252,9 @@ export class EthereumMonitor {
   /**
    * The first block at which `fromAddress` had spent `nonce`: the block that
    * took the nonce from a replaced transaction, found by bisecting the
-   * account's transaction count after signing. The attestation of an
-   * unviable request commits to this height.
+   * account's transaction count after signing, or undefined when the nonce
+   * was already spent at signing. The attestation of an unviable request
+   * commits to this height.
    */
   private static async findNonceConsumedBlock(
     provider: ethers.JsonRpcProvider,
@@ -237,6 +280,38 @@ export class EthereumMonitor {
       }
     }
     return BigInt(low);
+  }
+
+  /**
+   * Whether the nonce of `txHash` was taken in `blockHeight` by a watched
+   * sibling: another transaction this responder signed from the same sender
+   * at the same nonce, over different unsigned bytes. This is the MPC's
+   * resolve_replaced_siblings rule for Midnight (github.com/sig-net/mpc
+   * chain-signatures/chain-ethereum/src/execution_watcher.rs), and every
+   * other consumer falls to its consumed_nonce_fallback. A Borsh source's
+   * error response is the same bytes on either path, so the Midnight rule
+   * serves every source.
+   */
+  private static async displacingSiblingMinedAt(
+    provider: ethers.JsonRpcProvider,
+    txHash: string,
+    blockHeight: bigint
+  ): Promise<boolean> {
+    const displaced = this.signedTransactions.get(txHash.toLowerCase());
+    if (!displaced) return false;
+    for (const sibling of this.signedTransactions.values()) {
+      if (
+        sibling.hash === displaced.hash ||
+        sibling.from !== displaced.from ||
+        sibling.nonce !== displaced.nonce ||
+        sibling.unsignedTransaction === displaced.unsignedTransaction
+      ) {
+        continue;
+      }
+      const receipt = await provider.getTransactionReceipt(sibling.hash);
+      if (receipt && BigInt(receipt.blockNumber) === blockHeight) return true;
+    }
+    return false;
   }
 
   private static getProvider(

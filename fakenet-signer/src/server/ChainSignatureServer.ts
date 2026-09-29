@@ -399,6 +399,13 @@ export class ChainSignatureServer {
       throw new Error('Midnight: signed transaction has no hash');
     }
 
+    EthereumMonitor.recordSignedTransaction({
+      hash: signedTxHash,
+      from: wallet.address,
+      nonce: unsignedTx.nonce,
+      unsignedTransaction: ethers.hexlify(unsignedTxBytes),
+    });
+
     console.log(`Midnight: Signed tx ${signedTxHash}`);
     console.log(`  Signing address: ${wallet.address}`);
 
