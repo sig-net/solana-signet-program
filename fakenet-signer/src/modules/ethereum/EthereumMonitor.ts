@@ -49,25 +49,22 @@ export class EthereumMonitor {
   }
 
   /**
-   * Establish the earliest block used to look for nonce consumption.
+   * The finalised height when a request is signed: the earliest block
+   * searched for the consumption of its nonce. A nonce already spent there
+   * resolves to `nonce_spent_before_signing`.
    * @param caip2Id Destination chain identifier.
-   * @param fromAddress Derived transaction sender.
-   * @param nonce Requested transaction nonce.
    * @param config RPC configuration.
-   * @returns The finalised height, or undefined if the nonce is already spent.
-   * @throws If finalised state cannot be read from the RPC.
+   * @returns The finalised height.
+   * @throws If the finalised block cannot be read from the RPC.
    */
   static async getSigningBlock(
     caip2Id: string,
-    fromAddress: string,
-    nonce: number,
     config: ServerConfig
-  ): Promise<number | undefined> {
+  ): Promise<number> {
     const provider = this.getProvider(caip2Id, config);
     const block = await provider.getBlock('finalized');
     if (!block) throw new Error('Finalised EVM block unavailable');
-    const count = await provider.getTransactionCount(fromAddress, block.number);
-    return count > nonce ? undefined : block.number;
+    return block.number;
   }
 
   static async waitForTransactionAndGetOutput(
@@ -213,7 +210,7 @@ export class EthereumMonitor {
   /**
    * The first block at which `fromAddress` had spent `nonce`: the block that
    * took the nonce from a replaced transaction, found by bisecting the
-   * account's transaction count after admission. The attestation of an
+   * account's transaction count after signing. The attestation of an
    * unviable request commits to this height.
    */
   private static async findNonceConsumedBlock(

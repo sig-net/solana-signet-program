@@ -390,16 +390,8 @@ export class ChainSignatureServer {
     const wallet = new ethers.Wallet(derivedPrivateKey);
     const signedAtBlock = await EthereumMonitor.getSigningBlock(
       request.caip2Id,
-      wallet.address,
-      unsignedTx.nonce,
       this.config
     );
-    if (signedAtBlock === undefined) {
-      console.warn(
-        'Midnight: refusing EVM request with a nonce already spent at finality'
-      );
-      return;
-    }
     const signedTxHex = await wallet.signTransaction(unsignedTx);
     const signedTx = ethers.Transaction.from(signedTxHex);
     const signedTxHash = signedTx.hash;

@@ -14,38 +14,26 @@ const CONFIG: ServerConfig = {
 const ADDRESS = '0x' + '11'.repeat(20);
 const HASH = '0x' + '22'.repeat(32);
 
-for (const row of [
-  { count: 6, expected: 100 },
-  { count: 7, expected: 100 },
-  { count: 8, expected: undefined },
-]) {
-  test(`admission checks nonce 7 against finalised count ${row.count}`, async (t) => {
-    t.mock.method(
-      ethers.JsonRpcProvider.prototype,
-      'getBlock',
-      async (tag: string) => {
-        assert.equal(tag, 'finalized');
-        return { number: 100 };
-      }
-    );
-    t.mock.method(
-      ethers.JsonRpcProvider.prototype,
-      'getTransactionCount',
-      async (address: string, height: number) => {
-        assert.equal(address, ADDRESS);
-        assert.equal(height, 100);
-        return row.count;
-      }
-    );
-    assert.equal(
-      await EthereumMonitor.getSigningBlock('eip155:1', ADDRESS, 7, CONFIG),
-      row.expected
-    );
-  });
-}
+test('the signing block is the finalised height, whatever the nonce', async (t) => {
+  t.mock.method(
+    ethers.JsonRpcProvider.prototype,
+    'getBlock',
+    async (tag: string) => {
+      assert.equal(tag, 'finalized');
+      return { number: 100 };
+    }
+  );
+  const nonceReads = t.mock.method(
+    ethers.JsonRpcProvider.prototype,
+    'getTransactionCount',
+    async () => 8
+  );
+  assert.equal(await EthereumMonitor.getSigningBlock('eip155:1', CONFIG), 100);
+  assert.equal(nonceReads.mock.callCount(), 0);
+});
 
 for (const consumedAt of [1001, 1050, 1100]) {
-  test(`finds nonce consumption at ${consumedAt} without querying before admission`, async (t) => {
+  test(`finds nonce consumption at ${consumedAt} without querying before the signing block`, async (t) => {
     const queried: number[] = [];
     t.mock.method(ethers.JsonRpcProvider.prototype, 'getBlock', async () => ({
       number: 1100,
@@ -84,7 +72,7 @@ for (const consumedAt of [1001, 1050, 1100]) {
   });
 }
 
-test('a nonce spent at admission produces no unviable attestation', async (t) => {
+test('a nonce spent at the signing block produces no unviable attestation', async (t) => {
   t.mock.method(ethers.JsonRpcProvider.prototype, 'getBlock', async () => ({
     number: 200,
   }));
@@ -181,7 +169,7 @@ for (const row of [
   });
 }
 
-test('a missing admission boundary produces no attestation', async () => {
+test('a missing signing block produces no attestation', async () => {
   assert.deepEqual(
     await EthereumMonitor.waitForTransactionAndGetOutput(
       HASH,

@@ -175,7 +175,7 @@ export interface PendingTransaction {
   /** Nonce used for the EVM transaction (0 for Bitcoin). */
   nonce: number;
 
-  /** Finalised EVM admission height at which the request nonce was unspent. */
+  /** Finalised EVM height when the request was signed: the lower bound of the replacement search. */
   signedAtBlock?: number;
 
   /** Number of poll attempts already performed; drives backoff. */

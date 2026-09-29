@@ -434,8 +434,8 @@ Signs and prepares transactions:
 Monitors Ethereum transaction lifecycle:
 
 - Waits for receipts to reach the finalised destination height
-- Refuses EVM requests whose nonce is spent at the finalised admission block
-- Bounds replacement lookup to blocks after admission. The RPC must retain account state over that interval, so long-pending requests can still require archive access
+- Signs every EVM request whatever its nonce, as the MPC does. A nonce already spent at the finalised signing block leaves a Midnight request unanswered and gets a Solana or Substrate request the signed error response
+- Bounds replacement lookup to blocks after the signing block. The RPC must retain account state over that interval, so long-pending requests can still require archive access
 - Detects: pending, success, reverted, replaced states
 - Extracts return values from contract calls
 - Provider caching for efficiency
