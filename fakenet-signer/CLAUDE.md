@@ -44,7 +44,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 | CpiEventParser               | `src/events/`                       | Parses Anchor CPI events from Solana logs                                                                                                                                                |
 | EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                                                                                                                   |
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                                                                                                                |
-| Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana (ChainSignatureServer), schema-driven packed respond bytes for Midnight (abi-serde)                                                                                     |
+| Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana and Substrate over the decoded output (ChainSignatureServer), `executedEvmRespondOutput` for Midnight over the traced execution (abi-serde)                             |
 | MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract's notification events for requests, signs and posts attestations with the sender-scoped response key                                                  |
 | OutputCache                  | `src/server/`                       | In-memory twin of the MPC's output cache bucket: each Midnight attestation's exact bytes, stored before posting and served under the bucket's layout (a convenience, never an authority) |
 | Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                                                                                                              |
@@ -98,3 +98,21 @@ The exact check already exists where it matters: output extraction in
 an immediate `fatal_error` (`debug_trace_not_supported`) with a log line
 naming the fix, and the source chain gets an error response, a designed-for
 outcome clients handle with refund branches.
+
+## Nonce verdicts follow the MPC's sibling rule
+
+Never attest a Midnight request `unviable` merely because its nonce was
+consumed. The real MPC (`resolve_replaced_siblings` and
+`consumed_nonce_fallback` in chain-ethereum's `execution_watcher.rs`)
+attests Unviable only when a watched sibling takes the nonce: another
+transaction it signed from the same account at the same nonce, over
+different unsigned bytes, mined after the request was signed. Any other
+consumer gets no Midnight attestation at all, and Failed for Solana and
+Substrate (the fakenet's signed error response). So:
+
+- Never refuse to sign a request because its nonce is already spent: the
+  MPC signs whatever nonce a request declares.
+- Record every signed EVM transaction with
+  `EthereumMonitor.recordSignedTransaction`, broadcast or not. A signing
+  path that skips it silently turns every replacement of its requests into
+  an unanswered request.

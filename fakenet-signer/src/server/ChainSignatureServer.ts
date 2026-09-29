@@ -38,14 +38,10 @@ import { contracts } from 'signet.js';
 const { getRequestIdRespond } = contracts.solana;
 import { EthereumMonitor } from '../modules/ethereum/EthereumMonitor';
 import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
-// The Midnight respond payload encoding comes from the signet protocol
-// library (abi-serde, backed by @sig-net/midnight-serde): the exact
-// schema-driven packed bytes clients recompute at claim time.
 import {
   deriveEpsilon,
+  executedEvmRespondOutput,
   OutputKind,
-  serializeRespondOutput,
-  type AbiDecodedOutput,
 } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
@@ -394,22 +390,21 @@ export class ChainSignatureServer {
     const wallet = new ethers.Wallet(derivedPrivateKey);
     const signedAtBlock = await EthereumMonitor.getSigningBlock(
       request.caip2Id,
-      wallet.address,
-      unsignedTx.nonce,
       this.config
     );
-    if (signedAtBlock === undefined) {
-      console.warn(
-        'Midnight: refusing EVM request with a nonce already spent at finality'
-      );
-      return;
-    }
     const signedTxHex = await wallet.signTransaction(unsignedTx);
     const signedTx = ethers.Transaction.from(signedTxHex);
     const signedTxHash = signedTx.hash;
     if (!signedTxHash) {
       throw new Error('Midnight: signed transaction has no hash');
     }
+
+    EthereumMonitor.recordSignedTransaction({
+      hash: signedTxHash,
+      from: wallet.address,
+      nonce: unsignedTx.nonce,
+      unsignedTransaction: ethers.hexlify(unsignedTxBytes),
+    });
 
     console.log(`Midnight: Signed tx ${signedTxHash}`);
     console.log(`  Signing address: ${wallet.address}`);
@@ -605,6 +600,7 @@ export class ChainSignatureServer {
                 this.handleCompletedTransaction(txHash, txInfo, {
                   success: result.success,
                   output: result.output,
+                  evmExecution: result.evmExecution,
                   blockHeight: result.blockHeight,
                 }),
               'handleCompletedTransaction',
@@ -658,17 +654,12 @@ export class ChainSignatureServer {
     txInfo: PendingTransaction,
     result: CompletedTransaction
   ) {
-    // Checkpoint 3 (still deserialised, serialisation happens below):
-    // 'result.output' is the decoded field map from Checkpoint 2, i.e. the MPC's
-    // 'transaction_output' right before it is re-encoded by Output::serialize in
-    // github.com/sig-net/mpc/chain-signatures/chain-ethereum/src/respond_bidirectional.rs:132.
-    // Structural difference: the MPC decodes AND re-encodes inside the ethereum
-    // crate, so by its equivalent of this handoff (process_execution_confirmed,
-    // node/src/stream/ops.rs:301) it already carries serialized bytes. Fakenet
-    // hands the decoded map to this server and serializes here instead: the
-    // serializeBorshOutput/serializeMidnightRespondOutput calls below must
-    // byte-match Output::serialize (encode_borsh/encode_abi,
-    // respond_bidirectional.rs:38).
+    // The MPC builds every source's respond bytes in one place
+    // (build_serialized_output in github.com/sig-net/mpc
+    // chain-signatures/chain-ethereum/src/respond_bidirectional.rs). Here
+    // Midnight's come from result.evmExecution through the signet library,
+    // and the Borsh sources' from the decoded result.output through
+    // serializeBorshOutput, which must byte-match the MPC's encode_borsh.
     console.log(`✅ Transaction completed: ${txHash}`);
 
     const requestId = txInfo.requestId;
@@ -688,11 +679,24 @@ export class ChainSignatureServer {
             `Midnight: no block height for the executed tx ${txHash}, the attestation commits to it`
           );
         }
+        if (result.evmExecution === undefined) {
+          throw new Error(
+            `Midnight: no EVM execution for the executed tx ${txHash}, its respond output is built from it`
+          );
+        }
         // Midnight: ECDSA-sign the serialized output on-chain; the user
         // polls the signet contract and claims.
-        const serializedOutput = this.serializeMidnightRespondOutput(
-          txInfo.respondSerializationSchema,
-          result.output
+        const serializedOutput = executedEvmRespondOutput(
+          {
+            outputDeserializationSchema: Uint8Array.from(
+              txInfo.outputDeserializationSchema
+            ),
+            respondSerializationSchema: Uint8Array.from(
+              txInfo.respondSerializationSchema
+            ),
+          },
+          result.evmExecution.isContractCall,
+          result.evmExecution.trace
         );
         await this.midnightMonitor.signAndBroadcastResponse(
           requestIdBytes,
@@ -755,76 +759,6 @@ export class ChainSignatureServer {
           `Unsupported transaction source '${txInfo.source}' for tx ${txHash}`
         );
     }
-  }
-
-  /**
-   * Serialize a Midnight respond payload with the signet library's
-   * schema-driven packed encoding (`serializeRespondOutput`, abi-serde,
-   * backed by @sig-net/midnight-serde): the exact unpadded bytes clients
-   * recompute and the attestation digest commits to. Non-function-call
-   * executions (plain transfers) have no decoded output, so schema-typed
-   * success defaults are filled in first, mirroring the MPC's
-   * default_output_for_non_contract_call.
-   */
-  private serializeMidnightRespondOutput(
-    schema: Buffer | number[],
-    output: TransactionOutputData
-  ): Uint8Array {
-    const schemaBytes = Uint8Array.from(schema);
-    const values =
-      output.isFunctionCall === false
-        ? this.midnightDefaultOutput(schemaBytes)
-        : output;
-    return serializeRespondOutput(schemaBytes, values as AbiDecodedOutput);
-  }
-
-  /**
-   * Schema-typed success defaults for a non-function-call execution
-   * (a plain transfer): the exact synthesis the MPC's
-   * default_output_for_non_contract_call performs
-   * (chain-ethereum/src/respond_bidirectional.rs): string fields get
-   * 'non_function_call_success', bool fields get true, and every other
-   * type is an error, matching the MPC's bail. No decoded fields are
-   * merged in: on this path nothing was decoded (the MPC builds the
-   * output from the schema alone), so passing anything through would
-   * diverge from the bytes the MPC would attest.
-   */
-  private midnightDefaultOutput(
-    schemaBytes: Uint8Array
-  ): TransactionOutputData {
-    const schemaStr = this.borshSchemaString(schemaBytes);
-    if (!schemaStr.trim()) {
-      throw new Error(
-        'Empty respond serialization schema: cannot synthesize a non-function-call output without a valid schema'
-      );
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(schemaStr);
-    } catch {
-      throw new Error(
-        `Invalid respond serialization schema, not valid JSON: ${schemaStr.slice(0, 100)}`
-      );
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error(
-        `Respond serialization schema must be a JSON array of {name, type} fields, got: ${schemaStr.slice(0, 100)}`
-      );
-    }
-    const fields = parsed as Array<{ name: string; type: string }>;
-    const data: TransactionOutputData = {};
-    for (const field of fields) {
-      if (field.type === 'string') {
-        data[field.name] = 'non_function_call_success';
-      } else if (field.type === 'bool') {
-        data[field.name] = true;
-      } else {
-        throw new Error(
-          `Cannot synthesize a non-function-call default for field '${field.name}' of type ${field.type}`
-        );
-      }
-    }
-    return data;
   }
 
   /** Borsh-serialize the output and MPC-sign it for Solana/Substrate responses. */

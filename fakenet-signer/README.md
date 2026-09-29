@@ -379,10 +379,10 @@ For each discovered request the responder rebuilds the unsigned EVM transaction 
 
 Unlike Solana, where the full serialized output travels on-chain in the `RespondBidirectionalEvent`, the Midnight respond carries the MPC's signature, its verdict on the execution (the output kind), the destination block height, the output's byte width and the attestation digest, never the output itself:
 
-1. After the EVM transaction reaches a finalised block, the responder reads the mined call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same RPC method the real MPC uses, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled). An unsupported trace method stops monitoring and logs the required RPC capability. On Midnight this leaves the request unanswered, since no execution output can be attested.
-2. The raw return bytes are ABI-decoded per the request's `outputDeserializationSchema` and re-packed per its `respondSerializationSchema` using the schema-driven packed encoding in `@sig-net/midnight` (abi-serde). The result is the exact unpadded byte string clients recompute at claim time. A non-function-call execution (plain transfer) has no output to decode, so schema-typed success defaults are synthesised instead, mirroring the real MPC (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error).
+1. After the EVM transaction reaches a finalised block, the responder reads a contract call's actual return data via `debug_traceTransaction` (callTracer, top call only: the same request the real MPC sends, which is why `EVM_RPC_URL` must point at a node with the debug namespace enabled) and reads the returned call frame by the MPC's rules (`evmTraceOutputFromCallFrame` in `@sig-net/midnight`). A plain transfer (at most two bytes of input) is not traced. A frame reporting an `error` is refused and retried, and repeated refusals leave the request unanswered. An unsupported trace method stops monitoring and logs the required RPC capability. On Midnight this also leaves the request unanswered, since no execution output can be attested.
+2. The attested bytes are `executedEvmRespondOutput` (`@sig-net/midnight`, abi-serde) over the request's two schemas, the MPC's own rule for a Midnight respond output: a contract call's return data is ABI-decoded per the request's `outputDeserializationSchema` and packed per its `respondSerializationSchema`. A plain transfer, or a void call under an empty output schema, has no output to decode, so schema-typed success defaults are synthesised instead (string fields become `non_function_call_success`, bool fields become `true`, any other type is an error). The result is the exact unpadded byte string clients recompute at claim time.
 3. The responder computes the attestation digest `upgradeFromTransient(transientHash([HashDomain.attestationDigest, requestId, blockHeight, outputKind, serializedOutputLength, serializedOutput]))`, where `blockHeight` is the finalised EVM block holding the transaction and `outputKind` is `executed`, and ECDSA-signs it with the per-caller response key (derived from the MPC root key and the requesting contract's address on the fixed "midnight response key" path). The digest, the kind, the height, the output width and the signature are posted on-chain via `respondBidirectional`. The output itself never travels on-chain.
-4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
+4. A failed execution is attested the same way over an EMPTY output: a revert under the `failed` kind at the reverted transaction's block, a replacement under the `unviable` kind at the block that took the transaction's nonce. A replacement is attested only as the MPC attests it: the nonce is taken by a sibling, another transaction this responder signed (broadcast or not) from the same account at the same nonce over different unsigned bytes, mined after the request was signed. A nonce taken any other way leaves the request unanswered. The kind and height ride on the posted event, so a client settles a refund on the verified kind at width 0.
 
 Clients obtain the output bytes off-chain (recomputed from the mined transaction's trace, or downloaded from the output cache below), recompute the digest, and verify the posted signature against the response public key their contract pinned at initialisation.
 
@@ -434,8 +434,10 @@ Signs and prepares transactions:
 Monitors Ethereum transaction lifecycle:
 
 - Waits for receipts to reach the finalised destination height
-- Refuses EVM requests whose nonce is spent at the finalised admission block
-- Bounds replacement lookup to blocks after admission. The RPC must retain account state over that interval, so long-pending requests can still require archive access
+- Signs every EVM request whatever its nonce, as the MPC does. A nonce already spent at the finalised signing block leaves a Midnight request unanswered and gets a Solana or Substrate request the signed error response
+- Bounds replacement lookup to blocks after the signing block. The RPC must retain account state over that interval, so long-pending requests can still require archive access
+- Records every transaction it signs, broadcast or not, so a request whose nonce a sibling takes (another signed transaction from the same account at the same nonce, over different unsigned bytes) resolves as replaced at the sibling's block
+- Resolves any other consumer of the nonce as the MPC does: no attestation for Midnight, the signed error response for Solana and Substrate
 - Detects: pending, success, reverted, replaced states
 - Extracts return values from contract calls
 - Provider caching for efficiency
@@ -476,8 +478,8 @@ The in-memory twin of the MPC's output cache bucket: the Midnight monitor stores
 
 Handled inside `ChainSignatureServer`, per source chain:
 
-- **Borsh**: Solana and Substrate responses, encoded against the request's respond schema
-- **Packed respond bytes**: Midnight responses, schema-driven encoding via `@sig-net/midnight` (abi-serde)
+- **Borsh**: Solana and Substrate responses, the decoded output encoded against the request's respond schema
+- **Packed respond bytes**: Midnight responses, built from the traced execution and both schemas by `executedEvmRespondOutput` in `@sig-net/midnight` (abi-serde)
 
 ## API Reference
 
@@ -655,7 +657,7 @@ interface SignatureRequestedEvent {
 5. Respond to Solana with signature immediately
 6. Monitor transaction on Ethereum (exponential backoff)
 7. On success:
-   - Extract output (simulate call for contracts)
+   - Extract output (trace the mined call for contract calls)
    - Serialize output
    - Sign: keccak256(request_id + output)
    - Send respond_bidirectional to Solana
@@ -695,15 +697,16 @@ interface SignatureRequestedEvent {
 4. Sign the EVM transaction, post the signature record on-chain (respond circuit)
 5. Client broadcasts the EVM transaction, and the server monitors it
 6. On success:
-   - Extract the mined call's return data (debug_traceTransaction)
-   - Decode per outputDeserializationSchema, re-pack per respondSerializationSchema
+   - Extract a contract call's return data (debug_traceTransaction, plain transfers are not traced)
+   - Build the respond bytes from the trace and both schemas (executedEvmRespondOutput)
    - Sign the attestation digest
      upgradeFromTransient(transientHash([HashDomain.attestationDigest, request_id, block_height, output_kind, output_length, serialized_output]))
      with the per-caller response key
    - Post the respondBidirectional record (request id, block height, output kind, output width, digest, signature) on-chain
 7. On error:
    - Attest an EMPTY output the same way: kind `failed` at the reverted transaction's block, or
-     `unviable` at the block that took its nonce
+     `unviable` at the block where a sibling this responder signed took its nonce
+   - Attest nothing when any other transaction took the nonce
 ```
 
 See the [Midnight](#midnight) section for the full detail.
@@ -745,26 +748,26 @@ Supported chain identifiers:
 
 Loaded from the repo-root `.env` (or the process environment) and validated at startup:
 
-| Variable                           | Required                      | Description                                                                                                              |
-| ---------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `MPC_ROOT_KEY`                     | yes                           | Hex private key (`0x` + 64 hex chars) all chain keys derive from                                                         |
-| `EVM_RPC_URL`                      | yes                           | EVM JSON-RPC endpoint (credential in the URL if hosted). Must support `debug_traceTransaction`, checked at first use     |
-| `SOLANA_RPC_URL`                   | no (default devnet)           | Solana RPC endpoint (default `https://api.devnet.solana.com`)                                                            |
-| `SOLANA_PRIVATE_KEY`               | unless `DISABLE_SOLANA`       | Server keypair in JSON array format                                                                                      |
-| `PROGRAM_ID`                       | unless `DISABLE_SOLANA`       | Solana program ID of the chain signatures contract                                                                       |
-| `DISABLE_SOLANA`                   | no                            | `true` or `1` skips the entire Solana leg, for Midnight-only runs                                                        |
-| `VERBOSE`                          | no                            | `true` enables detailed logging                                                                                          |
-| `BITCOIN_NETWORK`                  | no (default `testnet`)        | `regtest` (Bitcoin Core RPC) or `testnet` (mempool.space testnet4 API)                                                   |
-| `SUBSTRATE_WS_URL`                 | no                            | Substrate node WebSocket URL, enables the Substrate (signet pallet) leg                                                  |
-| `MIDNIGHT_NETWORK_ID`              | no (default `undeployed`)     | Midnight network id                                                                                                      |
-| `MIDNIGHT_INDEXER_URL`             | for the Midnight leg          | Midnight indexer GraphQL URL. The Midnight leg starts only when this and `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` are both set |
-| `MIDNIGHT_INDEXER_WS_URL`          | no                            | Indexer GraphQL WebSocket URL, derived from `MIDNIGHT_INDEXER_URL` (http to ws) when unset                               |
-| `MIDNIGHT_NODE_URL`                | no (default `localhost:9944`) | Midnight node RPC URL                                                                                                    |
-| `MIDNIGHT_PROOF_SERVER_URL`        | no (default `localhost:6300`) | Midnight proof server URL                                                                                                |
-| `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` | for the Midnight leg          | Address of the deployed central signet contract the responder polls and posts to                                         |
-| `MIDNIGHT_WALLET_SEED`             | no (default genesis seed)     | Seed of the Midnight wallet the responder posts responses from                                                           |
-| `OUTPUT_CACHE_PORT`                | no (default `3040`)           | TCP port the output cache simulation is served on                                                                        |
-| `OUTPUT_CACHE_PREFIX`              | no (default `v1/fakenet`)     | Object prefix of the output cache simulation, the MPC's `publisher.output_storage.prefix` twin                           |
+| Variable                           | Required                      | Description                                                                                                                                      |
+| ---------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MPC_ROOT_KEY`                     | yes                           | Hex private key (`0x` + 64 hex chars) all chain keys derive from                                                                                 |
+| `EVM_RPC_URL`                      | yes                           | EVM JSON-RPC endpoint (credential in the URL if hosted). Must support `debug_traceTransaction` (contract calls are traced), checked at first use |
+| `SOLANA_RPC_URL`                   | no (default devnet)           | Solana RPC endpoint (default `https://api.devnet.solana.com`)                                                                                    |
+| `SOLANA_PRIVATE_KEY`               | unless `DISABLE_SOLANA`       | Server keypair in JSON array format                                                                                                              |
+| `PROGRAM_ID`                       | unless `DISABLE_SOLANA`       | Solana program ID of the chain signatures contract                                                                                               |
+| `DISABLE_SOLANA`                   | no                            | `true` or `1` skips the entire Solana leg, for Midnight-only runs                                                                                |
+| `VERBOSE`                          | no                            | `true` enables detailed logging                                                                                                                  |
+| `BITCOIN_NETWORK`                  | no (default `testnet`)        | `regtest` (Bitcoin Core RPC) or `testnet` (mempool.space testnet4 API)                                                                           |
+| `SUBSTRATE_WS_URL`                 | no                            | Substrate node WebSocket URL, enables the Substrate (signet pallet) leg                                                                          |
+| `MIDNIGHT_NETWORK_ID`              | no (default `undeployed`)     | Midnight network id                                                                                                                              |
+| `MIDNIGHT_INDEXER_URL`             | for the Midnight leg          | Midnight indexer GraphQL URL. The Midnight leg starts only when this and `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` are both set                         |
+| `MIDNIGHT_INDEXER_WS_URL`          | no                            | Indexer GraphQL WebSocket URL, derived from `MIDNIGHT_INDEXER_URL` (http to ws) when unset                                                       |
+| `MIDNIGHT_NODE_URL`                | no (default `localhost:9944`) | Midnight node RPC URL                                                                                                                            |
+| `MIDNIGHT_PROOF_SERVER_URL`        | no (default `localhost:6300`) | Midnight proof server URL                                                                                                                        |
+| `MIDNIGHT_SIGNET_CONTRACT_ADDRESS` | for the Midnight leg          | Address of the deployed central signet contract the responder polls and posts to                                                                 |
+| `MIDNIGHT_WALLET_SEED`             | no (default genesis seed)     | Seed of the Midnight wallet the responder posts responses from                                                                                   |
+| `OUTPUT_CACHE_PORT`                | no (default `3040`)           | TCP port the output cache simulation is served on                                                                                                |
+| `OUTPUT_CACHE_PREFIX`              | no (default `v1/fakenet`)     | Object prefix of the output cache simulation, the MPC's `publisher.output_storage.prefix` twin                                                   |
 
 ### Transaction Monitoring
 

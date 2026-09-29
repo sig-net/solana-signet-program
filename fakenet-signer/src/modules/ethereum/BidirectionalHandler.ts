@@ -24,27 +24,22 @@ export async function handleEthereumBidirectional(
     params: event.params,
   });
 
-  const unsignedTx = ethers.Transaction.from(
-    ethers.hexlify(event.serializedTransaction)
-  );
   const signedAtBlock = await EthereumMonitor.getSigningBlock(
     event.caip2Id,
-    new ethers.Wallet(derivedPrivateKey).address,
-    unsignedTx.nonce,
     context.config
   );
-  if (signedAtBlock === undefined) {
-    console.warn(
-      `Refusing EVM request ${requestId}: nonce already spent at finality`
-    );
-    return;
-  }
 
   const result =
     await EthereumTransactionProcessor.processTransactionForSigning(
       new Uint8Array(event.serializedTransaction),
       derivedPrivateKey
     );
+  EthereumMonitor.recordSignedTransaction({
+    hash: result.signedTxHash,
+    from: result.fromAddress,
+    nonce: result.nonce,
+    unsignedTransaction: ethers.hexlify(event.serializedTransaction),
+  });
 
   const requestIdBytes = Buffer.from(requestId.slice(2), 'hex');
   const requestIds = result.signature.map(() => requestIdBytes);
