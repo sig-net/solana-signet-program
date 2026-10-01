@@ -19,7 +19,8 @@ const CONFIG: ServerConfig = {
 };
 const ADDRESS = '0x' + '11'.repeat(20);
 const REQUEST_ID = '0x' + '33'.repeat(32);
-const BOOL_SCHEMA = '[{"name":"ok","type":"bool"}]';
+const BOOL_ABI_SCHEMA = '[{"name":"ok","type":"bool"}]';
+const BOOL_BORSH_SCHEMA = '{"struct":{"ok":"bool"}}';
 const TRANSFER_CALLDATA = '0x';
 const CONTRACT_CALLDATA = '0xa9059cbb00';
 
@@ -35,13 +36,14 @@ const CASES: {
   outputSchema: string;
   respondSchema: string;
   attested: string | undefined;
+  error?: RegExp;
 }[] = [
   {
     name: 'a plain transfer is not traced and attests the bool default',
     calldata: TRANSFER_CALLDATA,
     callFrame: undefined,
-    outputSchema: BOOL_SCHEMA,
-    respondSchema: BOOL_SCHEMA,
+    outputSchema: BOOL_ABI_SCHEMA,
+    respondSchema: BOOL_BORSH_SCHEMA,
     attested: '0x01',
   },
   {
@@ -53,15 +55,30 @@ const CASES: {
         '0x0000000000000000000000000000000000000000000000000102030405060708',
     },
     outputSchema: '[{"name":"amount","type":"uint256"}]',
-    respondSchema: '[{"name":"amount","type":"uint128"}]',
+    respondSchema: '{"struct":{"amount":"u128"}}',
     attested: '0x08070605040302010000000000000000',
+  },
+  {
+    name: 'an overflowing u128 response is rejected before attestation',
+    calldata: CONTRACT_CALLDATA,
+    callFrame: {
+      type: 'CALL',
+      output: ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256'],
+        [1n << 128n]
+      ),
+    },
+    outputSchema: '[{"name":"amount","type":"uint256"}]',
+    respondSchema: '{"struct":{"amount":"u128"}}',
+    attested: undefined,
+    error: /does not fit Borsh u128/,
   },
   {
     name: 'a void call under an empty output schema attests the bool default',
     calldata: CONTRACT_CALLDATA,
     callFrame: { type: 'CALL', output: '0x' },
     outputSchema: '[]',
-    respondSchema: BOOL_SCHEMA,
+    respondSchema: BOOL_BORSH_SCHEMA,
     attested: '0x01',
   },
   {
@@ -69,7 +86,7 @@ const CASES: {
     calldata: CONTRACT_CALLDATA,
     callFrame: { type: 'CALL' },
     outputSchema: '[]',
-    respondSchema: BOOL_SCHEMA,
+    respondSchema: BOOL_BORSH_SCHEMA,
     attested: '0x01',
   },
   {
@@ -82,7 +99,7 @@ const CASES: {
       output: '0x',
     },
     outputSchema: '[]',
-    respondSchema: BOOL_SCHEMA,
+    respondSchema: BOOL_BORSH_SCHEMA,
     attested: undefined,
   },
 ];
@@ -163,11 +180,11 @@ for (const [index, row] of CASES.entries()) {
       CONFIG
     );
     if (result.status === 'success') {
-      await new ChainSignatureServer(CONFIG)['handleCompletedTransaction'](
-        txHash,
-        txInfo,
-        result
-      );
+      const pending = new ChainSignatureServer(CONFIG)[
+        'handleCompletedTransaction'
+      ](txHash, txInfo, result);
+      if (row.error) await assert.rejects(pending, row.error);
+      else await pending;
     }
 
     assert.deepEqual(
@@ -178,7 +195,7 @@ for (const [index, row] of CASES.entries()) {
     );
     assert.equal(
       result.status,
-      row.attested === undefined ? 'pending' : 'success'
+      row.attested === undefined && !row.error ? 'pending' : 'success'
     );
   });
 }

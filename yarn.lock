@@ -1508,23 +1508,22 @@
     "@noble/curves" "~1.9.2"
     "@noble/hashes" "~1.8.0"
 
-"@sig-net/midnight-contract@0.24.0-rc.6":
+"@sig-net/midnight-contract@file:../midnight-integration-rs-midnight-serde/packages/signet-contract/package.tgz":
   version "0.24.0-rc.6"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.24.0-rc.6.tgz#7a20e5919c79475720aa51d5fb3d5bf99a6c956d"
-  integrity sha512-hbCN1doJp+bB33ZFkLCm8hMuWAIO46efDFw9K5ApcPLStvIRm9EtA3VAWt8BHjw1NFaIdx5s9I0luIPEHMbM7g==
+  resolved "file:../midnight-integration-rs-midnight-serde/packages/signet-contract/package.tgz#9c4f503d632d03fdf8af12220b176e875b9fce07"
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js" "5.0.0-beta.6"
 
-"@sig-net/midnight-serde@^0.24.0-rc.6":
+"@sig-net/midnight-serde@^0.24.0-rc.6", "@sig-net/midnight-serde@file:../midnight-integration-rs-midnight-serde/packages/midnight-serde-ts/package.tgz":
   version "0.24.0-rc.6"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-serde/-/midnight-serde-0.24.0-rc.6.tgz#9743de01efe7d333ca6ed3a4adfaa7a49cf4fd70"
-  integrity sha512-t3i8VR2aM4NW1f+qTMaEBUdZhdA8Ze0RWInI9jndzqymmdfo3wuw7hp8WvU1w7tkwkSMolQ18QJtrGrqEAqfDw==
+  resolved "file:../midnight-integration-rs-midnight-serde/packages/midnight-serde-ts/package.tgz#f6b7c1d48e724a096877e0b2e266284b0124dd5a"
+  dependencies:
+    borsh "^2.0.0"
 
-"@sig-net/midnight@0.24.0-rc.6":
+"@sig-net/midnight@file:../midnight-integration-rs-midnight-serde/packages/signet-midnight/package.tgz":
   version "0.24.0-rc.6"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.24.0-rc.6.tgz#72f1a0f6b372c3814279cfdb880e58cf8b0ea52e"
-  integrity sha512-MJ0+qcq43EPAMFux/NpzKG0Y3IdY8V2l4j7Os/0CFNL7MOy2lv/6e4nIwWmstAYLAvQEwK65U2OugjwRwss0yw==
+  resolved "file:../midnight-integration-rs-midnight-serde/packages/signet-midnight/package.tgz#fb2e16e71d5f214278b7103a2c6b4961ba47ea5f"
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js-types" "5.0.0-beta.6"
