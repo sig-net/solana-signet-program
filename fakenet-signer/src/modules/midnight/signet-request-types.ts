@@ -58,8 +58,10 @@ export interface SigningRequest {
   dest: string;
   /** Additional parameters (contract-specific). */
   params: Uint8Array;
-  /** Schema for deserializing the EVM tx output. */
+  /**
+   * The ABI output schema, the one schema a Midnight request carries: it
+   * decides whether the MPC signs at all (`unsupportedEvmOutputFields`) and
+   * derives the respond bytes it attests (`executedEvmRespondOutput`).
+   */
   outputDeserializationSchema: Uint8Array;
-  /** Schema for serializing the response back. */
-  respondSerializationSchema: Uint8Array;
 }

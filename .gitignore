@@ -69,3 +69,5 @@ pnpm-lock.yaml
 
 # Playwright MCP scratch output (page snapshots, console logs)
 .playwright-mcp/
+
+.yarn-cache/
