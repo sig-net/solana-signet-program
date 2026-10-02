@@ -89,9 +89,9 @@
     "tiny-secp256k1": "^2.2.3",
     "tsx": "^4.19.2",
     "zod": "^4.1.11",
-    "@sig-net/midnight": "0.24.0-rc.9",
-    "@sig-net/midnight-contract": "0.24.0-rc.9",
-    "@sig-net/midnight-serde": "0.24.0-rc.9"
+    "@sig-net/midnight": "0.24.0-rc.10",
+    "@sig-net/midnight-contract": "0.24.0-rc.10",
+    "@sig-net/midnight-serde": "0.24.0-rc.10"
   },
   "devDependencies": {
     "tsdown": "^0.15.6"
