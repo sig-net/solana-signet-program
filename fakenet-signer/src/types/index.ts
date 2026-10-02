@@ -138,9 +138,10 @@ export interface PrevoutRef {
  * Each entry is added immediately after the server hands signatures back to the
  * requester, and removed once the monitor emits either a success/failure
  * response. Fields mirror the data needed by `BitcoinMonitor`/`EthereumMonitor`
- * plus the schemas required to decode the output and format the respond payload.
+ * plus the schema required to decode the output. The respond payload's shape
+ * follows from the source chain, see {@link PendingTransaction}.
  */
-export interface PendingTransaction {
+interface PendingTransactionBase {
   /** Canonical transaction hash on the destination chain (txid for Bitcoin). */
   txHash: string;
 
@@ -158,16 +159,6 @@ export interface PendingTransaction {
    * the signed transaction is submitted to (ABI for EVM).
    */
   outputDeserializationSchema: Buffer | number[];
-
-  /**
-   * Schema for re-encoding the decoded output into the respond payload,
-   * carried verbatim from `SignBidirectionalEvent.respondSerializationSchema`
-   * (the MPC's `BidirectionalTx.respond_serialization_schema`). Only the
-   * schema is carried, never a format: the format follows from the source
-   * chain the request came from, which is where the response is posted
-   * (Borsh for Solana and Substrate, Midnight format for Midnight).
-   */
-  respondSerializationSchema: Buffer | number[];
 
   /** Address that broadcast the transaction (EVM sender or `bitcoin`). */
   fromAddress: string;
@@ -195,10 +186,42 @@ export interface PendingTransaction {
 
   /** Input indices already submitted to Solana (Bitcoin PSBT only). */
   submittedInputs?: Set<number>;
-
-  /** Chain the request originated from; responses are routed back to it. */
-  source: 'solana' | 'polkadot' | 'midnight';
 }
+
+/**
+ * A pending transaction whose source chain receives the output Borsh-encoded
+ * on-chain (Solana and Substrate), so the request's respond schema rides
+ * along to encode it with.
+ */
+export interface BorshRespondPendingTransaction extends PendingTransactionBase {
+  /** Chain the request originated from, where the response is posted. */
+  source: 'solana' | 'polkadot';
+
+  /**
+   * Schema for re-encoding the decoded output into the respond payload,
+   * carried verbatim from `SignBidirectionalEvent.respondSerializationSchema`
+   * (the MPC's `BidirectionalTx.respond_serialization_schema`). Only the
+   * schema is carried, never a format: the format is Borsh for both sources.
+   */
+  respondSerializationSchema: Buffer | number[];
+}
+
+/**
+ * A pending transaction whose source chain receives an attestation over the
+ * output (Midnight), the output itself travelling off-chain. Its respond
+ * bytes derive from `outputDeserializationSchema` alone
+ * (`executedEvmRespondOutput` in `@sig-net/midnight`). The request record's
+ * respond schema field is reserved and carries nothing.
+ */
+export interface AttestedRespondPendingTransaction extends PendingTransactionBase {
+  /** Chain the request originated from, where the attestation is posted. */
+  source: 'midnight';
+}
+
+/** Any cross-chain transaction still being monitored, discriminated by `source`. */
+export type PendingTransaction =
+  | BorshRespondPendingTransaction
+  | AttestedRespondPendingTransaction;
 
 // Borsh schema types
 export interface BorshStructField {

@@ -540,7 +540,6 @@ export class MidnightMonitor {
           : `unknown(${signetRequest.signatureDest})`,
       params: signetRequest.params,
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
-      respondSerializationSchema: signetRequest.respondSerializationSchema,
       signetRequest,
     };
   }

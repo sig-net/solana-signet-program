@@ -1508,30 +1508,30 @@
     "@noble/curves" "~1.9.2"
     "@noble/hashes" "~1.8.0"
 
-"@sig-net/midnight-contract@0.24.0-rc.8":
-  version "0.24.0-rc.8"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.24.0-rc.8.tgz#f5ac5bdcc22a3557d76a36832dd84fb433785241"
-  integrity sha512-EQx8z7PkYVFIxOkVvFkrpJ98+JAPYF+FtNpberttrP8YseHdaG9S25IPQ1srnZhgIbKs+VsVY4/MJPw2CExW1A==
+"@sig-net/midnight-contract@0.24.0-rc.9":
+  version "0.24.0-rc.9"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-contract/-/midnight-contract-0.24.0-rc.9.tgz#2e9e796a0cc4d7e0807c4e9d23b39a5cc49ec6d3"
+  integrity sha512-D+jm29eIGrSa6lrz7N87i0rV3ugQmxciKQlYsc8PuWMi3kdrH1+wz26ovAL71F4EHuOSk8QDg22ag0J9h5MLPg==
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js" "5.0.0-beta.6"
 
-"@sig-net/midnight-serde@0.24.0-rc.8", "@sig-net/midnight-serde@^0.24.0-rc.8":
-  version "0.24.0-rc.8"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight-serde/-/midnight-serde-0.24.0-rc.8.tgz#8af5062dc81379148503b0f0807b3f6d1688cf68"
-  integrity sha512-pgrLUR21yCgX3BdvY89kis11EKi8bG/3h4oMQP7ORXSG+IUirHEM2oz28pe/Pr6iL7S4tp9MuivgP4Wi6pbQvg==
+"@sig-net/midnight-serde@0.24.0-rc.9", "@sig-net/midnight-serde@^0.24.0-rc.9":
+  version "0.24.0-rc.9"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight-serde/-/midnight-serde-0.24.0-rc.9.tgz#607860665685e2819403f90d2ba9153cbb036727"
+  integrity sha512-18rtc8LQ+ha+bB4oyuUbqSbraIQlavo8vmEg3NtKH8k0+h1RXa0Kyrc06DZkJMcXoogfR5d19hPKrC3elM2isQ==
   dependencies:
-    borsh "^2.0.0"
+    borsh "2.0.0"
 
-"@sig-net/midnight@0.24.0-rc.8":
-  version "0.24.0-rc.8"
-  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.24.0-rc.8.tgz#0086f94f9c4b319ff84a8ce59c1c02f4c0d6119d"
-  integrity sha512-y1j0Jtj3vLGwLaOPmG3YJwtSo9iAYkfGyc7Vd3nB2olmysj/XRdPrq81dqbgDNanRx772xHqSWJeFUD/zNb3EA==
+"@sig-net/midnight@0.24.0-rc.9":
+  version "0.24.0-rc.9"
+  resolved "https://registry.yarnpkg.com/@sig-net/midnight/-/midnight-0.24.0-rc.9.tgz#6d3fadbb4082fbe70a1c1c06301ca72abd607ccd"
+  integrity sha512-17GIIpKvUXAPEMCdy4l8QCAiA7k/ZwSU5GHY/nzFutWH+IMc2lCbJ7vn7kzalkAAW/s1HqA+8slwauF15/JBrQ==
   dependencies:
     "@midnight-ntwrk/compact-runtime" "0.18.0-rc.1"
     "@midnight-ntwrk/midnight-js-types" "5.0.0-beta.6"
     "@noble/curves" "^2.2.0"
-    "@sig-net/midnight-serde" "^0.24.0-rc.8"
+    "@sig-net/midnight-serde" "^0.24.0-rc.9"
     ethers "^6.17.0"
 
 "@solana/buffer-layout@^4.0.1":
@@ -2340,6 +2340,11 @@ bn.js@5.2.3, bn.js@^5.1.2, bn.js@^5.2.0, bn.js@^5.2.1, bn.js@^5.2.3:
   resolved "https://registry.yarnpkg.com/bn.js/-/bn.js-5.2.3.tgz#16a9e409616b23fef3ccbedb8d42f13bff80295e"
   integrity sha512-EAcmnPkxpntVL+DS7bO1zhcZNvCkxqtkd0ZY53h06GNQ3DEkkGZ/gKgmDv6DdZQGj9BgfSPKtJJ7Dp1GPP8f7w==
 
+borsh@2.0.0, borsh@^2.0.0:
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/borsh/-/borsh-2.0.0.tgz#042a9f109565caac3c6a21297cd8c0ae8db3149d"
+  integrity sha512-kc9+BgR3zz9+cjbwM8ODoUB4fs3X3I5A/HtX7LZKxCLaMrEeDFoBpnhZY//DTS1VZBSs6S5v46RZRbZjRFspEg==
+
 borsh@^0.7.0:
   version "0.7.0"
   resolved "https://registry.yarnpkg.com/borsh/-/borsh-0.7.0.tgz#6e9560d719d86d90dc589bca60ffc8a6c51fec2a"
@@ -2348,11 +2353,6 @@ borsh@^0.7.0:
     bn.js "^5.2.0"
     bs58 "^4.0.0"
     text-encoding-utf-8 "^1.0.2"
-
-borsh@^2.0.0:
-  version "2.0.0"
-  resolved "https://registry.yarnpkg.com/borsh/-/borsh-2.0.0.tgz#042a9f109565caac3c6a21297cd8c0ae8db3149d"
-  integrity sha512-kc9+BgR3zz9+cjbwM8ODoUB4fs3X3I5A/HtX7LZKxCLaMrEeDFoBpnhZY//DTS1VZBSs6S5v46RZRbZjRFspEg==
 
 brace-expansion@^1.1.7:
   version "1.1.12"
