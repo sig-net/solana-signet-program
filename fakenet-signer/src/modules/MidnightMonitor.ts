@@ -584,10 +584,11 @@ export class MidnightMonitor {
         )})`
     );
 
-    // The attestation commits to the output at its exact unpadded length: no
-    // padding, no fixed field width. The output itself travels off-chain; the
-    // record the SDK mints carries everything else the digest commits to,
-    // plus the digest and the signature over it.
+    // The attestation commits to the output's exact unpadded length and its
+    // hash: no padding, no fixed field width. The output itself travels
+    // off-chain; the record the SDK mints carries the length, the hash and
+    // everything else the digest commits to, plus the digest and the
+    // signature over it.
     const respondBidirectionalEvent = attestRespondBidirectional(
       { requestId, blockHeight, outputKind, serializedOutput },
       responseSecretKey
