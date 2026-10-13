@@ -8,6 +8,7 @@ import type {
   SignatureRequestedEvent,
   CompletedTransaction,
   PendingTransaction,
+  BorshRespondPendingTransaction,
   TransactionFailure,
   TransactionOutput,
   TransactionOutputData,
@@ -42,6 +43,7 @@ import {
   deriveEpsilon,
   executedEvmRespondOutput,
   OutputKind,
+  unsupportedEvmOutputFields,
 } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
 import * as borsh from 'borsh';
@@ -79,6 +81,28 @@ const WS_HEALTH_CHECK_INTERVAL_MS = 10_000;
 const WS_RECONNECT_COOLDOWN_MS = 30_000;
 // When WS is healthy, only run backfill every Nth cycle as a safety net
 const BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY = 6;
+
+/**
+ * Why the MPC refuses to sign a Midnight request over its output schema, or
+ * `undefined` when it signs: the schema names an ABI type outside the subset
+ * the MPC attests (`unsupportedEvmOutputFields`), or it cannot be read as an
+ * output schema at all, which can never attest either.
+ */
+function outputSchemaRejection(
+  outputDeserializationSchema: Uint8Array
+): string | undefined {
+  let unsupported: ReturnType<typeof unsupportedEvmOutputFields>;
+  try {
+    unsupported = unsupportedEvmOutputFields(outputDeserializationSchema);
+  } catch (error) {
+    return `malformed output schema (${error instanceof Error ? error.message : String(error)})`;
+  }
+  if (unsupported.length === 0) return undefined;
+  return (
+    `unsupported output type${unsupported.length > 1 ? 's' : ''} ` +
+    unsupported.map((field) => `'${field.name}' (${field.type})`).join(', ')
+  );
+}
 
 export class ChainSignatureServer {
   // Null when config.disableSolana — the Solana leg is never constructed.
@@ -359,15 +383,29 @@ export class ChainSignatureServer {
   }
 
   /**
-   * Handle a signing request from the Midnight vault contract.
+   * Handle a signing request from a Midnight requester contract.
    *
    * The MPC reads calldata args + EVM gas params from the contract's ledger,
-   * builds ABI calldata + RLP transaction off-chain from contract-controlled values,
-   * signs with the derived secp256k1 key, and sends the signed tx to the client
-   * via WebSocket. The CLIENT broadcasts to Sepolia. The MPC monitors for the tx hash.
+   * builds ABI calldata + RLP transaction off-chain from contract-controlled
+   * values, signs with the derived secp256k1 key, and posts the signature on
+   * the signet contract. The CLIENT broadcasts to the EVM chain. The MPC
+   * monitors for the tx hash.
+   *
+   * A request whose output schema the MPC cannot attest is dropped before
+   * signing, as the MPC drops it: no signature and no attestation.
    */
   private async handleMidnightSigningRequest(request: MidnightSigningRequest) {
     if (!this.midnightMonitor) return;
+
+    const rejection = outputSchemaRejection(
+      request.outputDeserializationSchema
+    );
+    if (rejection !== undefined) {
+      console.warn(
+        `Midnight: dropping request 0x${Buffer.from(request.requestId).toString('hex')}: ${rejection}`
+      );
+      return;
+    }
 
     // Build the unsigned EVM transaction from contract-controlled calldata + gas params
     const unsignedTxBytes =
@@ -427,9 +465,6 @@ export class ChainSignatureServer {
       caip2Id: request.caip2Id,
       outputDeserializationSchema: Buffer.from(
         request.outputDeserializationSchema
-      ),
-      respondSerializationSchema: Buffer.from(
-        request.respondSerializationSchema
       ),
       fromAddress: wallet.address,
       nonce: Number(unsignedTx.nonce),
@@ -687,14 +722,7 @@ export class ChainSignatureServer {
         // Midnight: ECDSA-sign the serialized output on-chain; the user
         // polls the signet contract and claims.
         const serializedOutput = executedEvmRespondOutput(
-          {
-            outputDeserializationSchema: Uint8Array.from(
-              txInfo.outputDeserializationSchema
-            ),
-            respondSerializationSchema: Uint8Array.from(
-              txInfo.respondSerializationSchema
-            ),
-          },
+          Uint8Array.from(txInfo.outputDeserializationSchema),
           result.evmExecution.isContractCall,
           result.evmExecution.trace
         );
@@ -754,17 +782,19 @@ export class ChainSignatureServer {
         return;
       }
 
-      default:
+      default: {
+        const unreachable: never = txInfo;
         throw new Error(
-          `Unsupported transaction source '${txInfo.source}' for tx ${txHash}`
+          `Unsupported transaction source for tx ${txHash}: ${JSON.stringify(unreachable)}`
         );
+      }
     }
   }
 
   /** Borsh-serialize the output and MPC-sign it for Solana/Substrate responses. */
   private async serializeAndSignBorshResponse(
     requestIdBytes: Buffer,
-    txInfo: PendingTransaction,
+    txInfo: BorshRespondPendingTransaction,
     result: TransactionOutput
   ) {
     this.log(`🔗 serializeBorshOutput...`);

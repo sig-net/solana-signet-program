@@ -3,7 +3,10 @@ import { test } from 'node:test';
 import { ethers } from 'ethers';
 import { OutputKind, type JsonValue } from '@sig-net/midnight';
 import { EthereumMonitor } from '../src/modules/ethereum/EthereumMonitor';
-import { MidnightMonitor } from '../src/modules/MidnightMonitor';
+import {
+  MidnightMonitor,
+  type MidnightSigningRequest,
+} from '../src/modules/MidnightMonitor';
 import { ChainSignatureServer } from '../src/server/ChainSignatureServer';
 import type { PendingTransaction, ServerConfig } from '../src/types';
 
@@ -19,58 +22,114 @@ const CONFIG: ServerConfig = {
 };
 const ADDRESS = '0x' + '11'.repeat(20);
 const REQUEST_ID = '0x' + '33'.repeat(32);
+const EMPTY_SCHEMA = '[]';
 const BOOL_SCHEMA = '[{"name":"ok","type":"bool"}]';
+const UINT256_SCHEMA = '[{"name":"amount","type":"uint256"}]';
 const TRANSFER_CALLDATA = '0x';
 const CONTRACT_CALLDATA = '0xa9059cbb00';
+const abi = ethers.AbiCoder.defaultAbiCoder();
 
-// The trace and schemas each case feeds the fakenet, and what it attests. A
-// `callFrame` of undefined means the transaction must not be traced at all.
-// The contract-call row is the MPC's own oracle vector "uint256 decode
-// narrows to uint128 response" (chain-ethereum/tests/fixtures/
-// midnight_respond_vectors.json in github.com/sig-net/mpc).
+// The trace and output schema each case feeds the fakenet, and what it
+// attests. A `callFrame` of undefined means the transaction must not be
+// traced at all. The attested bytes are the Borsh struct the schema derives:
+// one member per field in order, a bool as one byte, a uint256 as its 32
+// little-endian bytes, an address as 20 bytes and bytesN as N bytes.
 const CASES: {
   name: string;
   calldata: string;
   callFrame: JsonValue | undefined;
   outputSchema: string;
-  respondSchema: string;
   attested: string | undefined;
+  error?: RegExp;
 }[] = [
   {
-    name: 'a plain transfer is not traced and attests the bool default',
+    name: 'a plain transfer under an empty schema is not traced and attests an empty output',
+    calldata: TRANSFER_CALLDATA,
+    callFrame: undefined,
+    outputSchema: EMPTY_SCHEMA,
+    attested: '0x',
+  },
+  {
+    name: 'a plain transfer under a non-empty schema is refused',
     calldata: TRANSFER_CALLDATA,
     callFrame: undefined,
     outputSchema: BOOL_SCHEMA,
-    respondSchema: BOOL_SCHEMA,
-    attested: '0x01',
+    attested: undefined,
+    error: /plain transfer returns nothing/,
   },
   {
-    name: 'a contract call attests its decoded return data',
+    name: 'a contract call attests its uint256 return value little-endian, carried whole',
     calldata: CONTRACT_CALLDATA,
     callFrame: {
       type: 'CALL',
       output:
         '0x0000000000000000000000000000000000000000000000000102030405060708',
     },
-    outputSchema: '[{"name":"amount","type":"uint256"}]',
-    respondSchema: '[{"name":"amount","type":"uint128"}]',
-    attested: '0x08070605040302010000000000000000',
+    outputSchema: UINT256_SCHEMA,
+    attested: '0x0807060504030201' + '00'.repeat(24),
   },
   {
-    name: 'a void call under an empty output schema attests the bool default',
+    name: 'a uint256 at its maximum is attested without narrowing',
+    calldata: CONTRACT_CALLDATA,
+    callFrame: {
+      type: 'CALL',
+      output: abi.encode(['uint256'], [(1n << 256n) - 1n]),
+    },
+    outputSchema: UINT256_SCHEMA,
+    attested: '0x' + 'ff'.repeat(32),
+  },
+  {
+    name: 'a multi-field return packs one struct member per field in schema order',
+    calldata: CONTRACT_CALLDATA,
+    callFrame: {
+      type: 'CALL',
+      output: abi.encode(['bool', 'uint256'], [true, 5n]),
+    },
+    outputSchema:
+      '[{"name":"success","type":"bool"},{"name":"amount","type":"uint256"}]',
+    attested: '0x01' + '05' + '00'.repeat(31),
+  },
+  {
+    name: 'address and fixed bytes are attested as their wire bytes',
+    calldata: CONTRACT_CALLDATA,
+    callFrame: {
+      type: 'CALL',
+      output: abi.encode(['address', 'bytes4'], [ADDRESS, '0xdeadbeef']),
+    },
+    outputSchema:
+      '[{"name":"who","type":"address"},{"name":"tag","type":"bytes4"}]',
+    attested: '0x' + '11'.repeat(20) + 'deadbeef',
+  },
+  {
+    name: 'a void call under an empty schema attests an empty output',
     calldata: CONTRACT_CALLDATA,
     callFrame: { type: 'CALL', output: '0x' },
-    outputSchema: '[]',
-    respondSchema: BOOL_SCHEMA,
-    attested: '0x01',
+    outputSchema: EMPTY_SCHEMA,
+    attested: '0x',
   },
   {
-    name: 'a void call whose frame has no output attests the bool default',
+    name: 'a void call whose frame has no output attests an empty output',
     calldata: CONTRACT_CALLDATA,
     callFrame: { type: 'CALL' },
-    outputSchema: '[]',
-    respondSchema: BOOL_SCHEMA,
-    attested: '0x01',
+    outputSchema: EMPTY_SCHEMA,
+    attested: '0x',
+  },
+  {
+    // The monitor's own decode refuses the empty return data first, so the
+    // execution is retried and the request stays unanswered.
+    name: 'a void call under a non-empty schema is refused before attestation',
+    calldata: CONTRACT_CALLDATA,
+    callFrame: { type: 'CALL', output: '0x' },
+    outputSchema: BOOL_SCHEMA,
+    attested: undefined,
+  },
+  {
+    name: 'return data under an empty schema is refused',
+    calldata: CONTRACT_CALLDATA,
+    callFrame: { type: 'CALL', output: abi.encode(['uint256'], [1n]) },
+    outputSchema: EMPTY_SCHEMA,
+    attested: undefined,
+    error: /declares no return values/,
   },
   {
     name: 'a trace reporting an error is refused and nothing is attested',
@@ -81,8 +140,7 @@ const CASES: {
       revertReason: 'InsufficientBalance',
       output: '0x',
     },
-    outputSchema: '[]',
-    respondSchema: BOOL_SCHEMA,
+    outputSchema: EMPTY_SCHEMA,
     attested: undefined,
   },
 ];
@@ -142,7 +200,6 @@ for (const [index, row] of CASES.entries()) {
       requestId: REQUEST_ID,
       caip2Id: 'eip155:1',
       outputDeserializationSchema: Buffer.from(row.outputSchema),
-      respondSerializationSchema: Buffer.from(row.respondSchema),
       fromAddress: ADDRESS,
       nonce: 7,
       signedAtBlock: 100,
@@ -163,11 +220,11 @@ for (const [index, row] of CASES.entries()) {
       CONFIG
     );
     if (result.status === 'success') {
-      await new ChainSignatureServer(CONFIG)['handleCompletedTransaction'](
-        txHash,
-        txInfo,
-        result
-      );
+      const pending = new ChainSignatureServer(CONFIG)[
+        'handleCompletedTransaction'
+      ](txHash, txInfo, result);
+      if (row.error) await assert.rejects(pending, row.error);
+      else await pending;
     }
 
     assert.deepEqual(
@@ -178,7 +235,99 @@ for (const [index, row] of CASES.entries()) {
     );
     assert.equal(
       result.status,
-      row.attested === undefined ? 'pending' : 'success'
+      row.attested === undefined && !row.error ? 'pending' : 'success'
     );
+  });
+}
+
+// The MPC signs a request only when it can attest its output schema. The
+// request below is a plain transfer, and its schema varies per row.
+const REQUEST: MidnightSigningRequest = {
+  predecessor: '22'.repeat(32),
+  requestId: new Uint8Array(32).fill(0x33),
+  evmParams: {
+    evmTo: new Uint8Array(20).fill(0x11),
+    evmChainId: 1n,
+    evmNonce: 7n,
+    evmGasLimit: 21_000n,
+    evmMaxFee: 1n,
+    evmPriorityFee: 1n,
+    evmValue: 0n,
+  },
+  calldata: { words: [] },
+  caip2Id: 'eip155:1',
+  keyVersion: 0,
+  path: new Uint8Array(32),
+  algo: 'ecdsa',
+  dest: 'ethereum',
+  params: new Uint8Array(0),
+  outputDeserializationSchema: new TextEncoder().encode(EMPTY_SCHEMA),
+  // Read only by buildSerializedTransaction, which the tests mock.
+  signetRequest: {} as MidnightSigningRequest['signetRequest'],
+};
+const REQUEST_TX = ethers.getBytes(
+  ethers.Transaction.from({
+    type: 2,
+    chainId: 1,
+    nonce: 7,
+    gasLimit: 21_000,
+    maxFeePerGas: 1,
+    maxPriorityFeePerGas: 1,
+    value: 0,
+    data: '0x',
+    to: ADDRESS,
+  }).unsignedSerialized
+);
+
+const SIGNING_CASES: { name: string; outputSchema: string; signed: boolean }[] =
+  [
+    { name: 'an empty schema', outputSchema: EMPTY_SCHEMA, signed: true },
+    {
+      name: 'every attested type',
+      outputSchema:
+        '[{"name":"a","type":"bool"},{"name":"b","type":"uint256"},{"name":"c","type":"address"},{"name":"d","type":"bytes32"}]',
+      signed: true,
+    },
+    {
+      name: 'a string output',
+      outputSchema: '[{"name":"a","type":"string"}]',
+      signed: false,
+    },
+    {
+      name: 'a narrower integer output',
+      outputSchema: '[{"name":"a","type":"uint128"}]',
+      signed: false,
+    },
+    {
+      name: 'a schema that is not an array of fields',
+      outputSchema: '{"name":"a","type":"bool"}',
+      signed: false,
+    },
+    { name: 'a schema that is not JSON', outputSchema: 'nope', signed: false },
+  ];
+
+for (const row of SIGNING_CASES) {
+  test(`Midnight request with ${row.name} is ${row.signed ? 'signed' : 'dropped unsigned'}`, async (t) => {
+    t.mock.method(ethers.JsonRpcProvider.prototype, 'getBlock', async () => ({
+      number: 100,
+    }));
+    const built = t.mock.method(
+      MidnightMonitor.prototype,
+      'buildSerializedTransaction',
+      () => REQUEST_TX
+    );
+    const posted = t.mock.method(
+      MidnightMonitor.prototype,
+      'broadcastSignedTransaction',
+      async () => {}
+    );
+
+    await new ChainSignatureServer(CONFIG)['handleMidnightSigningRequest']({
+      ...REQUEST,
+      outputDeserializationSchema: new TextEncoder().encode(row.outputSchema),
+    });
+
+    assert.equal(built.mock.callCount(), row.signed ? 1 : 0);
+    assert.equal(posted.mock.callCount(), row.signed ? 1 : 0);
   });
 }

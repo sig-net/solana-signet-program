@@ -12,10 +12,11 @@
  * 4. Post the MPC's ECDSA signature to the signet contract (respond)
  * 5. Once the EVM tx is final (executed, reverted, or its nonce taken by
  *    another transaction), sign the attestation digest over the request id,
- *    the destination block height, the outcome kind and the output with the
- *    response key derived for the requesting contract, and post the
- *    RespondBidirectionalEvent (respondBidirectional) carrying the signature,
- *    the kind and the height, which the client verifies before settling
+ *    the destination block height, the outcome kind, the output length and
+ *    the output hash with the response key derived for the requesting
+ *    contract, and post the RespondBidirectionalEvent (respondBidirectional)
+ *    carrying those fields, the digest and the signature, which the client
+ *    verifies against the output before settling
  */
 
 import { Buffer } from 'buffer';
@@ -540,7 +541,6 @@ export class MidnightMonitor {
           : `unknown(${signetRequest.signatureDest})`,
       params: signetRequest.params,
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
-      respondSerializationSchema: signetRequest.respondSerializationSchema,
       signetRequest,
     };
   }
@@ -585,10 +585,11 @@ export class MidnightMonitor {
         )})`
     );
 
-    // The attestation commits to the output at its exact unpadded length: no
-    // padding, no fixed field width. The output itself travels off-chain; the
-    // record the SDK mints carries everything else the digest commits to,
-    // plus the digest and the signature over it.
+    // The attestation commits to the output's exact unpadded length and its
+    // hash: no padding, no fixed field width. The output itself travels
+    // off-chain; the record the SDK mints carries the length, the hash and
+    // everything else the digest commits to, plus the digest and the
+    // signature over it.
     const respondBidirectionalEvent = attestRespondBidirectional(
       { requestId, blockHeight, outputKind, serializedOutput },
       responseSecretKey

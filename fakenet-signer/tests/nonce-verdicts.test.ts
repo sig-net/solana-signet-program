@@ -121,7 +121,8 @@ function mockChain(t: TestContext, row: NonceCase): void {
   );
 }
 
-const BOOL_SCHEMA = '[{"name":"ok","type":"bool"}]';
+// A plain transfer returns nothing, so its output schema is empty.
+const EMPTY_ABI_SCHEMA = '[]';
 const REQUEST: MidnightSigningRequest = {
   predecessor: '22'.repeat(32),
   requestId: new Uint8Array(32).fill(0x33),
@@ -141,8 +142,7 @@ const REQUEST: MidnightSigningRequest = {
   algo: 'ecdsa',
   dest: 'ethereum',
   params: new Uint8Array(0),
-  outputDeserializationSchema: new TextEncoder().encode(BOOL_SCHEMA),
-  respondSerializationSchema: new TextEncoder().encode(BOOL_SCHEMA),
+  outputDeserializationSchema: new TextEncoder().encode(EMPTY_ABI_SCHEMA),
   // Read only by buildSerializedTransaction, which the tests mock.
   signetRequest: {} as MidnightSigningRequest['signetRequest'],
 };
