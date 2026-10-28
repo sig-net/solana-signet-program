@@ -238,13 +238,18 @@ pub mod chain_signatures {
     /// # Arguments
     ///
     /// * `serialized_transaction` - serialized unsigned transaction for destination chain
-    /// * `caip2_id` - CAIP-2 chain identifier (e.g., `"eip155:1"` for Ethereum mainnet)
-    /// * `key_version` - MPC key version to use
+    /// * `caip2_id` - CAIP-2 chain identifier (`"eip155:1"` for Ethereum; the MPC
+    ///   picks mainnet or Sepolia from its own deployment)
+    /// * `key_version` - MPC key version to use (at least 1)
     /// * `path` - Derivation path for signing key
-    /// * `algo` - Reserved for future use (pass empty string `""`)
-    /// * `dest` - Reserved for future use (pass empty string `""`)
-    /// * `params` - Reserved for future use (pass empty string `""`)
+    /// * `algo` - Must be `"ECDSA"`
+    /// * `dest` - Must be empty (`""`)
+    /// * `params` - Must be empty (`""`)
     /// * `program_id` - Callback program ID (reserved for future use)
+    ///
+    /// `key_version`, `algo`, `dest` and `params` enter the request id, so the
+    /// MPC expects exactly the values above: it warns on others today and will
+    /// refuse them.
     /// * `output_deserialization_schema` - serialization schema for parsing destination chain output
     /// * `respond_serialization_schema` - serialization schema for serializing response to source chain
     ///
@@ -656,11 +661,11 @@ pub struct SignBidirectionalEvent {
     pub deposit: u64,
     /// Derivation path for the user's signing key.
     pub path: String,
-    /// Signing algorithm (e.g., "secp256k1").
+    /// Signing algorithm; `"ECDSA"`.
     pub algo: String,
-    /// Response destination identifier.
+    /// Response destination identifier; empty.
     pub dest: String,
-    /// Additional JSON parameters.
+    /// Additional parameters; empty.
     pub params: String,
     /// Callback program ID (reserved for future use).
     pub program_id: Pubkey,
