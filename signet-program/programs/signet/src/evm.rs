@@ -195,19 +195,21 @@
 //!     let output_schema = serde_json::to_vec(&transfer_func.outputs)?;
 //!     let respond_schema = serde_json::to_vec(&serde_json::json!("bool"))?;
 //!
-//!     // 4. Generate CAIP-2 chain ID
-//!     let caip2_id = format!("eip155:{}", tx_params.chain_id);
+//!     // 4. Name the destination chain. The MPC knows Ethereum only as
+//!     //    "eip155:1" and picks the network (mainnet or Sepolia) from its own
+//!     //    deployment, so the transaction's chain id does not go here.
+//!     let caip2_id = "eip155:1".to_string();
 //!
 //!     // 5. CPI to sign_bidirectional (source chain → destination chain)
 //!     sign_bidirectional(
 //!         cpi_ctx,
 //!         rlp_encoded,            // Transaction to execute on destination chain
-//!         caip2_id,               // Destination chain ID (e.g., "eip155:1")
-//!         0,                      // key_version
+//!         caip2_id,               // Destination chain ID
+//!         1,                      // key_version (at least 1)
 //!         path,                   // derivation path for user's key
-//!         "".to_string(),         // algo (reserved)
-//!         "".to_string(),         // dest (reserved)
-//!         "".to_string(),         // params (reserved)
+//!         "ECDSA".to_string(),    // algo
+//!         "".to_string(),         // dest (must be empty)
+//!         "".to_string(),         // params (must be empty)
 //!         crate::ID,              // callback program (reserved)
 //!         output_schema,          // How to parse destination chain output
 //!         respond_schema,         // How to serialize response for source chain
