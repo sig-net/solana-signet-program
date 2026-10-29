@@ -78,6 +78,7 @@ export class BitcoinMonitor {
         status: 'success',
         success: true,
         output,
+        evmExecution: undefined,
         blockHeight: undefined,
       };
     } catch (error) {
