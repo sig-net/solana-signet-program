@@ -149,7 +149,7 @@ pub mod chain_signatures {
     ///
     /// * `payload` - 32-byte data to sign (typically a transaction hash)
     /// * `key_version` - MPC key version to use
-    /// * `path` - Derivation path for the user's key (e.g., `"my_wallet"`)
+    /// * `path` - Derivation path for the user's key (e.g., `"my_wallet"`), outside the reserved `bidirectional/` prefix
     /// * `algo` - Reserved for future use (pass empty string `""`)
     /// * `dest` - Reserved for future use (pass empty string `""`)
     /// * `params` - Reserved for future use (pass empty string `""`)
@@ -241,7 +241,7 @@ pub mod chain_signatures {
     /// * `caip2_id` - CAIP-2 chain identifier (`"eip155:1"` for Ethereum; the MPC
     ///   picks mainnet or Sepolia from its own deployment)
     /// * `key_version` - MPC key version to use (at least 1)
-    /// * `path` - Derivation path for signing key
+    /// * `path` - Derivation path for signing key, under the reserved `bidirectional/` prefix
     /// * `algo` - Must be `"ECDSA"`
     /// * `dest` - Must be empty (`""`)
     /// * `params` - Must be empty (`""`)

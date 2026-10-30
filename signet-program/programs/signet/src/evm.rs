@@ -200,7 +200,11 @@
 //!     //    deployment, so the transaction's chain id does not go here.
 //!     let caip2_id = "eip155:1".to_string();
 //!
-//!     // 5. CPI to sign_bidirectional (source chain → destination chain)
+//!     // 5. Pick the key's path. SigNet reserves `bidirectional/` for
+//!     //    bidirectional requests and refuses plain sign requests under it.
+//!     let path = "bidirectional/vault".to_string();
+//!
+//!     // 6. CPI to sign_bidirectional (source chain → destination chain)
 //!     sign_bidirectional(
 //!         cpi_ctx,
 //!         rlp_encoded,            // Transaction to execute on destination chain
