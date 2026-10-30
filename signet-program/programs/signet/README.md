@@ -132,6 +132,19 @@ user_pubkey = derive_key(mpc_root_pubkey, epsilon)
 // Address format is chain-specific (see destination chain guides)
 ```
 
+### Reserved path prefix
+
+A plain `sign` request and a `sign_bidirectional` request derive the same key
+for the same sender, path and key version. A plain `sign` request could then get
+a transaction signed that uses up a bidirectional request's nonce, and the
+bidirectional request would never be answered.
+
+To prevent this, the MPC reserves the path prefix `bidirectional/`.
+`sign_bidirectional` requests must use a path that starts with it, and plain
+`sign` requests under it are refused. Nodes currently accept bidirectional
+requests outside the prefix with a warning, and will refuse them in a later
+release.
+
 ## Response Signature Verification
 
 The `respond_bidirectional` response is signed using a **special derivation path**:
