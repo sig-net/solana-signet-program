@@ -26,6 +26,7 @@ const CONFIG: ServerConfig = {
   bitcoinNetwork: 'regtest',
   midnightIndexerUrl: 'http://unused.invalid',
   midnightSignetContractAddress: 'unused',
+  midnightResponderContractAddress: 'unused',
 };
 const NONCE = 7;
 const TX_FIELDS = {
