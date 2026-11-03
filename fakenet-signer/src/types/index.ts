@@ -31,6 +31,7 @@ export interface ServerConfig {
   midnightNodeUrl?: string;
   midnightProofServerUrl?: string;
   midnightSignetContractAddress?: string;
+  midnightResponderContractAddress?: string;
   midnightWalletSeed?: string;
   /** TCP port the output cache simulation is served on (default 3040). */
   outputCachePort?: number;
@@ -77,6 +78,7 @@ export const serverConfigSchema = z
     midnightNodeUrl: z.string().optional(),
     midnightProofServerUrl: z.string().optional(),
     midnightSignetContractAddress: z.string().optional(),
+    midnightResponderContractAddress: z.string().optional(),
     midnightWalletSeed: z.string().optional(),
     outputCachePort: z.number().int().positive().optional(),
     outputCachePrefix: z.string().optional(),
