@@ -19,7 +19,7 @@ export const DEFAULT_OUTPUT_CACHE_PREFIX = 'v1/fakenet';
 /** The namespace an object lives under: the MPC keys its cache by network and signet singleton. */
 export interface OutputCacheNamespace {
   networkId: string;
-  /** The signet singleton the responder posts through, 64 hex chars. */
+  /** The signet singleton whose notifications the responder serves, 64 hex chars. */
   signetContractAddress: string;
 }
 

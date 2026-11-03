@@ -190,8 +190,6 @@ export function buildSignetResponderProviders(
       accountId,
       // A constant in source is obfuscation, not secrecy — acceptable here
       // only because nothing sensitive is stored (empty private state).
-      // The value existing local LevelDB directories were created with, so
-      // they still open.
       privateStoragePasswordProvider: () => '&*(BHJqwe419-signetContract',
     }),
 
