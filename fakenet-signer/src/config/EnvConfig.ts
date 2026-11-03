@@ -44,6 +44,7 @@ const envSchema = z
     MIDNIGHT_NODE_URL: z.string().url().optional(),
     MIDNIGHT_PROOF_SERVER_URL: z.string().url().optional(),
     MIDNIGHT_SIGNET_CONTRACT_ADDRESS: z.string().optional(),
+    MIDNIGHT_RESPONDER_CONTRACT_ADDRESS: z.string().optional(),
     MIDNIGHT_WALLET_SEED: z.string().optional(),
     // The output cache simulation: its TCP port and object prefix.
     OUTPUT_CACHE_PORT: z.coerce.number().int().positive().optional(),
@@ -94,6 +95,8 @@ function validateEnv(): EnvConfig {
       MIDNIGHT_PROOF_SERVER_URL: process.env.MIDNIGHT_PROOF_SERVER_URL,
       MIDNIGHT_SIGNET_CONTRACT_ADDRESS:
         process.env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
+      MIDNIGHT_RESPONDER_CONTRACT_ADDRESS:
+        process.env.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS,
       MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,
       OUTPUT_CACHE_PORT: nonEmpty(process.env.OUTPUT_CACHE_PORT),
       OUTPUT_CACHE_PREFIX: nonEmpty(process.env.OUTPUT_CACHE_PREFIX),

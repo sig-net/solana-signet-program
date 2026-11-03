@@ -45,7 +45,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 | EthereumTransactionProcessor | `src/modules/ethereum/`             | Signs EIP-1559 and Legacy transactions                                                                                                                                                   |
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                                                                                                                |
 | Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana and Substrate over the decoded output (ChainSignatureServer), `executedEvmRespondOutput` for Midnight over the traced execution (abi-serde)                             |
-| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract's notification events for requests, signs and posts attestations with the sender-scoped response key                                                  |
+| MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet contract's notification events for requests, signs, and posts signatures and attestations (sender-scoped response key) to the signet responder                 |
 | OutputCache                  | `src/server/`                       | In-memory twin of the MPC's output cache bucket: each Midnight attestation's exact bytes, stored before posting and served under the bucket's layout (a convenience, never an authority) |
 | Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                                                                                                              |
 
@@ -67,7 +67,7 @@ Environment variables loaded from the repo-root `.env`:
 - `EVM_RPC_URL` (required, any EVM endpoint; hosted providers carry their credential in the URL, e.g. for Infura: `https://sepolia.infura.io/v3/<api-key-here>`)
 - `MPC_ROOT_KEY` (required)
 - `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
-- `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_WALLET_SEED` plus the `MIDNIGHT_*` endpoint overrides (`MIDNIGHT_NETWORK_ID`, `MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_INDEXER_WS_URL`, `MIDNIGHT_PROOF_SERVER_URL`) enable the Midnight leg (optional)
+- `MIDNIGHT_SIGNET_CONTRACT_ADDRESS`, `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`, `MIDNIGHT_WALLET_SEED` plus the `MIDNIGHT_*` endpoint overrides (`MIDNIGHT_NETWORK_ID`, `MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_INDEXER_WS_URL`, `MIDNIGHT_PROOF_SERVER_URL`) enable the Midnight leg (optional)
 - `OUTPUT_CACHE_PORT`, `OUTPUT_CACHE_PREFIX` (optional, defaults 3040 and `v1/fakenet`: where the output cache simulation is served)
 - `DISABLE_SOLANA`, `VERBOSE`, `BITCOIN_NETWORK` (optional)
 

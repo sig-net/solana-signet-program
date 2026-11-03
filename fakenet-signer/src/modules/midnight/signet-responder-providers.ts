@@ -1,5 +1,6 @@
-// This server's OWN midnight-js provider composition for the central signet
-// contract. @sig-net/midnight-contract is platform-agnostic and deliberately
+// This server's OWN midnight-js provider composition for the signet
+// responder, the contract it posts responses to. @sig-net/midnight-responder
+// is platform-agnostic and deliberately
 // ships no environment bindings — every consumer declares where zk artifacts
 // come from, where private state is stored, and how its wallet adapts to
 // midnight-js. This is the Node composition of THIS server, ported from
@@ -31,11 +32,11 @@ import type {
 import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
 import {
   Contract,
-  SIGNET_CONTRACT_PRIVATE_STATE_ID,
-  type SignetContractCircuitId,
-  type SignetContractProviders,
-  type SignetContractPrivateState,
-} from '@sig-net/midnight-contract';
+  SIGNET_RESPONDER_PRIVATE_STATE_ID,
+  type SignetResponderCircuitId,
+  type SignetResponderProviders,
+  type SignetResponderPrivateState,
+} from '@sig-net/midnight-responder';
 
 import type { MidnightNodeConfig } from './midnight-node-config';
 import type { AccountKeys } from './wallet';
@@ -47,24 +48,24 @@ import type { AccountKeys } from './wallet';
 export const packagedManagedPath = path.dirname(
   path.dirname(
     createRequire(import.meta.url).resolve(
-      '@sig-net/midnight-contract/managed/compiler/contract-manifest.json'
+      '@sig-net/midnight-responder/managed/compiler/contract-manifest.json'
     )
   )
 );
 
 /**
- * The signet-contract compact-js compiled-contract binding: generated module
+ * The signet-responder compact-js compiled-contract binding: generated module
  * (the contract declares no witnesses) bound to on-disk compiled assets.
  * Consumed by `findDeployedContract`.
  *
  * @param managedDirPath - The compiler output dir (`contract/`, `keys/`, `zkir/`).
  * @returns The bound compiled contract.
  */
-export function makeSignetContractCompiledContract(managedDirPath: string) {
+export function makeSignetResponderCompiledContract(managedDirPath: string) {
   const base = CompiledContract.make<
-    Contract<SignetContractPrivateState>,
-    SignetContractPrivateState
-  >('signet-contract', Contract);
+    Contract<SignetResponderPrivateState>,
+    SignetResponderPrivateState
+  >('signet-responder', Contract);
   const vacant = CompiledContract.withVacantWitnesses(base);
   return CompiledContract.withCompiledFileAssets(vacant, managedDirPath);
 }
@@ -153,20 +154,20 @@ function createProofServerProvider<K extends string>(
 }
 
 /**
- * Build this server's midnight-js provider set for the signet contract.
+ * Build this server's midnight-js provider set for the signet responder.
  *
  * @param facade - A started (and synced) wallet facade — see ./wallet.
  * @param keys - The key material of the same wallet, for balancing and signing.
  * @param config - The Midnight network endpoints to run against.
  * @returns The provider set to hand to `findDeployedContract`.
  */
-export function buildSignetContractProviders(
+export function buildSignetResponderProviders(
   facade: WalletFacade,
   keys: AccountKeys,
   config: MidnightNodeConfig
-): SignetContractProviders {
+): SignetResponderProviders {
   // Retrieves the ZK artifacts of the contract needed to create proofs.
-  const zkConfigProvider = new NodeZkConfigProvider<SignetContractCircuitId>(
+  const zkConfigProvider = new NodeZkConfigProvider<SignetResponderCircuitId>(
     packagedManagedPath
   );
 
@@ -181,16 +182,14 @@ export function buildSignetContractProviders(
   return {
     // Manages the private state of the contract, plus contract-maintenance
     // signing keys. Store names are scoped to this server to avoid collision
-    // with other dApps sharing the same LevelDB. The signet contract's private
+    // with other dApps sharing the same LevelDB. The responder's private
     // state is empty, so nothing is lost if the store is cleared.
     privateStateProvider: levelPrivateStateProvider({
-      privateStateStoreName: `${SIGNET_CONTRACT_PRIVATE_STATE_ID}-private-states`,
-      signingKeyStoreName: `${SIGNET_CONTRACT_PRIVATE_STATE_ID}-signing-keys`,
+      privateStateStoreName: `${SIGNET_RESPONDER_PRIVATE_STATE_ID}-private-states`,
+      signingKeyStoreName: `${SIGNET_RESPONDER_PRIVATE_STATE_ID}-signing-keys`,
       accountId,
       // A constant in source is obfuscation, not secrecy — acceptable here
       // only because nothing sensitive is stored (empty private state).
-      // Value unchanged from the pre-severing package so existing local
-      // stores still open.
       privateStoragePasswordProvider: () => '&*(BHJqwe419-signetContract',
     }),
 

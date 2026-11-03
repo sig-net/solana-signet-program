@@ -18,8 +18,8 @@ COPY fakenet-signer/package.json fakenet-signer/
 COPY signet-program/package.json signet-program/
 RUN yarn install --frozen-lockfile --production && yarn cache clean
 
-# Source + committed runtime assets (idl/). The signet contract's zk
-# artifacts (incl. prover keys) come from the @sig-net/midnight-contract
+# Source + committed runtime assets (idl/). The signet responder's zk
+# artifacts (incl. prover keys) come from the @sig-net/midnight-responder
 # npm package installed above.
 COPY fakenet-signer/ fakenet-signer/
 
