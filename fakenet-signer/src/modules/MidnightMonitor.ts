@@ -57,7 +57,6 @@ import {
 } from '@sig-net/midnight/testing';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
 import {
   findDeployedContract,
   type FoundContract,
@@ -298,7 +297,7 @@ export class MidnightMonitor {
     );
     const keys = deriveAccountKeys(seed, this.config.networkId);
     const walletFacade = await initialiseWalletFacade(keys, this.nodeConfig);
-    await walletFacade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
+    await walletFacade.start(keys.seeds);
     await walletFacade.waitForSyncedState();
     console.log('MidnightMonitor: responder wallet synced');
     return { keys, walletFacade };
@@ -328,9 +327,6 @@ export class MidnightMonitor {
       );
     }
     const { keys, walletFacade } = await this.responderWallet();
-    // midnight-js reads a process-global network id, so set it before
-    // building providers and joining the contract.
-    setNetworkId(this.config.networkId);
     const providers = buildSignetContractProviders(
       walletFacade,
       keys,

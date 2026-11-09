@@ -10,24 +10,16 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { CompiledContract } from '@midnight-ntwrk/compact-js/effect';
-import { httpClientProvingProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
+import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import {
-  createProofProvider,
-  ZKConfigRegistry,
-  zkConfigToProvingKeyMaterial,
+  createLedger9MidnightProvider,
+  createLedger9WalletProvider,
   type MidnightProvider,
-  type ProofProvider,
-  type UnboundTransaction,
   type WalletProvider,
-  type ZKConfigProvider,
 } from '@midnight-ntwrk/midnight-js/types';
-import type {
-  ProvingKeyMaterial,
-  ProvingProvider,
-} from '@midnightntwrk/ledger-v9';
 import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
 import {
   Contract,
@@ -69,87 +61,39 @@ export function makeSignetContractCompiledContract(managedDirPath: string) {
   return CompiledContract.withCompiledFileAssets(vacant, managedDirPath);
 }
 
-// Balancing recipes expire 30 min out (same TTL the wallet-side submit uses).
+// Balancing recipes and call transactions expire 30 min out.
 const BALANCE_TTL_MS = 30 * 60 * 1000;
 
 /**
  * Adapt a started {@link WalletFacade} + {@link AccountKeys} to midnight-js's
- * `WalletProvider & MidnightProvider`. `balanceTx` balances the unbound
- * transaction with the account's shielded/dust keys, signs, then finalizes
- * (which proves); `submitTx` relays through the facade. The casts bridge the
- * midnight-js-protocol vs ledger-v9 nominal type identities of the same
- * underlying classes.
+ * ledger-9 `WalletProvider` and `MidnightProvider`. Transactions cross
+ * between the two SDKs as bytes: each seals them in its own handle type.
  */
-function createWalletAndMidnightProvider(
+function createFacadeWalletProviders(
   facade: WalletFacade,
   keys: AccountKeys
-): WalletProvider & MidnightProvider {
-  return {
+): { walletProvider: WalletProvider; midnightProvider: MidnightProvider } {
+  const walletProvider = createLedger9WalletProvider({
     getCoinPublicKey: () => keys.shieldedSecretKeys.coinPublicKey,
     getEncryptionPublicKey: () => keys.shieldedSecretKeys.encryptionPublicKey,
-    async balanceTx(tx: UnboundTransaction, ttl?: Date) {
+    async balanceTx(tx, ttl) {
       const recipe = await facade.balanceUnboundTransaction(
-        tx as never,
-        {
-          shieldedSecretKeys: keys.shieldedSecretKeys,
-          dustSecretKey: keys.dustSecretKey,
-        },
+        facade.adoptTransaction(tx.serialize(), 'Unbound'),
         { ttl: ttl ?? new Date(Date.now() + BALANCE_TTL_MS) }
       );
       const signed = await facade.signRecipe(
         recipe,
         keys.unshieldedKeystore.signDataAsync
       );
-      return (await facade.finalizeRecipe(signed)) as never;
+      return facade.finalizeRecipe(signed);
     },
-    submitTx: (tx) => facade.submitTransaction(tx as never) as never,
-  };
-}
-
-/**
- * Proof provider via the proof server's /check + /prove endpoints, with ZK key
- * material resolved from the contract's compiled assets. Exists instead of
- * midnight-js's own `httpClientProofProvider` because that one (5.0.0-beta.3)
- * lacks the `lookupKey` the ledger-v9 1.0.0-rc.3 WASM validates for — delete
- * in favor of `httpClientProofProvider` once midnight-js ships a beta aligned
- * with ledger-v9 1.0.0-rc.3. (Ported from lib's createProofServerProvider.)
- */
-function createProofServerProvider<K extends string>(
-  proofServerUrl: string,
-  zkConfigProvider: ZKConfigProvider<K>
-): ProofProvider {
-  const registry = new ZKConfigRegistry([
-    zkConfigProvider as ZKConfigProvider<string>,
-  ]);
-
-  // Pass the REGISTRY (not the provider) to the base: its /check and /prove
-  // key resolution special-cases a ZKConfigRegistry. The `as` bridges the
-  // nominal type: the base only ever calls `.resolveKeyLocation` on it.
-  const base = httpClientProvingProvider(
-    proofServerUrl,
-    registry as unknown as ZKConfigProvider<string>
+  });
+  const midnightProvider = createLedger9MidnightProvider((tx) =>
+    facade.submitTransaction(
+      facade.adoptTransaction(tx.serialize(), 'Finalized')
+    )
   );
-
-  const lookupKey = async (
-    keyLocation: string
-  ): Promise<ProvingKeyMaterial | undefined> => {
-    const resolved = await registry.resolveKeyLocation(keyLocation);
-    if (resolved !== undefined) {
-      return zkConfigToProvingKeyMaterial(resolved);
-    }
-    try {
-      return zkConfigToProvingKeyMaterial(
-        await zkConfigProvider.get(keyLocation as K)
-      );
-    } catch {
-      // Protocol builtins ("midnight/...") resolve to undefined and are
-      // supplied by the proof server itself.
-      return undefined;
-    }
-  };
-
-  const provingProvider: ProvingProvider = { ...base, lookupKey };
-  return createProofProvider(provingProvider);
+  return { walletProvider, midnightProvider };
 }
 
 /**
@@ -172,11 +116,11 @@ export function buildSignetContractProviders(
 
   // The wallet, adapted to midnight-js's balancer + submitter interfaces
   // (the facade itself does not implement WalletProvider/MidnightProvider).
-  const walletAndMidnightProvider = createWalletAndMidnightProvider(
+  const { walletProvider, midnightProvider } = createFacadeWalletProviders(
     facade,
     keys
   );
-  const accountId = walletAndMidnightProvider.getCoinPublicKey();
+  const accountId = walletProvider.getCoinPublicKey();
 
   return {
     // Manages the private state of the contract, plus contract-maintenance
@@ -204,15 +148,20 @@ export function buildSignetContractProviders(
 
     // Creates proven, unbalanced transactions (proves the contract-call
     // transcript). Distinct from the wallet's own balancing proofs.
-    proofProvider: createProofServerProvider(
-      config.proofServerUrl,
-      zkConfigProvider
-    ),
+    proofProvider: httpClientProofProvider({
+      url: config.proofServerUrl,
+      zkConfigProvider,
+    }),
 
     // Creates proven, balanced transactions.
-    walletProvider: walletAndMidnightProvider,
+    walletProvider,
 
     // Submits proven, balanced transactions to the network.
-    midnightProvider: walletAndMidnightProvider,
+    midnightProvider,
+
+    config: {
+      networkId: config.networkId,
+      ttlSeconds: BALANCE_TTL_MS / 1000,
+    },
   };
 }
