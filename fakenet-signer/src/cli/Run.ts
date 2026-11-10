@@ -19,7 +19,7 @@ async function main() {
     midnightIndexerWsUrl: envConfig.MIDNIGHT_INDEXER_WS_URL,
     midnightNodeUrl: envConfig.MIDNIGHT_NODE_URL,
     midnightProofServerUrl: envConfig.MIDNIGHT_PROOF_SERVER_URL,
-    midnightSignetContractAddress: envConfig.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
+    midnightSignerContractAddress: envConfig.MIDNIGHT_SIGNER_CONTRACT_ADDRESS,
     midnightResponderContractAddress:
       envConfig.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS,
     midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,

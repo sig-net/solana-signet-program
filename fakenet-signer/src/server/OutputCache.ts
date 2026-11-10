@@ -2,7 +2,7 @@
 // chain-midnight/src/output_storage.rs): the exact serialised output bytes
 // the responder attests for a Midnight bidirectional request, held as one
 // object per request id and served over HTTP under the MPC's bucket layout
-//   /<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin
+//   /<prefix>/<networkId>/<signerContractAddress>/<requestId>.bin
 // so a client's MpcOutputCacheReader (@sig-net/midnight) reads the fakenet
 // and a real MPC's bucket the same way. An object is written BEFORE the
 // attestation is posted on chain, as the MPC does, and holds UNTRUSTED data:
@@ -16,11 +16,11 @@ export const DEFAULT_OUTPUT_CACHE_PORT = 3040;
 /** Object prefix when OUTPUT_CACHE_PREFIX is unset: the MPC's `publisher.output_storage.prefix` twin. */
 export const DEFAULT_OUTPUT_CACHE_PREFIX = 'v1/fakenet';
 
-/** The namespace an object lives under: the MPC keys its cache by network and signet singleton. */
+/** The namespace an object lives under: the MPC keys its cache by network and signet signer. */
 export interface OutputCacheNamespace {
   networkId: string;
-  /** The signet singleton whose notifications the responder serves, 64 hex chars. */
-  signetContractAddress: string;
+  /** The signet signer whose notifications the responder serves, 64 hex chars. */
+  signerContractAddress: string;
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
@@ -60,7 +60,7 @@ export class OutputCacheStore {
   /** The object name of `requestId`'s attested output under `namespace`. */
   objectName(namespace: OutputCacheNamespace, requestId: Uint8Array): string {
     const requestIdHex = Buffer.from(requestId).toString('hex');
-    return `${this.prefix}/${namespace.networkId}/${namespace.signetContractAddress}/${requestIdHex}.bin`;
+    return `${this.prefix}/${namespace.networkId}/${namespace.signerContractAddress}/${requestIdHex}.bin`;
   }
 
   /**
@@ -166,7 +166,7 @@ export function startOutputCacheApi(
 
   server.listen(port, () => {
     console.log(
-      `OutputCache: serving GET /<prefix>/<networkId>/<signetContractAddress>/<requestId>.bin on port ${port}`
+      `OutputCache: serving GET /<prefix>/<networkId>/<signerContractAddress>/<requestId>.bin on port ${port}`
     );
   });
   return server;
