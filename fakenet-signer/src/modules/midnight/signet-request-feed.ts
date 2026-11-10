@@ -6,6 +6,7 @@
 // sibling of the real MPC's Rust indexer (sig-net/mpc,
 // chain-signatures/chain-midnight).
 
+import { ContractState } from '@midnight-ntwrk/compact-runtime';
 import {
   decodeSignBidirectionalEventNotificationPayload,
   decodeSignBidirectionalNotification,
@@ -151,9 +152,11 @@ export class SignetRequestFeed {
       let raw = states.get(pointer.callerAddress);
       if (raw === undefined) {
         try {
+          const read = await this.source.queryContractState(
+            pointer.callerAddress
+          );
           raw =
-            (await this.source.queryContractState(pointer.callerAddress))
-              ?.data ?? null;
+            read?.contractState.deserialize({ v9: ContractState }).data ?? null;
         } catch {
           raw = null;
         }

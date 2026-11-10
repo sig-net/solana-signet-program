@@ -3,7 +3,7 @@
 // midnight-js types a network id as a bare `string` (`NetworkId`) with no
 // companion enum, so the named values live here. Convention: a network id is
 // ALWAYS named `networkId` and ALWAYS typed `NetworkId`.
-import type { NetworkId as MidnightSDKNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
+import type { NetworkId as MidnightSDKNetworkId } from '@midnight-ntwrk/midnight-js/types';
 
 /** A Midnight network id: the SDK's bare-string type plus our known named networks. */
 export type NetworkId =

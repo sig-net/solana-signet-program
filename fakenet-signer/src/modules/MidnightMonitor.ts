@@ -1,16 +1,15 @@
 /**
  * MidnightMonitor - Generic signet monitor for any Midnight contract.
  *
- * Configured with the signet contract address, whose emitted notification
- * events name the requester contracts, and the signet responder address,
- * which every response is posted to.
+ * Configured with the signet contract address alone: requester contracts are
+ * discovered from that contract's emitted notification events.
  *
  * Flow:
  * 1. Poll the signet contract's notification events (SignetRequestFeed)
  * 2. Enumerate each notified caller's request map and serve every
  *    SignBidirectionalEvent not served before
  * 3. Build ABI calldata + RLP transaction off-chain
- * 4. Post the MPC's ECDSA signature to the signet responder (respond)
+ * 4. Post the MPC's ECDSA signature to the signet contract (respond)
  * 5. Once the EVM tx is final (executed, reverted, or its nonce taken by
  *    another transaction), sign the attestation digest over the request id,
  *    the destination block height, the outcome kind, the output length and
@@ -58,18 +57,17 @@ import {
 } from '@sig-net/midnight/testing';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { PublicDataProvider } from '@midnight-ntwrk/midnight-js-types';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
 import {
   findDeployedContract,
   type FoundContract,
 } from '@midnight-ntwrk/midnight-js/contracts';
 import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
 import {
-  SIGNET_RESPONDER_PRIVATE_STATE_ID,
-  createSignetResponderPrivateState,
-  type Contract as SignetResponder,
-  type SignetResponderPrivateState,
-} from '@sig-net/midnight-responder';
+  SIGNET_CONTRACT_PRIVATE_STATE_ID,
+  createSignetContractPrivateState,
+  type Contract as SignetContract,
+  type SignetContractPrivateState,
+} from '@sig-net/midnight-contract';
 
 import {
   deriveAccountKeys,
@@ -79,10 +77,10 @@ import {
 import type { NetworkId } from './midnight/network-id';
 import type { MidnightNodeConfig } from './midnight/midnight-node-config';
 import {
-  buildSignetResponderProviders,
-  makeSignetResponderCompiledContract,
+  buildSignetContractProviders,
+  makeSignetContractCompiledContract,
   packagedManagedPath,
-} from './midnight/signet-responder-providers';
+} from './midnight/signet-contract-providers';
 
 // ---- Types ----
 
@@ -103,15 +101,13 @@ export interface MidnightMonitorConfig {
   proofServerUrl: string;
   /**
    * Address of the deployed signet contract: the responder polls its events
-   * to discover requests.
+   * to discover requests and posts its responses to it.
    */
   signetContractAddress: string;
-  /** Address of the deployed signet responder, which responses are posted to. */
-  responderContractAddress: string;
   /**
    * Where every attested output's exact bytes go before its attestation is
    * posted: the fakenet's twin of the MPC's output cache, keyed by this
-   * monitor's network id and signet contract address, as the MPC keys it.
+   * monitor's network id and signet contract address.
    */
   outputCache: OutputCacheStore;
   mpcRootKey: string;
@@ -131,13 +127,13 @@ export interface ResponderWallet {
   walletFacade: WalletFacade;
 }
 
-/** The joined signet responder handle, typed to the generated contract. */
-type DeployedSignetResponder = FoundContract<
-  SignetResponder<SignetResponderPrivateState>
+/** The joined signet contract handle, typed to the generated contract. */
+type DeployedSignetContract = FoundContract<
+  SignetContract<SignetContractPrivateState>
 >;
 
 /**
- * Upper bound on a single signet responder write (proof + submit + finalize).
+ * Upper bound on a single signet contract write (proof + submit + finalize).
  * Long because a real attestation takes tens of seconds: it should only trip
  * on a wedged `callTx`, turning a forever-hang into a retryable failure.
  */
@@ -154,12 +150,12 @@ export class MidnightMonitor {
   private feed: SignetRequestFeed | null = null;
 
   private responderWalletPromise?: Promise<ResponderWallet>;
-  private responderContractPromise?: Promise<DeployedSignetResponder>;
+  private responderContractPromise?: Promise<DeployedSignetContract>;
 
   // Root of the per-contract response key derivation.
   private mpcRootKeyBytes: Uint8Array | null = null;
 
-  // Serializes ALL signet responder writes. Two concurrent callTx.* calls
+  // Serializes ALL signet contract writes. Two concurrent callTx.* calls
   // deadlock the shared single-writer LevelDB private-state store, and the two
   // write paths are driven by independent loops (this poll and
   // ChainSignatureServer's tx monitor), so per-loop re-entrancy guards cannot
@@ -203,9 +199,6 @@ export class MidnightMonitor {
     console.log(
       `MidnightMonitor: polling signet contract events at ${this.config.signetContractAddress}`
     );
-    console.log(
-      `MidnightMonitor: posting responses to the signet responder at ${this.config.responderContractAddress}`
-    );
     console.log('MidnightMonitor: Initialized');
   }
 
@@ -218,9 +211,6 @@ export class MidnightMonitor {
     console.log(`  Indexer: ${this.config.indexerUrl}`);
     console.log(
       `  Signet contract (notification events): ${this.config.signetContractAddress}`
-    );
-    console.log(
-      `  Signet responder (responses): ${this.config.responderContractAddress}`
     );
 
     this.pollIntervalId = setInterval(async () => {
@@ -266,7 +256,7 @@ export class MidnightMonitor {
     console.log('MidnightMonitor: Stopped');
   }
 
-  // ---- Responder wallet + signet responder contract (lazy) ----
+  // ---- Responder wallet + signet contract (lazy) ----
 
   /** The Midnight network endpoints this responder runs against. */
   private get nodeConfig(): MidnightNodeConfig {
@@ -307,17 +297,17 @@ export class MidnightMonitor {
     );
     const keys = deriveAccountKeys(seed, this.config.networkId);
     const walletFacade = await initialiseWalletFacade(keys, this.nodeConfig);
-    await walletFacade.start(keys.shieldedSecretKeys, keys.dustSecretKey);
+    await walletFacade.start(keys.seeds);
     await walletFacade.waitForSyncedState();
     console.log('MidnightMonitor: responder wallet synced');
     return { keys, walletFacade };
   }
 
   /**
-   * The joined signet responder, built on first access and memoized. Its
+   * The joined signet contract, built on first access and memoized. Its
    * `callTx` circuits are the responder's on-chain write paths.
    */
-  async responderContract(): Promise<DeployedSignetResponder> {
+  async responderContract(): Promise<DeployedSignetContract> {
     if (!this.responderContractPromise) {
       this.responderContractPromise = this.buildResponderContract().catch(
         (error) => {
@@ -329,31 +319,27 @@ export class MidnightMonitor {
     return this.responderContractPromise;
   }
 
-  private async buildResponderContract(): Promise<DeployedSignetResponder> {
-    const contractAddress = this.config.responderContractAddress;
+  private async buildResponderContract(): Promise<DeployedSignetContract> {
+    const contractAddress = this.config.signetContractAddress;
     if (!contractAddress) {
       throw new Error(
-        'MidnightMonitor: responderContractAddress is required to join the signet responder.'
+        'MidnightMonitor: signetContractAddress is required to join the signet contract.'
       );
     }
     const { keys, walletFacade } = await this.responderWallet();
-    // midnight-js reads a process-global network id, so set it before
-    // building providers and joining the contract.
-    setNetworkId(this.config.networkId);
-    const providers = buildSignetResponderProviders(
+    const providers = buildSignetContractProviders(
       walletFacade,
       keys,
       this.nodeConfig
     );
     console.log(
-      `MidnightMonitor: joining signet responder at ${contractAddress}...`
+      `MidnightMonitor: joining signet contract at ${contractAddress}...`
     );
     return findDeployedContract(providers, {
       contractAddress,
-      compiledContract:
-        makeSignetResponderCompiledContract(packagedManagedPath),
-      privateStateId: SIGNET_RESPONDER_PRIVATE_STATE_ID,
-      initialPrivateState: createSignetResponderPrivateState(),
+      compiledContract: makeSignetContractCompiledContract(packagedManagedPath),
+      privateStateId: SIGNET_CONTRACT_PRIVATE_STATE_ID,
+      initialPrivateState: createSignetContractPrivateState(),
     });
   }
 
@@ -427,7 +413,7 @@ export class MidnightMonitor {
     return { raw, result };
   }
 
-  /** Post an MPC signature response on-chain via the joined signet responder. */
+  /** Post an MPC signature response on-chain via the joined signet contract. */
   async postSignatureResponse(signatureResponse: SignatureRespondedEvent) {
     // Resolve the contract outside the timer: the first call builds the wallet
     // and joins the contract, whose one-off cost would skew the benchmark.
@@ -440,7 +426,7 @@ export class MidnightMonitor {
 
   /**
    * Post the MPC's respond-bidirectional response on-chain via the joined
-   * signet responder.
+   * signet contract.
    */
   async postRespondBidirectional(
     respondBidirectional: RespondBidirectionalEvent
@@ -625,7 +611,7 @@ export class MidnightMonitor {
   }
 
   /**
-   * Post the MPC's EVM signature for a request to the signet responder, taking
+   * Post the MPC's EVM signature for a request to the signet contract, taking
    * it from the fully-signed transaction the MPC produced.
    */
   async broadcastSignedTransaction(data: {
@@ -687,25 +673,23 @@ export class MidnightMonitor {
     config: ServerConfig,
     outputCache: OutputCacheStore
   ): MidnightMonitor | null {
-    const indexerUrl = config.midnightIndexerUrl;
-    const signetContractAddress = config.midnightSignetContractAddress;
-    const responderContractAddress = config.midnightResponderContractAddress;
-    if (!indexerUrl || !signetContractAddress || !responderContractAddress) {
-      // A half-set Midnight config is almost certainly a mistake, so name
-      // what is missing instead of silently never starting the leg.
-      const missing = Object.entries({
-        MIDNIGHT_INDEXER_URL: indexerUrl,
-        MIDNIGHT_SIGNET_CONTRACT_ADDRESS: signetContractAddress,
-        MIDNIGHT_RESPONDER_CONTRACT_ADDRESS: responderContractAddress,
-      })
-        .filter(([, value]) => !value)
-        .map(([name]) => name);
-      if (missing.length < 3) {
+    if (!config.midnightIndexerUrl || !config.midnightSignetContractAddress) {
+      // A half-set Midnight config is almost certainly a mistake, so name the
+      // missing variable instead of silently never starting the leg.
+      if (config.midnightSignetContractAddress && !config.midnightIndexerUrl) {
         console.warn(
-          `MidnightMonitor: ${missing.join(', ')} missing. The Midnight leg ` +
-            'will NOT start: it needs MIDNIGHT_INDEXER_URL, ' +
-            'MIDNIGHT_SIGNET_CONTRACT_ADDRESS and ' +
-            'MIDNIGHT_RESPONDER_CONTRACT_ADDRESS.'
+          'MidnightMonitor: MIDNIGHT_SIGNET_CONTRACT_ADDRESS is set but ' +
+            'MIDNIGHT_INDEXER_URL is missing. The Midnight leg will NOT start. ' +
+            'Set MIDNIGHT_INDEXER_URL to enable it.'
+        );
+      } else if (
+        config.midnightIndexerUrl &&
+        !config.midnightSignetContractAddress
+      ) {
+        console.warn(
+          'MidnightMonitor: MIDNIGHT_INDEXER_URL is set but ' +
+            'MIDNIGHT_SIGNET_CONTRACT_ADDRESS is missing. The Midnight leg ' +
+            'will NOT start. Set MIDNIGHT_SIGNET_CONTRACT_ADDRESS to enable it.'
         );
       }
       return null;
@@ -713,13 +697,13 @@ export class MidnightMonitor {
 
     return new MidnightMonitor({
       networkId: (config.midnightNetworkId ?? 'undeployed') as NetworkId,
-      indexerUrl,
+      indexerUrl: config.midnightIndexerUrl,
       indexerWsUrl:
-        config.midnightIndexerWsUrl || indexerUrl.replace('http', 'ws'),
+        config.midnightIndexerWsUrl ||
+        config.midnightIndexerUrl.replace('http', 'ws'),
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
-      signetContractAddress,
-      responderContractAddress,
+      signetContractAddress: config.midnightSignetContractAddress,
       outputCache,
       mpcRootKey: config.mpcRootKey,
       responderWalletSeed:
