@@ -1,0 +1,166 @@
+// This server's OWN midnight-js provider composition for the signet
+// responder, the contract it posts responses to. @sig-net/midnight-responder
+// is platform-agnostic and deliberately
+// ships no environment bindings — every consumer declares where zk artifacts
+// come from, where private state is stored, and how its wallet adapts to
+// midnight-js. This is the Node composition of THIS server, ported from
+// @midnight-erc20-vault/lib's midnight-providers.ts + deploy.ts (same pattern
+// as ./wallet and ./midnight-node-config).
+
+import { createRequire } from 'node:module';
+import path from 'node:path';
+
+import { CompiledContract } from '@midnight-ntwrk/compact-js/effect';
+import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
+import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
+import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
+import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
+import {
+  createLedger9MidnightProvider,
+  createLedger9WalletProvider,
+  type MidnightProvider,
+  type WalletProvider,
+} from '@midnight-ntwrk/midnight-js/types';
+import type { WalletFacade } from '@midnightntwrk/wallet-sdk-facade';
+import {
+  Contract,
+  SIGNET_RESPONDER_PRIVATE_STATE_ID,
+  type SignetResponderCircuitId,
+  type SignetResponderProviders,
+  type SignetResponderPrivateState,
+} from '@sig-net/midnight-responder';
+
+import type { MidnightNodeConfig } from './midnight-node-config';
+import type { AccountKeys } from './wallet';
+
+/**
+ * The npm package's bundled compiler output (contract module, zkir, prover +
+ * verifier keys). Resolved through the package's `./managed/*` subpath export.
+ */
+export const packagedManagedPath = path.dirname(
+  path.dirname(
+    createRequire(import.meta.url).resolve(
+      '@sig-net/midnight-responder/managed/compiler/contract-manifest.json'
+    )
+  )
+);
+
+/**
+ * The signet-responder compact-js compiled-contract binding: generated module
+ * (the contract declares no witnesses) bound to on-disk compiled assets.
+ * Consumed by `findDeployedContract`.
+ *
+ * @param managedDirPath - The compiler output dir (`contract/`, `keys/`, `zkir/`).
+ * @returns The bound compiled contract.
+ */
+export function makeSignetResponderCompiledContract(managedDirPath: string) {
+  const base = CompiledContract.make<
+    Contract<SignetResponderPrivateState>,
+    SignetResponderPrivateState
+  >('signet-responder', Contract);
+  const vacant = CompiledContract.withVacantWitnesses(base);
+  return CompiledContract.withCompiledFileAssets(vacant, managedDirPath);
+}
+
+// Balancing recipes and call transactions expire 30 min out.
+const BALANCE_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Adapt a started {@link WalletFacade} + {@link AccountKeys} to midnight-js's
+ * ledger-9 `WalletProvider` and `MidnightProvider`. Transactions cross
+ * between the two SDKs as bytes: each seals them in its own handle type.
+ */
+function createFacadeWalletProviders(
+  facade: WalletFacade,
+  keys: AccountKeys
+): { walletProvider: WalletProvider; midnightProvider: MidnightProvider } {
+  const walletProvider = createLedger9WalletProvider({
+    getCoinPublicKey: () => keys.shieldedSecretKeys.coinPublicKey,
+    getEncryptionPublicKey: () => keys.shieldedSecretKeys.encryptionPublicKey,
+    async balanceTx(tx, ttl) {
+      const recipe = await facade.balanceUnboundTransaction(
+        facade.adoptTransaction(tx.serialize(), 'Unbound'),
+        { ttl: ttl ?? new Date(Date.now() + BALANCE_TTL_MS) }
+      );
+      const signed = await facade.signRecipe(
+        recipe,
+        keys.unshieldedKeystore.signDataAsync
+      );
+      return facade.finalizeRecipe(signed);
+    },
+  });
+  const midnightProvider = createLedger9MidnightProvider((tx) =>
+    facade.submitTransaction(
+      facade.adoptTransaction(tx.serialize(), 'Finalized')
+    )
+  );
+  return { walletProvider, midnightProvider };
+}
+
+/**
+ * Build this server's midnight-js provider set for the signet responder.
+ *
+ * @param facade - A started (and synced) wallet facade — see ./wallet.
+ * @param keys - The key material of the same wallet, for balancing and signing.
+ * @param config - The Midnight network endpoints to run against.
+ * @returns The provider set to hand to `findDeployedContract`.
+ */
+export function buildSignetResponderProviders(
+  facade: WalletFacade,
+  keys: AccountKeys,
+  config: MidnightNodeConfig
+): SignetResponderProviders {
+  // Retrieves the ZK artifacts of the contract needed to create proofs.
+  const zkConfigProvider = new NodeZkConfigProvider<SignetResponderCircuitId>(
+    packagedManagedPath
+  );
+
+  // The wallet, adapted to midnight-js's balancer + submitter interfaces
+  // (the facade itself does not implement WalletProvider/MidnightProvider).
+  const { walletProvider, midnightProvider } = createFacadeWalletProviders(
+    facade,
+    keys
+  );
+  const accountId = walletProvider.getCoinPublicKey();
+
+  return {
+    // Manages the private state of the contract, plus contract-maintenance
+    // signing keys. Store names are scoped to this server to avoid collision
+    // with other dApps sharing the same LevelDB. The responder's private
+    // state is empty, so nothing is lost if the store is cleared.
+    privateStateProvider: levelPrivateStateProvider({
+      privateStateStoreName: `${SIGNET_RESPONDER_PRIVATE_STATE_ID}-private-states`,
+      signingKeyStoreName: `${SIGNET_RESPONDER_PRIVATE_STATE_ID}-signing-keys`,
+      accountId,
+      // A constant in source is obfuscation, not secrecy — acceptable here
+      // only because nothing sensitive is stored (empty private state).
+      privateStoragePasswordProvider: () => '&*(BHJqwe419-signetContract',
+    }),
+
+    // Retrieves public data from the blockchain.
+    publicDataProvider: indexerPublicDataProvider({
+      queryURL: config.indexerUrl,
+      subscriptionURL: config.indexerWsUrl,
+    }),
+
+    zkConfigProvider,
+
+    // Creates proven, unbalanced transactions (proves the contract-call
+    // transcript). Distinct from the wallet's own balancing proofs.
+    proofProvider: httpClientProofProvider({
+      url: config.proofServerUrl,
+      zkConfigProvider,
+    }),
+
+    // Creates proven, balanced transactions.
+    walletProvider,
+
+    // Submits proven, balanced transactions to the network.
+    midnightProvider,
+
+    config: {
+      networkId: config.networkId,
+      ttlSeconds: BALANCE_TTL_MS / 1000,
+    },
+  };
+}

@@ -20,6 +20,8 @@ async function main() {
     midnightNodeUrl: envConfig.MIDNIGHT_NODE_URL,
     midnightProofServerUrl: envConfig.MIDNIGHT_PROOF_SERVER_URL,
     midnightSignetContractAddress: envConfig.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
+    midnightResponderContractAddress:
+      envConfig.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS,
     midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,
     outputCachePort: envConfig.OUTPUT_CACHE_PORT,
     outputCachePrefix: envConfig.OUTPUT_CACHE_PREFIX,

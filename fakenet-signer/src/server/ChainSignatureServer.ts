@@ -396,8 +396,8 @@ export class ChainSignatureServer {
    *
    * The MPC reads calldata args + EVM gas params from the contract's ledger,
    * builds ABI calldata + RLP transaction off-chain from contract-controlled
-   * values, signs with the derived secp256k1 key, and posts the signature on
-   * the signet contract. The CLIENT broadcasts to the EVM chain. The MPC
+   * values, signs with the derived secp256k1 key, and posts the signature to
+   * the signet responder. The CLIENT broadcasts to the EVM chain. The MPC
    * monitors for the tx hash.
    *
    * A request whose output schema the MPC cannot attest is dropped before
@@ -458,7 +458,7 @@ export class ChainSignatureServer {
 
     const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
 
-    // Post the MPC signature on-chain to the signet contract
+    // Post the MPC signature on-chain to the signet responder
     // (the client polls it and broadcasts the EVM tx itself).
     await this.midnightMonitor.broadcastSignedTransaction({
       requestId: requestIdHex,
@@ -729,7 +729,7 @@ export class ChainSignatureServer {
           );
         }
         // Midnight: ECDSA-sign the serialized output on-chain; the user
-        // polls the signet contract and claims.
+        // polls the signet responder and claims.
         const serializedOutput = executedEvmRespondOutput(
           Uint8Array.from(txInfo.outputDeserializationSchema),
           result.evmExecution.isContractCall,

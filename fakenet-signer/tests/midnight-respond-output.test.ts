@@ -19,6 +19,7 @@ const CONFIG: ServerConfig = {
   bitcoinNetwork: 'regtest',
   midnightIndexerUrl: 'http://unused.invalid',
   midnightSignetContractAddress: 'unused',
+  midnightResponderContractAddress: 'unused',
 };
 const ADDRESS = '0x' + '11'.repeat(20);
 const REQUEST_ID = '0x' + '33'.repeat(32);
