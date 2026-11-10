@@ -373,7 +373,7 @@ The responder needs only the central signet contract's address. It polls that co
 
 ### Request signing
 
-A request is signed only if the MPC can attest its execution: its `outputDeserializationSchema` must be an ABI output schema whose every field is `bool`, `uint256`, `address` or `bytes1` to `bytes32` (`unsupportedEvmOutputFields` in `@sig-net/midnight`). A request naming any other type, or whose schema cannot be read, is dropped before signing exactly as the MPC drops it: no signature and no attestation are ever posted, and the drop is logged with the offending fields.
+A request is signed only if the MPC can attest its execution: its `outputDeserializationSchema` must be an ABI output schema whose every field is `bool`, `uint256`, `address` or `bytes1` to `bytes32` (`unsupportedEvmOutputFields` in `@sig-net/midnight`). A plain transfer (at most two bytes of input) returns nothing, so its schema must also be empty. A request naming any other type, a plain transfer whose schema declares return values, or a request whose schema cannot be read, is dropped before signing exactly as the MPC drops it: no signature and no attestation are ever posted, and the drop is logged with its reason.
 
 For each remaining request the responder rebuilds the unsigned EVM transaction from the on-ledger, contract-controlled parameters, derives the signing key from the MPC root key using the requesting contract's address and the request's 32-byte path (the signet library's v2 epsilon derivation, so clients derive the same expected signer), signs it, and posts the ECDSA signature record on-chain via the signet contract's `respond` circuit. The client polls the contract for the signature and broadcasts the EVM transaction itself.
 
@@ -481,7 +481,7 @@ The in-memory twin of the MPC's output cache bucket: the Midnight monitor stores
 Handled inside `ChainSignatureServer`, per source chain:
 
 - **Borsh**: Solana and Substrate responses, the decoded output encoded against the request's respond schema
-- **Packed respond bytes**: Midnight responses, built from the traced execution and both schemas by `executedEvmRespondOutput` in `@sig-net/midnight` (abi-serde)
+- **Packed respond bytes**: Midnight responses, built from the traced execution and the output schema by `executedEvmRespondOutput` in `@sig-net/midnight` (abi-serde)
 
 ## API Reference
 
@@ -700,7 +700,7 @@ interface SignatureRequestedEvent {
 5. Client broadcasts the EVM transaction, and the server monitors it
 6. On success:
    - Extract a contract call's return data (debug_traceTransaction, plain transfers are not traced)
-   - Build the respond bytes from the trace and both schemas (executedEvmRespondOutput)
+   - Build the respond bytes from the trace and the output schema (executedEvmRespondOutput)
    - Sign the attestation digest
      upgradeFromTransient(transientHash([HashDomain.attestationDigest, request_id, block_height, output_kind, output_length, output_hash])),
      where output_hash = upgradeFromTransient(transientHash([HashDomain.attestedOutput, serialized_output]))

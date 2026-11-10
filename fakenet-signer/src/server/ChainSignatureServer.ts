@@ -42,7 +42,9 @@ import { BitcoinMonitor } from '../modules/bitcoin/BitcoinMonitor';
 import {
   deriveEpsilon,
   executedEvmRespondOutput,
+  isEvmContractCall,
   OutputKind,
+  respondOutputWidth,
   unsupportedEvmOutputFields,
 } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
@@ -84,12 +86,14 @@ const BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY = 6;
 
 /**
  * Why the MPC refuses to sign a Midnight request over its output schema, or
- * `undefined` when it signs: the schema names an ABI type outside the subset
- * the MPC attests (`unsupportedEvmOutputFields`), or it cannot be read as an
- * output schema at all, which can never attest either.
+ * `undefined` when it signs. The MPC refuses every request whose execution
+ * it could attest for no return data at all: a schema it cannot read, an ABI
+ * type outside the subset it attests (`unsupportedEvmOutputFields`), and a
+ * plain transfer whose schema declares return values.
  */
 function outputSchemaRejection(
-  outputDeserializationSchema: Uint8Array
+  outputDeserializationSchema: Uint8Array,
+  isContractCall: boolean
 ): string | undefined {
   let unsupported: ReturnType<typeof unsupportedEvmOutputFields>;
   try {
@@ -97,11 +101,16 @@ function outputSchemaRejection(
   } catch (error) {
     return `malformed output schema (${error instanceof Error ? error.message : String(error)})`;
   }
-  if (unsupported.length === 0) return undefined;
-  return (
-    `unsupported output type${unsupported.length > 1 ? 's' : ''} ` +
-    unsupported.map((field) => `'${field.name}' (${field.type})`).join(', ')
-  );
+  if (unsupported.length > 0) {
+    return (
+      `unsupported output type${unsupported.length > 1 ? 's' : ''} ` +
+      unsupported.map((field) => `'${field.name}' (${field.type})`).join(', ')
+    );
+  }
+  if (!isContractCall && respondOutputWidth(outputDeserializationSchema) > 0) {
+    return 'a plain transfer returns nothing, but the output schema declares return values';
+  }
+  return undefined;
 }
 
 export class ChainSignatureServer {
@@ -397,8 +406,14 @@ export class ChainSignatureServer {
   private async handleMidnightSigningRequest(request: MidnightSigningRequest) {
     if (!this.midnightMonitor) return;
 
+    // Build the unsigned EVM transaction from contract-controlled calldata + gas params
+    const unsignedTxBytes =
+      this.midnightMonitor.buildSerializedTransaction(request);
+    const unsignedTx = ethers.Transaction.from(ethers.hexlify(unsignedTxBytes));
+
     const rejection = outputSchemaRejection(
-      request.outputDeserializationSchema
+      request.outputDeserializationSchema,
+      isEvmContractCall(unsignedTx.data)
     );
     if (rejection !== undefined) {
       console.warn(
@@ -406,10 +421,6 @@ export class ChainSignatureServer {
       );
       return;
     }
-
-    // Build the unsigned EVM transaction from contract-controlled calldata + gas params
-    const unsignedTxBytes =
-      this.midnightMonitor.buildSerializedTransaction(request);
 
     // Derive the signing key using the contract's path field as the derivation
     // path. The path is 32 opaque bytes of the client contract's choosing,
@@ -423,8 +434,6 @@ export class ChainSignatureServer {
       this.config.mpcRootKey
     );
 
-    // Parse the unsigned tx and sign it properly with ethers
-    const unsignedTx = ethers.Transaction.from(ethers.hexlify(unsignedTxBytes));
     const wallet = new ethers.Wallet(derivedPrivateKey);
     const signedAtBlock = await EthereumMonitor.getSigningBlock(
       request.caip2Id,

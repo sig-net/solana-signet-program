@@ -240,8 +240,9 @@ for (const [index, row] of CASES.entries()) {
   });
 }
 
-// The MPC signs a request only when it can attest its output schema. The
-// request below is a plain transfer, and its schema varies per row.
+// The MPC signs a request only when its output schema can attest some
+// execution of its transaction. Each row supplies the transaction's calldata
+// and the schema.
 const REQUEST: MidnightSigningRequest = {
   predecessor: '22'.repeat(32),
   requestId: new Uint8Array(32).fill(0x33),
@@ -265,56 +266,88 @@ const REQUEST: MidnightSigningRequest = {
   // Read only by buildSerializedTransaction, which the tests mock.
   signetRequest: {} as MidnightSigningRequest['signetRequest'],
 };
-const REQUEST_TX = ethers.getBytes(
-  ethers.Transaction.from({
-    type: 2,
-    chainId: 1,
-    nonce: 7,
-    gasLimit: 21_000,
-    maxFeePerGas: 1,
-    maxPriorityFeePerGas: 1,
-    value: 0,
-    data: '0x',
-    to: ADDRESS,
-  }).unsignedSerialized
-);
+function requestTx(calldata: string): Uint8Array {
+  return ethers.getBytes(
+    ethers.Transaction.from({
+      type: 2,
+      chainId: 1,
+      nonce: 7,
+      gasLimit: 21_000,
+      maxFeePerGas: 1,
+      maxPriorityFeePerGas: 1,
+      value: 0,
+      data: calldata,
+      to: ADDRESS,
+    }).unsignedSerialized
+  );
+}
 
-const SIGNING_CASES: { name: string; outputSchema: string; signed: boolean }[] =
-  [
-    { name: 'an empty schema', outputSchema: EMPTY_SCHEMA, signed: true },
-    {
-      name: 'every attested type',
-      outputSchema:
-        '[{"name":"a","type":"bool"},{"name":"b","type":"uint256"},{"name":"c","type":"address"},{"name":"d","type":"bytes32"}]',
-      signed: true,
-    },
-    {
-      name: 'a string output',
-      outputSchema: '[{"name":"a","type":"string"}]',
-      signed: false,
-    },
-    {
-      name: 'a narrower integer output',
-      outputSchema: '[{"name":"a","type":"uint128"}]',
-      signed: false,
-    },
-    {
-      name: 'a schema that is not an array of fields',
-      outputSchema: '{"name":"a","type":"bool"}',
-      signed: false,
-    },
-    { name: 'a schema that is not JSON', outputSchema: 'nope', signed: false },
-  ];
+const EVERY_ATTESTED_TYPE_SCHEMA =
+  '[{"name":"a","type":"bool"},{"name":"b","type":"uint256"},{"name":"c","type":"address"},{"name":"d","type":"bytes32"}]';
+
+const SIGNING_CASES: {
+  name: string;
+  calldata: string;
+  outputSchema: string;
+  signed: boolean;
+}[] = [
+  {
+    name: 'a plain transfer with an empty schema',
+    calldata: TRANSFER_CALLDATA,
+    outputSchema: EMPTY_SCHEMA,
+    signed: true,
+  },
+  {
+    name: 'a plain transfer with a schema declaring return values',
+    calldata: TRANSFER_CALLDATA,
+    outputSchema: EVERY_ATTESTED_TYPE_SCHEMA,
+    signed: false,
+  },
+  {
+    name: 'a contract call with an empty schema',
+    calldata: CONTRACT_CALLDATA,
+    outputSchema: EMPTY_SCHEMA,
+    signed: true,
+  },
+  {
+    name: 'a contract call with every attested type',
+    calldata: CONTRACT_CALLDATA,
+    outputSchema: EVERY_ATTESTED_TYPE_SCHEMA,
+    signed: true,
+  },
+  {
+    name: 'a contract call with a string output',
+    calldata: CONTRACT_CALLDATA,
+    outputSchema: '[{"name":"a","type":"string"}]',
+    signed: false,
+  },
+  {
+    name: 'a contract call with a narrower integer output',
+    calldata: CONTRACT_CALLDATA,
+    outputSchema: '[{"name":"a","type":"uint128"}]',
+    signed: false,
+  },
+  {
+    name: 'a contract call with a schema that is not an array of fields',
+    calldata: CONTRACT_CALLDATA,
+    outputSchema: '{"name":"a","type":"bool"}',
+    signed: false,
+  },
+  {
+    name: 'a contract call with a schema that is not JSON',
+    calldata: CONTRACT_CALLDATA,
+    outputSchema: 'nope',
+    signed: false,
+  },
+];
 
 for (const row of SIGNING_CASES) {
-  test(`Midnight request with ${row.name} is ${row.signed ? 'signed' : 'dropped unsigned'}`, async (t) => {
+  test(`Midnight request for ${row.name} is ${row.signed ? 'signed' : 'dropped unsigned'}`, async (t) => {
     t.mock.method(ethers.JsonRpcProvider.prototype, 'getBlock', async () => ({
       number: 100,
     }));
-    const built = t.mock.method(
-      MidnightMonitor.prototype,
-      'buildSerializedTransaction',
-      () => REQUEST_TX
+    t.mock.method(MidnightMonitor.prototype, 'buildSerializedTransaction', () =>
+      requestTx(row.calldata)
     );
     const posted = t.mock.method(
       MidnightMonitor.prototype,
@@ -327,7 +360,6 @@ for (const row of SIGNING_CASES) {
       outputDeserializationSchema: new TextEncoder().encode(row.outputSchema),
     });
 
-    assert.equal(built.mock.callCount(), row.signed ? 1 : 0);
     assert.equal(posted.mock.callCount(), row.signed ? 1 : 0);
   });
 }
