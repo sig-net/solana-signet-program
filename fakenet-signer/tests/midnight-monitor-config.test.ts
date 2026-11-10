@@ -16,7 +16,7 @@ const INDEXER = 'http://indexer.invalid/api/v4/graphql';
 const SIGNET = 'aa'.repeat(32);
 const RESPONDER = 'bb'.repeat(32);
 
-// The Midnight leg needs the indexer, the signet contract (request
+// The Midnight leg needs the indexer, the signet signer (request
 // discovery) and the responder (where responses are posted). A partial
 // config names what is missing; an absent one stays silent.
 const CASES: {
@@ -29,7 +29,7 @@ const CASES: {
     name: 'all three set',
     midnight: {
       midnightIndexerUrl: INDEXER,
-      midnightSignetContractAddress: SIGNET,
+      midnightSignerContractAddress: SIGNET,
       midnightResponderContractAddress: RESPONDER,
     },
     starts: true,
@@ -39,17 +39,17 @@ const CASES: {
     name: 'the responder missing',
     midnight: {
       midnightIndexerUrl: INDEXER,
-      midnightSignetContractAddress: SIGNET,
+      midnightSignerContractAddress: SIGNET,
     },
     starts: false,
     warning: /^MidnightMonitor: MIDNIGHT_RESPONDER_CONTRACT_ADDRESS missing/,
   },
   {
-    name: 'the indexer and the signet contract missing',
+    name: 'the indexer and the signet signer missing',
     midnight: { midnightResponderContractAddress: RESPONDER },
     starts: false,
     warning:
-      /^MidnightMonitor: MIDNIGHT_INDEXER_URL, MIDNIGHT_SIGNET_CONTRACT_ADDRESS missing/,
+      /^MidnightMonitor: MIDNIGHT_INDEXER_URL, MIDNIGHT_SIGNER_CONTRACT_ADDRESS missing/,
   },
   { name: 'nothing set', midnight: {}, starts: false, warning: undefined },
 ];
@@ -70,8 +70,8 @@ for (const row of CASES) {
       assert.match(String(warn.mock.calls[0]?.arguments[0]), row.warning);
     }
     if (monitor !== null) {
-      // Discovery reads the signet contract; responses go to the responder.
-      assert.equal(monitor['config'].signetContractAddress, SIGNET);
+      // Discovery reads the signet signer and responses go to the responder.
+      assert.equal(monitor['config'].signerContractAddress, SIGNET);
       assert.equal(monitor['config'].responderContractAddress, RESPONDER);
     }
   });
