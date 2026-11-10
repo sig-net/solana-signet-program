@@ -18,7 +18,7 @@ const CONFIG: ServerConfig = {
   isDevnet: false,
   bitcoinNetwork: 'regtest',
   midnightIndexerUrl: 'http://unused.invalid',
-  midnightSignetContractAddress: 'unused',
+  midnightSignerContractAddress: 'unused',
   midnightResponderContractAddress: 'unused',
 };
 const ADDRESS = '0x' + '11'.repeat(20);
