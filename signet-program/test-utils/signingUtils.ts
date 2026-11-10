@@ -46,13 +46,13 @@ export function createSignArgs(
       if (i === 1) return offset; // Second byte for test iteration/offset
       return (i + offset) % 256; // Remaining bytes with pattern
     }),
-    keyVersion: 0,
+    keyVersion: 1,
     path: pathSuffix
       ? `test-${testType.toLowerCase()}-path-${pathSuffix}`
       : `test-${testType.toLowerCase()}-path`,
-    algo: 'secp256k1',
-    dest: 'ethereum',
-    params: '{}',
+    algo: 'ECDSA',
+    dest: '',
+    params: '',
   };
 }
 
