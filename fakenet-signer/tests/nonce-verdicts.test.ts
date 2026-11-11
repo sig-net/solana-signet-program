@@ -124,18 +124,19 @@ function mockChain(t: TestContext, row: NonceCase): void {
 
 // A plain transfer returns nothing, so its output schema is empty.
 const EMPTY_ABI_SCHEMA = '[]';
+const EVM_PARAMS = {
+  evmTo: new Uint8Array(20).fill(0x11),
+  evmChainId: 1n,
+  evmNonce: BigInt(NONCE),
+  evmGasLimit: 21_000n,
+  evmMaxFee: 1n,
+  evmPriorityFee: 1n,
+  evmValue: 0n,
+};
 const REQUEST: MidnightSigningRequest = {
   predecessor: '22'.repeat(32),
   requestId: new Uint8Array(32).fill(0x33),
-  evmParams: {
-    evmTo: new Uint8Array(20).fill(0x11),
-    evmChainId: 1n,
-    evmNonce: BigInt(NONCE),
-    evmGasLimit: 21_000n,
-    evmMaxFee: 1n,
-    evmPriorityFee: 1n,
-    evmValue: 0n,
-  },
+  evmParams: EVM_PARAMS,
   calldata: { words: [] },
   caip2Id: 'eip155:1',
   keyVersion: 0,
@@ -150,7 +151,7 @@ const REQUEST: MidnightSigningRequest = {
 const SIBLING_REQUEST: MidnightSigningRequest = {
   ...REQUEST,
   requestId: new Uint8Array(32).fill(0x66),
-  evmParams: { ...REQUEST.evmParams, evmTo: new Uint8Array(20).fill(0x99) },
+  evmParams: { ...EVM_PARAMS, evmTo: new Uint8Array(20).fill(0x99) },
 };
 
 // The MPC attests Unviable for Midnight only when a watched sibling over

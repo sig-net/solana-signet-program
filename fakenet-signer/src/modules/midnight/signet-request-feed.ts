@@ -8,6 +8,7 @@
 
 import { ContractState } from '@midnight-ntwrk/compact-runtime';
 import {
+  type AnySignBidirectionalEvent,
   decodeSignBidirectionalEventNotificationPayload,
   decodeSignBidirectionalNotification,
   isSignetEventNamed,
@@ -15,7 +16,6 @@ import {
   type RawContractState,
   type RequestIdHex,
   requestIdHex,
-  type SignBidirectionalEvent,
   SignetEventName,
   type SignetEventSource,
   type SignetPublicStateSource,
@@ -33,8 +33,7 @@ export interface ResolvedSignetRequest {
   callerAddress: string;
   /** The request id the record is stored under in `callerAddress`'s index. */
   requestId: RequestIdHex;
-  /** The authenticated request record to sign. */
-  request: SignBidirectionalEvent;
+  request: AnySignBidirectionalEvent;
 }
 
 /** Everything a {@link SignetRequestFeed} needs. */
