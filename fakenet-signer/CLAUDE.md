@@ -46,6 +46,7 @@ This is a multi-chain signature orchestrator for Solana and Midnight. It listens
 | BitcoinTransactionProcessor  | `src/modules/bitcoin/`              | Builds PSBT signing plans                                                                                                                                                                |
 | Output serialization         | `src/server/` + `@sig-net/midnight` | Borsh for Solana and Substrate over the decoded output (ChainSignatureServer), `executedEvmRespondOutput` for Midnight over the traced execution (abi-serde)                             |
 | MidnightMonitor              | `src/modules/`                      | Polls the Midnight signet signer's notification events for requests, signs, and posts signatures and attestations (sender-scoped response key) to the signet responder                   |
+| TronWatcher                  | `src/modules/tron/`                 | Polls solidified Tron receipts by txID and walks expired windows for Tron-targeted Midnight requests, attesting executed, failed or unviable over an empty output                        |
 | OutputCache                  | `src/server/`                       | In-memory twin of the MPC's output cache bucket: each Midnight attestation's exact bytes, stored before posting and served under the bucket's layout (a convenience, never an authority) |
 | Bitcoin Adapters             | `src/adapters/`                     | Unified interface for Bitcoin RPC (regtest) and mempool.space API (testnet)                                                                                                              |
 
@@ -69,6 +70,7 @@ Environment variables loaded from the repo-root `.env`:
 - `SOLANA_RPC_URL`, `SOLANA_PRIVATE_KEY`, `PROGRAM_ID` (required unless `DISABLE_SOLANA=true`)
 - `MIDNIGHT_SIGNER_CONTRACT_ADDRESS`, `MIDNIGHT_RESPONDER_CONTRACT_ADDRESS`, `MIDNIGHT_WALLET_SEED` plus the `MIDNIGHT_*` endpoint overrides (`MIDNIGHT_NETWORK_ID`, `MIDNIGHT_NODE_URL`, `MIDNIGHT_INDEXER_URL`, `MIDNIGHT_INDEXER_WS_URL`, `MIDNIGHT_PROOF_SERVER_URL`) enable the Midnight leg (optional)
 - `OUTPUT_CACHE_PORT`, `OUTPUT_CACHE_PREFIX` (optional, defaults 3040 and `v1/fakenet`: where the output cache simulation is served)
+- `TRON_RPC_URL` (optional, a java-tron HTTP API, e.g. `http://localhost:9090` for TRE) enables the Tron watcher for Tron-targeted Midnight requests; `TRON_API_KEY` (optional, TronGrid's `TRON-PRO-API-KEY`) requires it
 - `DISABLE_SOLANA`, `VERBOSE`, `BITCOIN_NETWORK` (optional)
 
 Runtime config in `src/config/Config.ts` includes polling intervals, timeouts, and key derivation settings.
@@ -116,3 +118,21 @@ Substrate (the fakenet's signed error response). So:
   `EthereumMonitor.recordSignedTransaction`, broadcast or not. A signing
   path that skips it silently turns every replacement of its requests into
   an unanswered request.
+
+## Tron requests follow the MPC's admission and watcher
+
+A Midnight request record with `txParamType` tron (`executionDest`
+`tron:mainnet`) mirrors sig-net/mpc's chain-tron and node admission:
+
+- Refuse it before signing (no signature, no attestation, parked for good)
+  unless the output schema is EMPTY (length 0, padding counts) and the
+  respond schema is empty up to its first NUL. The MPC's `validate` does the
+  same: Tron output extraction defines no schemas yet.
+- Sign sha256 of the TriggerSmartContract raw whose owner is the derived
+  key in Tron form (same derivation as EVM). Never broadcast: the client
+  does.
+- Attest only from solidified data: a receipt's verdict at its block
+  (`executed`/`failed`, empty output), or `unviable` at the first solidified
+  block at or past `expiration` once the walk from the TaPoS reference block
+  finds no inclusion. An unreadable block or an unresolved reference defers;
+  never read absence as empty.

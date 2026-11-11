@@ -396,6 +396,19 @@ The real MPC, when configured with output storage, uploads the exact bytes each 
 
 Point a client's `MpcOutputCacheReader` (`@sig-net/midnight`) at `http://<host>:3040/v1/fakenet` and it reads the fakenet exactly as it reads a real MPC's bucket. The cache is a CONVENIENCE, never an authority: the bytes are unauthenticated, and a client must verify the MPC's posted signature over them before trusting them.
 
+### Tron targets
+
+A request record whose `txParamType` is tron (`executionDest` `tron:mainnet`) asks for a Tron `TriggerSmartContract` call. The responder mirrors the real MPC (sig-net/mpc `chain-tron` and node admission):
+
+1. **Admission.** The request is refused before signing, with no signature and no attestation ever posted, unless its output schema is empty (length 0, so a zero-padded schema field counts as non-empty) and its respond schema is empty up to the first NUL. Tron output extraction defines no schemas yet. A record whose `executionDest` does not match its `txParamType` is refused the same way.
+2. **Signing.** The raw transaction is assembled from the record's `TronTxParams` with `owner_address` set to the request's derived key in Tron form (`0x41` plus the same 20 bytes as the derived EVM address; same derivation as an EVM request). The MPC signs the txID, `sha256(raw)`, and posts the signature to the signet responder's `respond` circuit exactly like an EVM signature (recovery id 0 or 1). Nothing is read from Tron and nothing is broadcast: the client broadcasts.
+3. **Watching** (only when `TRON_RPC_URL` is set). Each tick polls `/walletsolidity/gettransactioninfobyid` for every watched txID. `SUCCESS` attests `executed` and any failure member (`REVERT`, `OUT_OF_ENERGY`, ...) attests `failed`, both over an EMPTY output at the receipt's block. No receipt, or an unclassifiable one, keeps polling. Once the solidified head's timestamp reaches the transaction's `expiration`, the watcher finds the first solidified block at or past it, resolves the TaPoS reference block and walks the span between them: no inclusion attests `unviable` at that boundary block; inclusion keeps waiting for the receipt. An unreadable block or an unresolved reference defers the verdict.
+4. **Attestation.** As for EVM: the signet responder's `respondBidirectional` over the request id, the Tron block height, the kind and the empty output, which is also stored in the output cache.
+
+Without `TRON_RPC_URL`, Tron requests are still signed but no outcome is ever attested (the MPC behaves the same without `MPC_TRON_ENDPOINT`).
+
+The local Tron chain `tronbox/tre` produces blocks only when transactions arrive. A test that waits on a receipt or an expiry must keep the chain moving itself (for example, a filler TRX transfer whenever the head stalls). The responder never pushes blocks.
+
 ## Architecture
 
 ### Core Components
@@ -526,6 +539,8 @@ interface ServerConfig {
   midnightWalletSeed?: string; // Responder wallet seed (defaults to the genesis account seed)
   outputCachePort?: number; // output cache simulation port (default 3040)
   outputCachePrefix?: string; // output cache object prefix (default 'v1/fakenet')
+  tronRpcUrl?: string; // java-tron HTTP API base URL, enables the Tron watcher
+  tronApiKey?: string; // TronGrid TRON-PRO-API-KEY (requires tronRpcUrl)
 }
 ```
 
@@ -775,6 +790,8 @@ Loaded from the repo-root `.env` (or the process environment) and validated at s
 | `MIDNIGHT_WALLET_SEED`                | no (default genesis seed)     | Seed of the Midnight wallet the responder posts responses from                                                                                   |
 | `OUTPUT_CACHE_PORT`                   | no (default `3040`)           | TCP port the output cache simulation is served on                                                                                                |
 | `OUTPUT_CACHE_PREFIX`                 | no (default `v1/fakenet`)     | Object prefix of the output cache simulation, the MPC's `publisher.output_storage.prefix` twin                                                   |
+| `TRON_RPC_URL`                        | for the Tron watcher          | java-tron HTTP API base URL (e.g. `http://localhost:9090` for TRE). Enables watching Tron-targeted Midnight requests                             |
+| `TRON_API_KEY`                        | no                            | TronGrid `TRON-PRO-API-KEY`; requires `TRON_RPC_URL`                                                                                             |
 
 ### Transaction Monitoring
 

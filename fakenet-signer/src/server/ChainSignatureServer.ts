@@ -43,8 +43,12 @@ import {
   deriveEpsilon,
   executedEvmRespondOutput,
   isEvmContractCall,
+  isTronSignBidirectionalEvent,
   OutputKind,
   respondOutputWidth,
+  type SignBidirectionalEvent as MidnightSignBidirectionalEvent,
+  TRON_CAIP2_ID,
+  type TronTxParams,
   unsupportedEvmOutputFields,
 } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
@@ -70,6 +74,15 @@ import {
   startOutputCacheApi,
 } from './OutputCache';
 import type http from 'node:http';
+import {
+  TronWatcher,
+  type TronOutcomeKind,
+  type TronWatch,
+} from '../modules/tron/TronWatcher';
+import {
+  signTronRequest,
+  tronRequestRejection,
+} from '../modules/tron/TronSigning';
 
 const pendingTransactions = new Map<string, PendingTransaction>();
 
@@ -147,6 +160,7 @@ export class ChainSignatureServer {
   // MPC's bucket layout (see OutputCache.ts).
   private readonly outputCache: OutputCacheStore;
   private outputCacheServer: http.Server | null = null;
+  private tronWatcher: TronWatcher | null = null;
 
   constructor(config: ServerConfig) {
     try {
@@ -189,6 +203,18 @@ export class ChainSignatureServer {
       this.config,
       this.outputCache
     );
+    if (this.midnightMonitor) {
+      this.tronWatcher = TronWatcher.fromServerConfig(
+        this.config,
+        (watch, kind, blockHeight) =>
+          this.attestTronOutcome(watch, kind, blockHeight)
+      );
+    } else if (this.config.tronRpcUrl) {
+      console.warn(
+        'TronWatcher: TRON_RPC_URL is set but the Midnight leg is not ' +
+          'configured, so no Tron request can arrive. The Tron leg will NOT start.'
+      );
+    }
   }
 
   private setupSolana() {
@@ -269,6 +295,11 @@ export class ChainSignatureServer {
 
     if (this.midnightMonitor) {
       await this.connectToMidnight();
+    }
+
+    if (this.tronWatcher) {
+      console.log(`Tron: watching via ${this.config.tronRpcUrl}`);
+      this.tronWatcher.start();
     }
 
     // Chain-agnostic: tracks pending destination-chain txs (EVM/Bitcoin) for
@@ -406,6 +437,21 @@ export class ChainSignatureServer {
   private async handleMidnightSigningRequest(request: MidnightSigningRequest) {
     if (!this.midnightMonitor) return;
 
+    if (isTronSignBidirectionalEvent(request.signetRequest)) {
+      await this.handleMidnightTronSigningRequest(
+        request,
+        request.signetRequest
+      );
+      return;
+    }
+    if (request.caip2Id === TRON_CAIP2_ID) {
+      console.warn(
+        `Midnight: dropping request 0x${Buffer.from(request.requestId).toString('hex')}: ` +
+          `execution_dest ${TRON_CAIP2_ID} does not name the EVM family its evmType2 params assemble for`
+      );
+      return;
+    }
+
     // Build the unsigned EVM transaction from contract-controlled calldata + gas params
     const unsignedTxBytes =
       this.midnightMonitor.buildSerializedTransaction(request);
@@ -487,6 +533,79 @@ export class ChainSignatureServer {
 
     console.log(
       `Midnight: Monitoring EVM tx ${signedTxHash} (client will broadcast)`
+    );
+  }
+
+  private async handleMidnightTronSigningRequest(
+    request: MidnightSigningRequest,
+    signetRequest: MidnightSignBidirectionalEvent<TronTxParams>
+  ) {
+    if (!this.midnightMonitor) return;
+    const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
+
+    const rejection = tronRequestRejection(signetRequest, request.caip2Id);
+    if (rejection !== undefined) {
+      console.warn(`Tron: dropping request ${requestIdHex}: ${rejection}`);
+      return;
+    }
+
+    const signed = signTronRequest(
+      signetRequest.txParams,
+      request.predecessor,
+      this.midnightMonitor.getPathHex(request),
+      this.config.mpcRootKey
+    );
+    console.log(`Tron: Signed txid ${signed.txid} for ${requestIdHex}`);
+    console.log(
+      `  Owner: 0x${Buffer.from(signed.owner).toString('hex')} (EVM ${signed.evmAddress})`
+    );
+
+    await this.midnightMonitor.postTronSignature({
+      requestId: requestIdHex,
+      signature: signed.signature,
+      txid: signed.txid,
+    });
+
+    if (!this.tronWatcher) {
+      console.warn(
+        `Tron: TRON_RPC_URL is unset, so the outcome of ${requestIdHex} is never attested`
+      );
+      return;
+    }
+    this.tronWatcher.watch({
+      requestId: requestIdHex,
+      txid: signed.txid,
+      sender: request.predecessor,
+      window: {
+        expiration: signetRequest.txParams.expiration,
+        refBlockBytes: signetRequest.txParams.refBlockBytes,
+        refBlockHash: signetRequest.txParams.refBlockHash,
+      },
+      outputDeserializationSchema: signetRequest.outputDeserializationSchema,
+    });
+  }
+
+  private async attestTronOutcome(
+    watch: TronWatch,
+    kind: TronOutcomeKind,
+    blockHeight: bigint
+  ): Promise<void> {
+    if (!this.midnightMonitor) {
+      throw new Error(`Midnight monitor unavailable for ${watch.requestId}`);
+    }
+    await this.midnightMonitor.signAndBroadcastResponse(
+      Buffer.from(watch.requestId.slice(2), 'hex'),
+      new Uint8Array(0),
+      watch.sender,
+      blockHeight,
+      {
+        executed: OutputKind.executed,
+        failed: OutputKind.failed,
+        unviable: OutputKind.unviable,
+      }[kind]
+    );
+    console.log(
+      `✓ Tron: ${kind} attested for ${watch.requestId} (txid ${watch.txid}) at block ${blockHeight}`
     );
   }
 
@@ -1672,6 +1791,10 @@ export class ChainSignatureServer {
     if (this.substrateMonitor) {
       await this.substrateMonitor.disconnect();
       this.substrateMonitor = null;
+    }
+    if (this.tronWatcher) {
+      this.tronWatcher.stop();
+      this.tronWatcher = null;
     }
     if (this.midnightMonitor) {
       await this.midnightMonitor.stop();
