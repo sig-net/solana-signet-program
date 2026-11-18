@@ -14,7 +14,6 @@ import { TronSolidityView } from '../src/modules/tron/TronExpiry';
 import {
   tronExecutionOutcome,
   tronExecutionResult,
-  tronSchemaRejection,
 } from '../src/modules/tron/TronVerdicts';
 import {
   TronWatcher,
@@ -135,35 +134,126 @@ test('an unset, unknown or missing Tron result attests nothing (keep polling)', 
   assert.throws(() => tronExecutionResult({}), /no execution result/);
 });
 
-test('a Tron success attests executed, a failure failed, and a schema-carrying success parks', () => {
-  const schema = new TextEncoder().encode('[{"name":"ok","type":"bool"}]');
-  const empty = new Uint8Array(0);
-  assert.equal(
-    tronExecutionOutcome({ receiptResult: 'SUCCESS' }, empty),
-    'executed'
+const BOOL_SCHEMA = new TextEncoder().encode(
+  '[{"name":"success","type":"bool"}]'
+);
+const EMPTY = new Uint8Array(0);
+
+function abiBool(value: boolean): Uint8Array {
+  const word = new Uint8Array(32);
+  word[31] = value ? 1 : 0;
+  return word;
+}
+
+test('a Tron success attests contractResult[0] serialised as an EVM output, a failure an empty one', () => {
+  assert.deepEqual(
+    tronExecutionOutcome(
+      { receiptResult: 'SUCCESS', contractResult: [abiBool(false)] },
+      BOOL_SCHEMA,
+      true
+    ),
+    { kind: 'executed', output: Uint8Array.from([0]) }
   );
-  assert.equal(tronExecutionOutcome({ result: 'REVERT' }, empty), 'failed');
-  assert.equal(
-    tronExecutionOutcome({ receiptResult: 'OUT_OF_ENERGY' }, schema),
-    'failed'
+  assert.deepEqual(
+    tronExecutionOutcome(
+      { receiptResult: 'SUCCESS', contractResult: [abiBool(true)] },
+      BOOL_SCHEMA,
+      true
+    ),
+    { kind: 'executed', output: Uint8Array.from([1]) }
   );
+  assert.deepEqual(
+    tronExecutionOutcome(
+      { receiptResult: 'SUCCESS', contractResult: [] },
+      EMPTY,
+      true
+    ),
+    { kind: 'executed', output: EMPTY }
+  );
+  assert.deepEqual(
+    tronExecutionOutcome(
+      { receiptResult: 'SUCCESS', contractResult: [EMPTY] },
+      EMPTY,
+      true
+    ),
+    { kind: 'executed', output: EMPTY }
+  );
+  assert.deepEqual(
+    tronExecutionOutcome(
+      { result: 'REVERT', contractResult: [abiBool(true)] },
+      BOOL_SCHEMA,
+      true
+    ),
+    { kind: 'failed' }
+  );
+  assert.deepEqual(
+    tronExecutionOutcome(
+      { receiptResult: 'OUT_OF_ENERGY', contractResult: [] },
+      BOOL_SCHEMA,
+      true
+    ),
+    { kind: 'failed' }
+  );
+});
+
+test('a Tron success parks where the MPC parks it', () => {
+  for (const [name, receipt, schema] of [
+    [
+      'return data with an empty schema',
+      { receiptResult: 'SUCCESS', contractResult: [abiBool(false)] },
+      EMPTY,
+    ],
+    [
+      'a schema without return data',
+      { receiptResult: 'SUCCESS', contractResult: [] },
+      BOOL_SCHEMA,
+    ],
+    [
+      'a schema with empty return data',
+      { receiptResult: 'SUCCESS', contractResult: [EMPTY] },
+      BOOL_SCHEMA,
+    ],
+    [
+      'undecodable return data',
+      { receiptResult: 'SUCCESS', contractResult: [Uint8Array.from([0, 0])] },
+      BOOL_SCHEMA,
+    ],
+    [
+      'a non-canonical bool word',
+      {
+        receiptResult: 'SUCCESS',
+        contractResult: [new Uint8Array(32).fill(2)],
+      },
+      BOOL_SCHEMA,
+    ],
+  ] as const) {
+    assert.equal(
+      tronExecutionOutcome(receipt, schema, true).kind,
+      'parked',
+      name
+    );
+  }
   assert.equal(
-    tronExecutionOutcome({ receiptResult: 'SUCCESS' }, schema),
+    tronExecutionOutcome(
+      { receiptResult: 'SUCCESS', contractResult: [] },
+      BOOL_SCHEMA,
+      false
+    ).kind,
     'parked'
   );
 });
 
-test('Tron admission requires empty output and respond schemas', () => {
-  const empty = new Uint8Array(0);
-  assert.equal(tronSchemaRejection(empty, empty), undefined);
-  assert.equal(tronSchemaRejection(empty, new Uint8Array(8)), undefined);
-  assert.match(
-    tronSchemaRejection(new Uint8Array(8), empty) ?? '',
-    /no output schemas/
-  );
-  assert.match(
-    tronSchemaRejection(empty, new TextEncoder().encode('[]')) ?? '',
-    /no output schemas/
+test('only the first contractResult element is the output', () => {
+  assert.deepEqual(
+    tronExecutionOutcome(
+      {
+        receiptResult: 'SUCCESS',
+        contractResult: [abiBool(true), abiBool(false)],
+      },
+      BOOL_SCHEMA,
+      true
+    ),
+    { kind: 'executed', output: Uint8Array.from([1]) }
   );
 });
 
@@ -177,6 +267,16 @@ test('the recorded Nile responses parse as the MPC reads them', () => {
   assert.equal(SUCCESS_RECEIPT.result, undefined);
   assert.equal(SUCCESS_RECEIPT.receiptResult, 'SUCCESS');
   assert.equal(tronExecutionResult(SUCCESS_RECEIPT), 'succeeded');
+  assert.deepEqual(SUCCESS_RECEIPT.contractResult, [abiBool(false)]);
+  assert.deepEqual(tronExecutionOutcome(SUCCESS_RECEIPT, BOOL_SCHEMA, true), {
+    kind: 'executed',
+    output: Uint8Array.from([0]),
+  });
+  assert.deepEqual(parseTransactionInfo({ id: 'AB' })?.contractResult, []);
+  assert.throws(
+    () => parseTransactionInfo({ id: 'ab', contractResult: ['zz'] }),
+    /malformed contractResult/
+  );
 
   assert.equal(BLOCK_95.number, 71_896_095n);
   assert.equal(BLOCK_95.timestamp, 1_792_220_496_000n);
@@ -244,27 +344,41 @@ function watchFor(txid: string, overrides: Partial<TronWatch> = {}): TronWatch {
     txid,
     sender: '22'.repeat(32),
     window: { ...REFERENCED_95, expiration: BLOCK_96.timestamp },
-    outputDeserializationSchema: new Uint8Array(0),
+    outputDeserializationSchema: BOOL_SCHEMA,
+    isContractCall: true,
     ...overrides,
   };
 }
 
 function recordingWatcher(reader: TronReader) {
-  const attestations: { kind: TronOutcomeKind; blockHeight: bigint }[] = [];
+  const attestations: {
+    kind: TronOutcomeKind;
+    blockHeight: bigint;
+    output: string;
+  }[] = [];
   const watcher = new TronWatcher({
     reader,
-    attest: async (_watch, kind, blockHeight) => {
-      attestations.push({ kind, blockHeight });
+    attest: async (_watch, kind, blockHeight, output) => {
+      attestations.push({
+        kind,
+        blockHeight,
+        output: Buffer.from(output).toString('hex'),
+      });
     },
   });
   return { watcher, attestations };
 }
 
 test('the watcher attests a solidified receipt over its verdict at the receipt block', async () => {
-  for (const [result, kind] of [
-    [{ receiptResult: 'SUCCESS' }, 'executed'],
-    [{ result: 'FAILED', receiptResult: 'REVERT' }, 'failed'],
-    [{ result: 'FAILED', receiptResult: 'OUT_OF_ENERGY' }, 'failed'],
+  for (const [result, kind, output] of [
+    [{ receiptResult: 'SUCCESS' }, 'executed', '00'],
+    [
+      { receiptResult: 'SUCCESS', contractResult: [abiBool(true)] },
+      'executed',
+      '01',
+    ],
+    [{ result: 'FAILED', receiptResult: 'REVERT' }, 'failed', ''],
+    [{ result: 'FAILED', receiptResult: 'OUT_OF_ENERGY' }, 'failed', ''],
   ] as const) {
     const receipts = new Map([
       [INCLUDED_TXID, receipt({ ...result, blockNumber: 71_896_096n })],
@@ -274,7 +388,9 @@ test('the watcher attests a solidified receipt over its verdict at the receipt b
     );
     watcher.watch(watchFor(INCLUDED_TXID));
     await watcher.tick();
-    assert.deepEqual(attestations, [{ kind, blockHeight: 71_896_096n }]);
+    assert.deepEqual(attestations, [
+      { kind, blockHeight: 71_896_096n, output },
+    ]);
     assert.deepEqual(watcher.pendingRequestIds(), []);
   }
 });
@@ -298,22 +414,34 @@ test('the watcher keeps polling with no receipt and an open window, or an unclas
   assert.equal(unset.watcher.pendingRequestIds().length, 1);
 });
 
-test('the watcher parks a schema-carrying success: logged, never answered', async () => {
-  const { watcher, attestations } = recordingWatcher(
-    nileReader(
-      71_896_100n,
-      new Map([[INCLUDED_TXID, receipt({ receiptResult: 'SUCCESS' })]])
-    )
-  );
-  watcher.watch(
-    watchFor(INCLUDED_TXID, {
-      outputDeserializationSchema: new TextEncoder().encode('[]'),
-    })
-  );
-  await watcher.tick();
-  await watcher.tick();
-  assert.deepEqual(attestations, []);
-  assert.deepEqual(watcher.pendingRequestIds(), []);
+test('the watcher parks an unrecoverable output: logged, never answered', async () => {
+  for (const [contractResult, schema] of [
+    [[abiBool(false)], EMPTY],
+    [[], BOOL_SCHEMA],
+    [[Uint8Array.from([0, 0])], BOOL_SCHEMA],
+  ] as const) {
+    const { watcher, attestations } = recordingWatcher(
+      nileReader(
+        71_896_100n,
+        new Map([
+          [
+            INCLUDED_TXID,
+            receipt({
+              receiptResult: 'SUCCESS',
+              contractResult: [...contractResult],
+            }),
+          ],
+        ])
+      )
+    );
+    watcher.watch(
+      watchFor(INCLUDED_TXID, { outputDeserializationSchema: schema })
+    );
+    await watcher.tick();
+    await watcher.tick();
+    assert.deepEqual(attestations, []);
+    assert.deepEqual(watcher.pendingRequestIds(), []);
+  }
 });
 
 test('the watcher attests unviable at the first solidified block at or past the expiration', async () => {
@@ -321,7 +449,7 @@ test('the watcher attests unviable at the first solidified block at or past the 
   watcher.watch(watchFor(ABSENT_TXID));
   await watcher.tick();
   assert.deepEqual(attestations, [
-    { kind: 'unviable', blockHeight: 71_896_096n },
+    { kind: 'unviable', blockHeight: 71_896_096n, output: '' },
   ]);
   assert.deepEqual(watcher.pendingRequestIds(), []);
 });
@@ -341,7 +469,7 @@ test('a closed window with inclusion keeps waiting for the receipt', async () =>
   );
   await watcher.tick();
   assert.deepEqual(attestations, [
-    { kind: 'executed', blockHeight: 71_896_096n },
+    { kind: 'executed', blockHeight: 71_896_096n, output: '00' },
   ]);
 });
 

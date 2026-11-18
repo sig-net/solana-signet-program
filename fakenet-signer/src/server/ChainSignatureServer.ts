@@ -45,13 +45,12 @@ import {
   isEvmContractCall,
   isTronSignBidirectionalEvent,
   OutputKind,
-  respondOutputWidth,
   type SignBidirectionalEvent as MidnightSignBidirectionalEvent,
   TRON_CAIP2_ID,
   type TronTxParams,
-  unsupportedEvmOutputFields,
 } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
+import { outputSchemaRejection } from '../modules/shared/OutputSchemaRejection';
 import * as borsh from 'borsh';
 import type { Schema } from 'borsh';
 import { getNamespaceFromCaip2 } from '../modules/ChainUtils';
@@ -81,6 +80,7 @@ import {
 } from '../modules/tron/TronWatcher';
 import {
   signTronRequest,
+  tronIsContractCall,
   tronRequestRejection,
 } from '../modules/tron/TronSigning';
 
@@ -96,35 +96,6 @@ const WS_HEALTH_CHECK_INTERVAL_MS = 10_000;
 const WS_RECONNECT_COOLDOWN_MS = 30_000;
 // When WS is healthy, only run backfill every Nth cycle as a safety net
 const BACKFILL_SKIP_FACTOR_WHEN_WS_HEALTHY = 6;
-
-/**
- * Why the MPC refuses to sign a Midnight request over its output schema, or
- * `undefined` when it signs. The MPC refuses every request whose execution
- * it could attest for no return data at all: a schema it cannot read, an ABI
- * type outside the subset it attests (`unsupportedEvmOutputFields`), and a
- * plain transfer whose schema declares return values.
- */
-function outputSchemaRejection(
-  outputDeserializationSchema: Uint8Array,
-  isContractCall: boolean
-): string | undefined {
-  let unsupported: ReturnType<typeof unsupportedEvmOutputFields>;
-  try {
-    unsupported = unsupportedEvmOutputFields(outputDeserializationSchema);
-  } catch (error) {
-    return `malformed output schema (${error instanceof Error ? error.message : String(error)})`;
-  }
-  if (unsupported.length > 0) {
-    return (
-      `unsupported output type${unsupported.length > 1 ? 's' : ''} ` +
-      unsupported.map((field) => `'${field.name}' (${field.type})`).join(', ')
-    );
-  }
-  if (!isContractCall && respondOutputWidth(outputDeserializationSchema) > 0) {
-    return 'a plain transfer returns nothing, but the output schema declares return values';
-  }
-  return undefined;
-}
 
 export class ChainSignatureServer {
   // Null when config.disableSolana — the Solana leg is never constructed.
@@ -206,8 +177,8 @@ export class ChainSignatureServer {
     if (this.midnightMonitor) {
       this.tronWatcher = TronWatcher.fromServerConfig(
         this.config,
-        (watch, kind, blockHeight) =>
-          this.attestTronOutcome(watch, kind, blockHeight)
+        (watch, kind, blockHeight, output) =>
+          this.attestTronOutcome(watch, kind, blockHeight, output)
       );
     } else if (this.config.tronRpcUrl) {
       console.warn(
@@ -582,20 +553,22 @@ export class ChainSignatureServer {
         refBlockHash: signetRequest.txParams.refBlockHash,
       },
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
+      isContractCall: tronIsContractCall(signetRequest.txParams),
     });
   }
 
   private async attestTronOutcome(
     watch: TronWatch,
     kind: TronOutcomeKind,
-    blockHeight: bigint
+    blockHeight: bigint,
+    output: Uint8Array
   ): Promise<void> {
     if (!this.midnightMonitor) {
       throw new Error(`Midnight monitor unavailable for ${watch.requestId}`);
     }
     await this.midnightMonitor.signAndBroadcastResponse(
       Buffer.from(watch.requestId.slice(2), 'hex'),
-      new Uint8Array(0),
+      output,
       watch.sender,
       blockHeight,
       {

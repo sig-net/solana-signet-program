@@ -1,3 +1,7 @@
+import {
+  EvmTraceOutputKind,
+  executedEvmRespondOutput,
+} from '@sig-net/midnight';
 import type { TronReceipt } from './TronClient';
 
 const FAILED_RESULTS = new Set([
@@ -31,29 +35,40 @@ export function tronExecutionResult(
   throw new Error(`unclassifiable execution result ${JSON.stringify(result)}`);
 }
 
-export function tronExecutionOutcome(
-  receipt: Pick<TronReceipt, 'result' | 'receiptResult'>,
-  outputSchema: Uint8Array
-): 'executed' | 'failed' | 'parked' {
-  if (tronExecutionResult(receipt) === 'failed') return 'failed';
-  return outputSchema.length === 0 ? 'executed' : 'parked';
-}
+export type TronExecutionOutcome =
+  | { kind: 'executed'; output: Uint8Array }
+  | { kind: 'failed' }
+  | { kind: 'parked'; reason: string };
 
-export function tronSchemaRejection(
-  outputDeserializationSchema: Uint8Array,
-  respondSerializationSchema: Uint8Array
-): string | undefined {
-  const nul = respondSerializationSchema.indexOf(0);
-  const respondPrefix =
-    nul === -1
-      ? respondSerializationSchema
-      : respondSerializationSchema.subarray(0, nul);
-  if (outputDeserializationSchema.length === 0 && respondPrefix.length === 0) {
-    return undefined;
+/**
+ * The verdict the MPC attests for a solidified receipt (`execution_outcome`
+ * in github.com/sig-net/mpc chain-signatures/chain-tron/src/types.rs). A
+ * success's output is `contractResult[0]` recovered exactly as an EVM call's
+ * traced return data: decoded with the output schema and serialised for
+ * Midnight. Where that recovery refuses, the request parks unanswered.
+ */
+export function tronExecutionOutcome(
+  receipt: Pick<TronReceipt, 'result' | 'receiptResult' | 'contractResult'>,
+  outputSchema: Uint8Array,
+  isContractCall: boolean
+): TronExecutionOutcome {
+  if (tronExecutionResult(receipt) === 'failed') return { kind: 'failed' };
+  const returnData = receipt.contractResult[0];
+  try {
+    return {
+      kind: 'executed',
+      output: executedEvmRespondOutput(
+        outputSchema,
+        isContractCall,
+        returnData === undefined
+          ? { kind: EvmTraceOutputKind.NoReturnData }
+          : { kind: EvmTraceOutputKind.Output, returnData }
+      ),
+    };
+  } catch (error) {
+    return {
+      kind: 'parked',
+      reason: error instanceof Error ? error.message : String(error),
+    };
   }
-  return (
-    'Tron targets define no output schemas yet: the output schema ' +
-    `(${outputDeserializationSchema.length} byte(s)) and the respond schema ` +
-    `(${respondPrefix.length} byte(s)) must both be empty`
-  );
 }

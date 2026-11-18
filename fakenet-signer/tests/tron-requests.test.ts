@@ -54,6 +54,10 @@ const TRON_PARAMS: TronTxParams = {
   },
 };
 
+const BOOL_SCHEMA = new TextEncoder().encode(
+  '[{"name":"success","type":"bool"}]'
+);
+
 function paddedAscii(text: string): Uint8Array {
   const out = new Uint8Array(64);
   out.set(new TextEncoder().encode(text));
@@ -73,7 +77,7 @@ function tronRecord(
     executionDest: paddedAscii(TRON_CAIP2_ID),
     signatureDest: 0,
     params: new Uint8Array(64),
-    outputDeserializationSchema: new Uint8Array(0),
+    outputDeserializationSchema: BOOL_SCHEMA,
     respondSerializationSchema: new Uint8Array(0),
     ...overrides,
   };
@@ -150,23 +154,65 @@ test('a Tron request is signed over sha256(raw) with the derived key as owner, t
   assert.equal(watch.txid, posted.txid);
   assert.equal(watch.sender, PREDECESSOR);
   assert.equal(watch.window.expiration, TRON_PARAMS.expiration);
+  assert.deepEqual(watch.outputDeserializationSchema, BOOL_SCHEMA);
+  assert.equal(watch.isContractCall, true);
 });
 
 for (const [name, record] of [
+  ['the bool output schema', tronRecord()],
   [
-    'a non-empty output schema',
-    tronRecord({
-      outputDeserializationSchema: new TextEncoder().encode('[]'),
-    }),
+    'an empty output schema',
+    tronRecord({ outputDeserializationSchema: new Uint8Array(0) }),
   ],
   [
     'a zero-padded output schema',
     tronRecord({ outputDeserializationSchema: new Uint8Array(16) }),
   ],
   [
-    'a non-empty respond schema',
+    'a NUL-padded bool output schema',
     tronRecord({
-      respondSerializationSchema: new TextEncoder().encode('[]'),
+      outputDeserializationSchema: Uint8Array.from([
+        ...BOOL_SCHEMA,
+        ...new Uint8Array(6),
+      ]),
+    }),
+  ],
+  [
+    'a non-empty respond schema',
+    tronRecord({ respondSerializationSchema: BOOL_SCHEMA }),
+  ],
+] as const) {
+  test(`a Tron request with ${name} is admitted, signed and watched`, async (t) => {
+    const { signatures, watches } = mockMidnight(t);
+    const server = new ChainSignatureServer(CONFIG);
+    await server['handleMidnightSigningRequest'](toRequest(record));
+    assert.equal(signatures.mock.callCount(), 1);
+    assert.equal(watches.mock.callCount(), 1);
+  });
+}
+
+for (const [name, record] of [
+  [
+    'a malformed output schema',
+    tronRecord({
+      outputDeserializationSchema: new TextEncoder().encode('not json'),
+    }),
+  ],
+  [
+    'an unsupported output type',
+    tronRecord({
+      outputDeserializationSchema: new TextEncoder().encode(
+        '[{"name":"s","type":"string"}]'
+      ),
+    }),
+  ],
+  [
+    'an output schema on a call without calldata',
+    tronRecord({
+      txParams: {
+        ...TRON_PARAMS,
+        calldata: { ...TRON_PARAMS.calldata, is_some: false },
+      },
     }),
   ],
   [
@@ -203,7 +249,7 @@ test('without TRON_RPC_URL a Tron request is signed but never watched', async (t
   assert.equal(watches.mock.callCount(), 0);
 });
 
-test('Tron outcomes are attested over an EMPTY output under the watched kind and height', async (t) => {
+test('Tron outcomes are attested over the watched output, kind and height', async (t) => {
   const attestations: unknown[][] = [];
   t.mock.method(
     MidnightMonitor.prototype,
@@ -218,11 +264,18 @@ test('Tron outcomes are attested over an EMPTY output under the watched kind and
     txid: 'ab'.repeat(32),
     sender: PREDECESSOR,
     window: { ...TRON_PARAMS },
-    outputDeserializationSchema: new Uint8Array(0),
+    outputDeserializationSchema: BOOL_SCHEMA,
+    isContractCall: true,
   };
-  await server['attestTronOutcome'](watch, 'executed', 7n);
-  await server['attestTronOutcome'](watch, 'failed', 8n);
-  await server['attestTronOutcome'](watch, 'unviable', 9n);
+  const empty = new Uint8Array(0);
+  await server['attestTronOutcome'](
+    watch,
+    'executed',
+    7n,
+    Uint8Array.from([0])
+  );
+  await server['attestTronOutcome'](watch, 'failed', 8n, empty);
+  await server['attestTronOutcome'](watch, 'unviable', 9n, empty);
   assert.deepEqual(
     attestations.map(([requestId, output, sender, height, kind]) => [
       ethers.hexlify(requestId as Uint8Array),
@@ -232,7 +285,7 @@ test('Tron outcomes are attested over an EMPTY output under the watched kind and
       kind,
     ]),
     [
-      [watch.requestId, '0x', PREDECESSOR, 7n, OutputKind.executed],
+      [watch.requestId, '0x00', PREDECESSOR, 7n, OutputKind.executed],
       [watch.requestId, '0x', PREDECESSOR, 8n, OutputKind.failed],
       [watch.requestId, '0x', PREDECESSOR, 9n, OutputKind.unviable],
     ]

@@ -1,7 +1,9 @@
 import { ethers } from 'ethers';
 import {
+  assembleCalldata,
   buildTronRawTransaction,
   deriveEpsilon,
+  isEvmContractCall,
   type SignBidirectionalEvent,
   TRON_CAIP2_ID,
   type TronTxParams,
@@ -9,7 +11,7 @@ import {
   tronTransactionId,
 } from '@sig-net/midnight';
 import { CryptoUtils } from '../CryptoUtils';
-import { tronSchemaRejection } from './TronVerdicts';
+import { outputSchemaRejection } from '../shared/OutputSchemaRejection';
 
 export interface SignedTronRequest {
   raw: Uint8Array;
@@ -22,17 +24,23 @@ export interface SignedTronRequest {
 export function tronRequestRejection(
   request: Pick<
     SignBidirectionalEvent<TronTxParams>,
-    'outputDeserializationSchema' | 'respondSerializationSchema'
+    'outputDeserializationSchema' | 'txParams'
   >,
   caip2Id: string
 ): string | undefined {
   if (caip2Id !== TRON_CAIP2_ID) {
     return `execution_dest ${caip2Id} does not name ${TRON_CAIP2_ID}, the chain family the record's tx_params assemble for`;
   }
-  return tronSchemaRejection(
+  return outputSchemaRejection(
     request.outputDeserializationSchema,
-    request.respondSerializationSchema
+    tronIsContractCall(request.txParams)
   );
+}
+
+export function tronIsContractCall(
+  txParams: Pick<TronTxParams, 'calldata'>
+): boolean {
+  return isEvmContractCall(assembleCalldata(txParams.calldata));
 }
 
 export function signTronRequest(

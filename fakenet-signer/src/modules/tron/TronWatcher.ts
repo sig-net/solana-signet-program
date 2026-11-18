@@ -18,6 +18,7 @@ export interface TronWatch {
   sender: string;
   window: TronTxWindow;
   outputDeserializationSchema: Uint8Array;
+  isContractCall: boolean;
 }
 
 export type TronOutcomeKind = 'executed' | 'failed' | 'unviable';
@@ -25,7 +26,8 @@ export type TronOutcomeKind = 'executed' | 'failed' | 'unviable';
 export type TronAttest = (
   watch: TronWatch,
   kind: TronOutcomeKind,
-  blockHeight: bigint
+  blockHeight: bigint,
+  output: Uint8Array
 ) => Promise<void>;
 
 export interface TronWatcherConfig {
@@ -134,7 +136,8 @@ export class TronWatcher {
     try {
       outcome = tronExecutionOutcome(
         receipt,
-        watch.outputDeserializationSchema
+        watch.outputDeserializationSchema,
+        watch.isContractCall
       );
     } catch (error) {
       console.warn(
@@ -143,21 +146,22 @@ export class TronWatcher {
       return false;
     }
 
-    if (outcome === 'parked') {
+    if (outcome.kind === 'parked') {
       console.error(
-        `TronWatcher: ${watch.requestId} (txid ${watch.txid}) executed, but it carries an ` +
-          'output schema and Tron output extraction is undefined: parking, the request stays unanswered'
+        `TronWatcher: ${watch.requestId} (txid ${watch.txid}) executed, but its output ` +
+          `cannot be recovered (${outcome.reason}): parking, the request stays unanswered`
       );
       this.watches.delete(watch.requestId);
       return true;
     }
-    if (outcome === 'failed') {
+    if (outcome.kind === 'failed') {
       console.log(
         `TronWatcher: ${watch.requestId} (txid ${watch.txid}) failed at block ${receipt.blockNumber}` +
           ` (${receipt.result ?? receipt.receiptResult}${receipt.resMessage ? `: ${receipt.resMessage}` : ''})`
       );
+      return this.post(watch, 'failed', receipt.blockNumber);
     }
-    return this.post(watch, outcome, receipt.blockNumber);
+    return this.post(watch, 'executed', receipt.blockNumber, outcome.output);
   }
 
   private async expiryScan(open: TronWatch[]): Promise<void> {
@@ -205,10 +209,11 @@ export class TronWatcher {
   private async post(
     watch: TronWatch,
     kind: TronOutcomeKind,
-    blockHeight: bigint
+    blockHeight: bigint,
+    output: Uint8Array = new Uint8Array(0)
   ): Promise<boolean> {
     try {
-      await this.attest(watch, kind, blockHeight);
+      await this.attest(watch, kind, blockHeight, output);
     } catch (error) {
       console.error(
         `TronWatcher: posting ${kind} for ${watch.requestId} failed; retrying next tick:`,

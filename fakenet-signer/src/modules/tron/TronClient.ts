@@ -6,6 +6,7 @@ export interface TronReceipt {
   result?: string;
   receiptResult?: string;
   resMessage?: string;
+  contractResult: readonly Uint8Array[];
 }
 
 export interface SolidifiedBlock {
@@ -39,12 +40,22 @@ interface TransactionInfoJson {
   result?: string;
   resMessage?: string;
   receipt?: { result?: string };
+  contractResult?: string[];
 }
 
 function decodeHexAscii(value: string): string {
   if (!/^([0-9a-fA-F]{2})*$/.test(value)) return value;
   const text = Buffer.from(value, 'hex').toString('utf8');
   return /^[\x20-\x7e\s]*$/.test(text) ? text : value;
+}
+
+function decodeContractResult(value: string): Uint8Array {
+  if (!/^([0-9a-fA-F]{2})*$/.test(value)) {
+    throw new Error(
+      `malformed contractResult element ${JSON.stringify(value)}`
+    );
+  }
+  return Uint8Array.from(Buffer.from(value, 'hex'));
 }
 
 export function parseSolidifiedBlock(body: BlockJson): SolidifiedBlock | null {
@@ -79,6 +90,7 @@ export function parseTransactionInfo(
       body.resMessage === undefined
         ? undefined
         : decodeHexAscii(body.resMessage),
+    contractResult: (body.contractResult ?? []).map(decodeContractResult),
   };
 }
 
