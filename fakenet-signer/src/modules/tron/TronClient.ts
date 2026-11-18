@@ -50,12 +50,13 @@ function decodeHexAscii(value: string): string {
 }
 
 function decodeContractResult(value: string): Uint8Array {
-  if (!/^([0-9a-fA-F]{2})*$/.test(value)) {
+  const digits = value.startsWith('0x') ? value.slice(2) : value;
+  if (!/^([0-9a-fA-F]{2})*$/.test(digits)) {
     throw new Error(
       `malformed contractResult element ${JSON.stringify(value)}`
     );
   }
-  return Uint8Array.from(Buffer.from(value, 'hex'));
+  return Uint8Array.from(Buffer.from(digits, 'hex'));
 }
 
 export function parseSolidifiedBlock(body: BlockJson): SolidifiedBlock | null {

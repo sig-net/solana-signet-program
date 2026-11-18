@@ -273,6 +273,11 @@ test('the recorded Nile responses parse as the MPC reads them', () => {
     output: Uint8Array.from([0]),
   });
   assert.deepEqual(parseTransactionInfo({ id: 'AB' })?.contractResult, []);
+  assert.deepEqual(
+    parseTransactionInfo({ id: 'ab', contractResult: ['0x01', ''] })
+      ?.contractResult,
+    [Uint8Array.from([1]), new Uint8Array(0)]
+  );
   assert.throws(
     () => parseTransactionInfo({ id: 'ab', contractResult: ['zz'] }),
     /malformed contractResult/
