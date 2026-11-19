@@ -125,14 +125,15 @@ A Midnight request record with `txParamType` tron (`executionDest`
 `tron:mainnet`) mirrors sig-net/mpc's chain-tron and node admission:
 
 - Refuse it before signing (no signature, no attestation, parked for good)
-  unless the output schema is EMPTY (length 0, padding counts) and the
-  respond schema is empty up to its first NUL. The MPC's `validate` does the
-  same: Tron output extraction defines no schemas yet.
+  when its output schema fails the same check as an EVM request's
+  (`outputSchemaRejection`), or when `expiration` is at or before the source
+  block time, or more than 24 h after it (the MPC's `expiry_bound`).
 - Sign sha256 of the TriggerSmartContract raw whose owner is the derived
   key in Tron form (same derivation as EVM). Never broadcast: the client
   does.
 - Attest only from solidified data: a receipt's verdict at its block
-  (`executed`/`failed`, empty output), or `unviable` at the first solidified
+  (`executed` with `contractResult[0]` decoded by the output schema,
+  `failed` with an empty output), or `unviable` at the first solidified
   block at or past `expiration` once the walk from the TaPoS reference block
   finds no inclusion. An unreadable block or an unresolved reference defers;
   never read absence as empty.
