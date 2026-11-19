@@ -10,7 +10,10 @@ import {
   type TronReader,
   type TronReceipt,
 } from '../src/modules/tron/TronClient';
-import { TronSolidityView } from '../src/modules/tron/TronExpiry';
+import {
+  TronSolidityCache,
+  TronSolidityView,
+} from '../src/modules/tron/TronExpiry';
 import {
   tronExecutionOutcome,
   tronExecutionResult,
@@ -328,7 +331,7 @@ test('the expiry walk defers on a lying reference, a span past the cap, or nothi
     /TaPoS reference unresolved/
   );
   await assert.rejects(
-    new TronSolidityView(nileReader(head), head, 0n).verdict(
+    new TronSolidityView(nileReader(head), head, undefined, 0n).verdict(
       ABSENT_TXID,
       window
     ),
@@ -476,6 +479,68 @@ test('a closed window with inclusion keeps waiting for the receipt', async () =>
   assert.deepEqual(attestations, [
     { kind: 'executed', blockHeight: 71_896_096n, output: '00' },
   ]);
+});
+
+test('the expiry walk keeps one solidity cache across ticks', async () => {
+  const reader = nileReader(71_896_100n);
+  const { watcher } = recordingWatcher(reader);
+  watcher.watch(watchFor(INCLUDED_TXID));
+  await watcher.tick();
+  const firstTick = reader.blockReads.length;
+  assert.ok(firstTick > 0);
+  await watcher.tick();
+  const floor = 71_896_100n - 28_800n;
+  assert.deepEqual(
+    reader.blockReads.slice(firstTick).filter((number) => number >= floor),
+    []
+  );
+  assert.equal(watcher.pendingRequestIds().length, 1);
+});
+
+test('an unsolidified block is never cached: a later pass reads it again, as the MPC does', async () => {
+  const head = 71_896_100n;
+  const inner = nileReader(head);
+  let hidden = true;
+  const reader: TronReader = {
+    ...inner,
+    getBlockSolidity: async (number) =>
+      hidden && number === BLOCK_96.number
+        ? null
+        : inner.getBlockSolidity(number),
+  };
+  const cache = new TronSolidityCache();
+  const window = { ...REFERENCED_95, expiration: BLOCK_96.timestamp };
+  await assert.rejects(
+    new TronSolidityView(reader, head, cache).verdict(ABSENT_TXID, window),
+    /is absent/
+  );
+  hidden = false;
+  assert.deepEqual(
+    await new TronSolidityView(reader, head, cache).verdict(
+      ABSENT_TXID,
+      window
+    ),
+    { kind: 'absent', boundary: 71_896_096n }
+  );
+});
+
+test('the solidity cache drops headers below the walk span and txids no longer scanned', () => {
+  const cache = new TronSolidityCache();
+  const header = { timestamp: 0n, refSlice: new Uint8Array(8) };
+  cache.headers.set(99n, header);
+  cache.headers.set(100n, header);
+  cache.membership.set(
+    'aa',
+    new Map([
+      [99n, false],
+      [100n, false],
+    ])
+  );
+  cache.membership.set('bb', new Map([[100n, false]]));
+  cache.prune(100n + 28_800n, ['aa']);
+  assert.deepEqual([...cache.headers.keys()], [100n]);
+  assert.deepEqual([...cache.membership.keys()], ['aa']);
+  assert.deepEqual([...(cache.membership.get('aa')?.keys() ?? [])], [100n]);
 });
 
 test('a failed post keeps the watch and retries it next tick', async () => {

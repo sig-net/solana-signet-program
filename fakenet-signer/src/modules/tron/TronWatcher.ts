@@ -6,6 +6,7 @@ import {
 } from '../shared/TickGuard';
 import { TronClient, type TronReader } from './TronClient';
 import {
+  TronSolidityCache,
   TronSolidityView,
   isWindowClosed,
   type TronTxWindow,
@@ -41,6 +42,7 @@ export class TronWatcher {
   private readonly attest: TronAttest;
   private readonly pollIntervalMs: number;
   private readonly watches = new Map<string, TronWatch>();
+  private readonly solidity = new TronSolidityCache();
   private intervalId: NodeJS.Timeout | null = null;
   private ticking = false;
 
@@ -179,7 +181,11 @@ export class TronWatcher {
     const closed = open.filter((watch) => isWindowClosed(watch.window, head));
     if (closed.length === 0) return;
 
-    const view = new TronSolidityView(this.reader, head.number);
+    this.solidity.prune(
+      head.number,
+      closed.map((watch) => watch.txid)
+    );
+    const view = new TronSolidityView(this.reader, head.number, this.solidity);
     for (const watch of closed) {
       let verdict;
       try {
