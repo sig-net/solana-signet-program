@@ -46,11 +46,11 @@ import {
   isTronSignBidirectionalEvent,
   OutputKind,
   type SignBidirectionalEvent as MidnightSignBidirectionalEvent,
-  TRON_CAIP2_ID,
   type TronTxParams,
 } from '@sig-net/midnight';
 import { CpiEventParser } from '../events/CpiEventParser';
 import { outputSchemaRejection } from '../modules/shared/OutputSchemaRejection';
+import { midnightRequestRejection } from '../modules/midnight/request-admission';
 import * as borsh from 'borsh';
 import type { Schema } from 'borsh';
 import { getNamespaceFromCaip2 } from '../modules/ChainUtils';
@@ -408,17 +408,21 @@ export class ChainSignatureServer {
   private async handleMidnightSigningRequest(request: MidnightSigningRequest) {
     if (!this.midnightMonitor) return;
 
+    const admission = midnightRequestRejection(
+      request.signetRequest,
+      request.predecessor
+    );
+    if (admission !== undefined) {
+      console.warn(
+        `Midnight: dropping request 0x${Buffer.from(request.requestId).toString('hex')}: ${admission}`
+      );
+      return;
+    }
+
     if (isTronSignBidirectionalEvent(request.signetRequest)) {
       await this.handleMidnightTronSigningRequest(
         request,
         request.signetRequest
-      );
-      return;
-    }
-    if (request.caip2Id === TRON_CAIP2_ID) {
-      console.warn(
-        `Midnight: dropping request 0x${Buffer.from(request.requestId).toString('hex')}: ` +
-          `execution_dest ${TRON_CAIP2_ID} does not name the EVM family its evmType2 params assemble for`
       );
       return;
     }
@@ -514,7 +518,7 @@ export class ChainSignatureServer {
     if (!this.midnightMonitor) return;
     const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
 
-    const rejection = tronRequestRejection(signetRequest, request.caip2Id);
+    const rejection = tronRequestRejection(signetRequest);
     if (rejection !== undefined) {
       console.warn(`Tron: dropping request ${requestIdHex}: ${rejection}`);
       return;

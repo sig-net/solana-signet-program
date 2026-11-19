@@ -235,7 +235,10 @@ test('an evmType2 request naming the Tron destination is dropped before signing'
   const server = new ChainSignatureServer(CONFIG);
   await server['handleMidnightSigningRequest']({
     ...toRequest(tronRecord()),
-    signetRequest: { txParamType: TxParamType.evmType2 } as never,
+    signetRequest: {
+      ...tronRecord(),
+      txParamType: TxParamType.evmType2,
+    } as never,
   });
   assert.equal(evmBuilds.mock.callCount(), 0);
 });

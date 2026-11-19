@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ethers } from 'ethers';
-import { OutputKind, type JsonValue } from '@sig-net/midnight';
+import {
+  contractAddressFromHex,
+  OutputKind,
+  TxParamType,
+  type JsonValue,
+} from '@sig-net/midnight';
 import { EthereumMonitor } from '../src/modules/ethereum/EthereumMonitor';
 import {
   MidnightMonitor,
@@ -264,8 +269,20 @@ const REQUEST: MidnightSigningRequest = {
   dest: 'ethereum',
   params: new Uint8Array(0),
   outputDeserializationSchema: new TextEncoder().encode(EMPTY_SCHEMA),
-  // Read only by buildSerializedTransaction, which the tests mock.
-  signetRequest: {} as MidnightSigningRequest['signetRequest'],
+  // Its txParams are read only by buildSerializedTransaction, which the tests mock.
+  signetRequest: {
+    keyVersion: 1n,
+    sender: contractAddressFromHex('22'.repeat(32)),
+    path: new Uint8Array(32),
+    algo: 0,
+    txParamType: TxParamType.evmType2,
+    txParams: {} as never,
+    executionDest: new TextEncoder().encode('eip155:1'),
+    signatureDest: 0,
+    params: new Uint8Array(64),
+    outputDeserializationSchema: new TextEncoder().encode(EMPTY_SCHEMA),
+    respondSerializationSchema: new Uint8Array(0),
+  },
 };
 function requestTx(calldata: string): Uint8Array {
   return ethers.getBytes(

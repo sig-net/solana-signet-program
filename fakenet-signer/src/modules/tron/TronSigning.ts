@@ -5,7 +5,6 @@ import {
   deriveEpsilon,
   isEvmContractCall,
   type SignBidirectionalEvent,
-  TRON_CAIP2_ID,
   type TronTxParams,
   tronAddressFromEvm,
   tronTransactionId,
@@ -25,12 +24,8 @@ export function tronRequestRejection(
   request: Pick<
     SignBidirectionalEvent<TronTxParams>,
     'outputDeserializationSchema' | 'txParams'
-  >,
-  caip2Id: string
+  >
 ): string | undefined {
-  if (caip2Id !== TRON_CAIP2_ID) {
-    return `execution_dest ${caip2Id} does not name ${TRON_CAIP2_ID}, the chain family the record's tx_params assemble for`;
-  }
   return outputSchemaRejection(
     request.outputDeserializationSchema,
     tronIsContractCall(request.txParams)
