@@ -518,7 +518,10 @@ export class ChainSignatureServer {
     if (!this.midnightMonitor) return;
     const requestIdHex = '0x' + Buffer.from(request.requestId).toString('hex');
 
-    const rejection = tronRequestRejection(signetRequest);
+    const rejection = tronRequestRejection(
+      signetRequest,
+      request.sourceBlockTimeSeconds
+    );
     if (rejection !== undefined) {
       console.warn(`Tron: dropping request ${requestIdHex}: ${rejection}`);
       return;

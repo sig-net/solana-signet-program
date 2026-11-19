@@ -17,6 +17,10 @@ import {
   type MidnightSigningRequest,
 } from '../src/modules/MidnightMonitor';
 import { TronWatcher, type TronWatch } from '../src/modules/tron/TronWatcher';
+import {
+  MAX_EXPIRATION_SPAN_MS,
+  tronExpiryRejection,
+} from '../src/modules/tron/TronSigning';
 import { ChainSignatureServer } from '../src/server/ChainSignatureServer';
 import { serverConfigSchema, type ServerConfig } from '../src/types';
 
@@ -84,14 +88,16 @@ function tronRecord(
 }
 
 function toRequest(
-  record: SignBidirectionalEvent<TronTxParams>
+  record: SignBidirectionalEvent<TronTxParams>,
+  blockTimestamp?: Date
 ): MidnightSigningRequest {
   const monitor = MidnightMonitor.fromServerConfig(CONFIG, {} as never);
   assert.ok(monitor);
   return monitor['toSigningRequest'](
     PREDECESSOR,
     '33'.repeat(32) as never,
-    record
+    record,
+    blockTimestamp
   );
 }
 
@@ -242,6 +248,78 @@ test('an evmType2 request naming the Tron destination is dropped before signing'
   });
   assert.equal(evmBuilds.mock.callCount(), 0);
 });
+
+test('the Tron expiry bound refuses exactly where the MPC does, in its units', () => {
+  const source = 1_792_220_556n;
+  const sourceMs = source * 1000n;
+  assert.match(
+    tronExpiryRejection(sourceMs, source) ?? '',
+    /validity window closed at the source block/
+  );
+  assert.equal(tronExpiryRejection(sourceMs + 1n, source), undefined);
+  assert.equal(
+    tronExpiryRejection(sourceMs + MAX_EXPIRATION_SPAN_MS, source),
+    undefined
+  );
+  assert.match(
+    tronExpiryRejection(sourceMs + MAX_EXPIRATION_SPAN_MS + 1n, source) ?? '',
+    /exceeds the cap/
+  );
+  assert.equal(MAX_EXPIRATION_SPAN_MS, 86_400_000n);
+  assert.equal(tronExpiryRejection(0n, undefined), undefined);
+});
+
+for (const [name, blockMs, expiration, admitted] of [
+  [
+    'an expiration at the source block time',
+    1_792_220_556_000,
+    TRON_PARAMS.expiration,
+    false,
+  ],
+  [
+    'an expiration one millisecond past the source block time',
+    1_792_220_556_000,
+    TRON_PARAMS.expiration + 1n,
+    true,
+  ],
+  [
+    'an expiration in the source block second, its milliseconds truncated',
+    1_792_220_555_999,
+    TRON_PARAMS.expiration,
+    true,
+  ],
+  [
+    'an expiration exactly 24 h past the source block time',
+    1_792_134_156_000,
+    TRON_PARAMS.expiration,
+    true,
+  ],
+  [
+    'an expiration one millisecond past the 24 h cap',
+    1_792_134_156_000,
+    TRON_PARAMS.expiration + 1n,
+    false,
+  ],
+  [
+    'no source block time (the bound is skipped)',
+    undefined,
+    TRON_PARAMS.expiration + 10n * 86_400_000n,
+    true,
+  ],
+] as const) {
+  test(`a Tron request with ${name} is ${admitted ? 'signed' : 'dropped'}`, async (t) => {
+    const { signatures, watches } = mockMidnight(t);
+    const server = new ChainSignatureServer(CONFIG);
+    await server['handleMidnightSigningRequest'](
+      toRequest(
+        tronRecord({ txParams: { ...TRON_PARAMS, expiration } }),
+        blockMs === undefined ? undefined : new Date(blockMs)
+      )
+    );
+    assert.equal(signatures.mock.callCount(), admitted ? 1 : 0);
+    assert.equal(watches.mock.callCount(), admitted ? 1 : 0);
+  });
+}
 
 test('without TRON_RPC_URL a Tron request is signed but never watched', async (t) => {
   const { signatures, watches } = mockMidnight(t);

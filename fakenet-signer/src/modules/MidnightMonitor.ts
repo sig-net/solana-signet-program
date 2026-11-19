@@ -93,6 +93,7 @@ export interface MidnightSigningRequest extends SigningRequest {
    * signing and logging.
    */
   signetRequest: AnySignBidirectionalEvent;
+  sourceBlockTimeSeconds?: bigint;
 }
 
 export interface MidnightMonitorConfig {
@@ -469,6 +470,7 @@ export class MidnightMonitor {
       callerAddress,
       requestId,
       request: signetRequest,
+      blockTimestamp,
     } of resolved) {
       console.log(
         `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
@@ -476,7 +478,8 @@ export class MidnightMonitor {
       const request = this.toSigningRequest(
         callerAddress,
         requestId,
-        signetRequest
+        signetRequest,
+        blockTimestamp
       );
       if (isTronSignBidirectionalEvent(signetRequest)) {
         console.log(
@@ -511,7 +514,8 @@ export class MidnightMonitor {
   private toSigningRequest(
     predecessor: string,
     requestId: RequestIdHex,
-    signetRequest: AnySignBidirectionalEvent
+    signetRequest: AnySignBidirectionalEvent,
+    blockTimestamp?: Date
   ): MidnightSigningRequest {
     const { txParams } = signetRequest;
     // The used words only, for logging. Re-assembly happens in the builder.
@@ -557,6 +561,10 @@ export class MidnightMonitor {
       params: signetRequest.params,
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
       signetRequest,
+      sourceBlockTimeSeconds:
+        blockTimestamp === undefined
+          ? undefined
+          : BigInt(Math.floor(blockTimestamp.getTime() / 1000)),
     };
   }
 

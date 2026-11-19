@@ -20,15 +20,36 @@ export interface SignedTronRequest {
   signature: ethers.Signature;
 }
 
+export const MAX_EXPIRATION_SPAN_MS = 86_400_000n;
+
+export function tronExpiryRejection(
+  expiration: bigint,
+  sourceBlockTimeSeconds: bigint | undefined
+): string | undefined {
+  if (sourceBlockTimeSeconds === undefined) return undefined;
+  const sourceMs = sourceBlockTimeSeconds * 1000n;
+  if (expiration <= sourceMs) {
+    return `validity window closed at the source block: expiration ${expiration} ms, source block ${sourceMs} ms`;
+  }
+  if (expiration > sourceMs + MAX_EXPIRATION_SPAN_MS) {
+    return `expiration ${expiration} ms exceeds the cap over source block ${sourceMs} ms`;
+  }
+  return undefined;
+}
+
 export function tronRequestRejection(
   request: Pick<
     SignBidirectionalEvent<TronTxParams>,
     'outputDeserializationSchema' | 'txParams'
-  >
+  >,
+  sourceBlockTimeSeconds: bigint | undefined
 ): string | undefined {
-  return outputSchemaRejection(
-    request.outputDeserializationSchema,
-    tronIsContractCall(request.txParams)
+  return (
+    outputSchemaRejection(
+      request.outputDeserializationSchema,
+      tronIsContractCall(request.txParams)
+    ) ??
+    tronExpiryRejection(request.txParams.expiration, sourceBlockTimeSeconds)
   );
 }
 
