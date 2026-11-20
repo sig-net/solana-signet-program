@@ -36,15 +36,16 @@ import {
 } from './shared/TickGuard';
 
 import {
+  type AnySignBidirectionalEvent,
   bytesToHex,
   formatSecp256k1PublicKey,
+  isTronSignBidirectionalEvent,
   signetEventSourceFromIndexer,
   signBidirectionalEventToUnsignedEvmTransaction,
   MPCDestination,
   MPCSignatureAlgorithm,
   OutputKind,
   type RequestIdHex,
-  type SignBidirectionalEvent,
   type SignatureRespondedEvent,
   type RespondBidirectionalEvent,
 } from '@sig-net/midnight';
@@ -91,7 +92,8 @@ export interface MidnightSigningRequest extends SigningRequest {
    * `SigningRequest` fields are its decoded view, used for key derivation,
    * signing and logging.
    */
-  signetRequest: SignBidirectionalEvent;
+  signetRequest: AnySignBidirectionalEvent;
+  sourceBlockTimeSeconds?: bigint;
 }
 
 export interface MidnightMonitorConfig {
@@ -468,6 +470,7 @@ export class MidnightMonitor {
       callerAddress,
       requestId,
       request: signetRequest,
+      blockTimestamp,
     } of resolved) {
       console.log(
         `MidnightMonitor: New request ${requestId} from contract ${callerAddress}`
@@ -475,8 +478,15 @@ export class MidnightMonitor {
       const request = this.toSigningRequest(
         callerAddress,
         requestId,
-        signetRequest
+        signetRequest,
+        blockTimestamp
       );
+      if (isTronSignBidirectionalEvent(signetRequest)) {
+        console.log(
+          `  Tron TriggerSmartContract to 0x${bytesToHex(signetRequest.txParams.contractAddress)}` +
+            ` (expiration ${signetRequest.txParams.expiration})`
+        );
+      }
       console.log(
         `  Selector: ${request.calldata.selector ?? '(no calldata)'}`
       );
@@ -504,7 +514,8 @@ export class MidnightMonitor {
   private toSigningRequest(
     predecessor: string,
     requestId: RequestIdHex,
-    signetRequest: SignBidirectionalEvent
+    signetRequest: AnySignBidirectionalEvent,
+    blockTimestamp?: Date
   ): MidnightSigningRequest {
     const { txParams } = signetRequest;
     // The used words only, for logging. Re-assembly happens in the builder.
@@ -518,15 +529,17 @@ export class MidnightMonitor {
     return {
       predecessor,
       requestId: new Uint8Array(Buffer.from(requestId, 'hex')),
-      evmParams: {
-        evmTo: txParams.to,
-        evmChainId: txParams.chainId,
-        evmNonce: txParams.nonce,
-        evmGasLimit: txParams.gasLimit,
-        evmMaxFee: txParams.maxFeePerGas,
-        evmPriorityFee: txParams.maxPriorityFeePerGas,
-        evmValue: txParams.value,
-      },
+      evmParams: isTronSignBidirectionalEvent(signetRequest)
+        ? undefined
+        : {
+            evmTo: signetRequest.txParams.to,
+            evmChainId: signetRequest.txParams.chainId,
+            evmNonce: signetRequest.txParams.nonce,
+            evmGasLimit: signetRequest.txParams.gasLimit,
+            evmMaxFee: signetRequest.txParams.maxFeePerGas,
+            evmPriorityFee: signetRequest.txParams.maxPriorityFeePerGas,
+            evmValue: signetRequest.txParams.value,
+          },
       calldata: {
         selector: txParams.calldata.is_some
           ? `0x${bytesToHex(txParams.calldata.value.selector)}`
@@ -548,12 +561,21 @@ export class MidnightMonitor {
       params: signetRequest.params,
       outputDeserializationSchema: signetRequest.outputDeserializationSchema,
       signetRequest,
+      sourceBlockTimeSeconds:
+        blockTimestamp === undefined
+          ? undefined
+          : BigInt(Math.floor(blockTimestamp.getTime() / 1000)),
     };
   }
 
   // ---- Transaction building & signing ----
 
   buildSerializedTransaction(request: MidnightSigningRequest): Uint8Array {
+    if (isTronSignBidirectionalEvent(request.signetRequest)) {
+      throw new Error(
+        'buildSerializedTransaction: a Tron request assembles a TriggerSmartContract raw, not an EVM transaction'
+      );
+    }
     const unsignedTx = signBidirectionalEventToUnsignedEvmTransaction(
       request.signetRequest
     );
@@ -648,6 +670,24 @@ export class MidnightMonitor {
     await this.postSignatureResponse(signatureResponse);
     console.log(
       `MidnightMonitor: posted signature response for ${data.requestId}`
+    );
+  }
+
+  async postTronSignature(data: {
+    requestId: string;
+    signature: ethers.Signature;
+    txid: string;
+  }): Promise<void> {
+    const signatureResponse = signatureToSignatureRespondedEvent(
+      ethers.getBytes(data.requestId),
+      data.signature
+    );
+    console.log(
+      `MidnightMonitor: posting Tron signature response for ${data.requestId} (txid ${data.txid})...`
+    );
+    await this.postSignatureResponse(signatureResponse);
+    console.log(
+      `MidnightMonitor: posted Tron signature response for ${data.requestId}`
     );
   }
 

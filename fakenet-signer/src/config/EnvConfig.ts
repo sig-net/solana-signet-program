@@ -49,6 +49,8 @@ const envSchema = z
     // The output cache simulation: its TCP port and object prefix.
     OUTPUT_CACHE_PORT: z.coerce.number().int().positive().optional(),
     OUTPUT_CACHE_PREFIX: z.string().optional(),
+    TRON_RPC_URL: z.string().url().optional(),
+    TRON_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     if (!env.DISABLE_SOLANA) {
@@ -66,6 +68,13 @@ const envSchema = z
           message: 'Program ID is required',
         });
       }
+    }
+    if (env.TRON_API_KEY && !env.TRON_RPC_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRON_API_KEY'],
+        message: 'TRON_API_KEY requires TRON_RPC_URL',
+      });
     }
   });
 
@@ -100,6 +109,8 @@ function validateEnv(): EnvConfig {
       MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,
       OUTPUT_CACHE_PORT: nonEmpty(process.env.OUTPUT_CACHE_PORT),
       OUTPUT_CACHE_PREFIX: nonEmpty(process.env.OUTPUT_CACHE_PREFIX),
+      TRON_RPC_URL: nonEmpty(process.env.TRON_RPC_URL),
+      TRON_API_KEY: nonEmpty(process.env.TRON_API_KEY),
     });
 
     return env;

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { ethers } from 'ethers';
-import { OutputKind } from '@sig-net/midnight';
+import {
+  contractAddressFromHex,
+  OutputKind,
+  TxParamType,
+} from '@sig-net/midnight';
 import { EthereumMonitor } from '../src/modules/ethereum/EthereumMonitor';
 import { handleEthereumBidirectional } from '../src/modules/ethereum/BidirectionalHandler';
 import {
@@ -124,18 +128,19 @@ function mockChain(t: TestContext, row: NonceCase): void {
 
 // A plain transfer returns nothing, so its output schema is empty.
 const EMPTY_ABI_SCHEMA = '[]';
+const EVM_PARAMS = {
+  evmTo: new Uint8Array(20).fill(0x11),
+  evmChainId: 1n,
+  evmNonce: BigInt(NONCE),
+  evmGasLimit: 21_000n,
+  evmMaxFee: 1n,
+  evmPriorityFee: 1n,
+  evmValue: 0n,
+};
 const REQUEST: MidnightSigningRequest = {
   predecessor: '22'.repeat(32),
   requestId: new Uint8Array(32).fill(0x33),
-  evmParams: {
-    evmTo: new Uint8Array(20).fill(0x11),
-    evmChainId: 1n,
-    evmNonce: BigInt(NONCE),
-    evmGasLimit: 21_000n,
-    evmMaxFee: 1n,
-    evmPriorityFee: 1n,
-    evmValue: 0n,
-  },
+  evmParams: EVM_PARAMS,
   calldata: { words: [] },
   caip2Id: 'eip155:1',
   keyVersion: 0,
@@ -144,13 +149,25 @@ const REQUEST: MidnightSigningRequest = {
   dest: 'ethereum',
   params: new Uint8Array(0),
   outputDeserializationSchema: new TextEncoder().encode(EMPTY_ABI_SCHEMA),
-  // Read only by buildSerializedTransaction, which the tests mock.
-  signetRequest: {} as MidnightSigningRequest['signetRequest'],
+  // Its txParams are read only by buildSerializedTransaction, which the tests mock.
+  signetRequest: {
+    keyVersion: 1n,
+    sender: contractAddressFromHex('22'.repeat(32)),
+    path: new Uint8Array(32),
+    algo: 0,
+    txParamType: TxParamType.evmType2,
+    txParams: {} as never,
+    executionDest: new TextEncoder().encode('eip155:1'),
+    signatureDest: 0,
+    params: new Uint8Array(64),
+    outputDeserializationSchema: new TextEncoder().encode(EMPTY_ABI_SCHEMA),
+    respondSerializationSchema: new Uint8Array(0),
+  },
 };
 const SIBLING_REQUEST: MidnightSigningRequest = {
   ...REQUEST,
   requestId: new Uint8Array(32).fill(0x66),
-  evmParams: { ...REQUEST.evmParams, evmTo: new Uint8Array(20).fill(0x99) },
+  evmParams: { ...EVM_PARAMS, evmTo: new Uint8Array(20).fill(0x99) },
 };
 
 // The MPC attests Unviable for Midnight only when a watched sibling over

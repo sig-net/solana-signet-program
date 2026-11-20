@@ -8,6 +8,7 @@
 
 import { ContractState } from '@midnight-ntwrk/compact-runtime';
 import {
+  type AnySignBidirectionalEvent,
   decodeSignBidirectionalEventNotificationPayload,
   decodeSignBidirectionalNotification,
   isSignetEventNamed,
@@ -15,11 +16,24 @@ import {
   type RawContractState,
   type RequestIdHex,
   requestIdHex,
-  type SignBidirectionalEvent,
   SignetEventName,
   type SignetEventSource,
+  type SignetMiscEvent,
   type SignetPublicStateSource,
 } from '@sig-net/midnight';
+
+type Pointer = {
+  callerAddress: string;
+  requestsPath: number[];
+  requestId: RequestIdHex;
+  blockTimestamp?: Date;
+};
+
+function eventBlockTimestamp(event: SignetMiscEvent): Date | undefined {
+  return 'blockTimestamp' in event && event.blockTimestamp instanceof Date
+    ? event.blockTimestamp
+    : undefined;
+}
 
 /**
  * A request discovered through a notification event and read from the named
@@ -33,8 +47,8 @@ export interface ResolvedSignetRequest {
   callerAddress: string;
   /** The request id the record is stored under in `callerAddress`'s index. */
   requestId: RequestIdHex;
-  /** The authenticated request record to sign. */
-  request: SignBidirectionalEvent;
+  request: AnySignBidirectionalEvent;
+  blockTimestamp?: Date;
 }
 
 /** Everything a {@link SignetRequestFeed} needs. */
@@ -86,13 +100,8 @@ export class SignetRequestFeed {
    *
    * @returns The deduplicated pointers to look up this cycle.
    */
-  private async notificationPointers(): Promise<
-    { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }[]
-  > {
-    const pointers = new Map<
-      string,
-      { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }
-    >();
+  private async notificationPointers(): Promise<Pointer[]> {
+    const pointers = new Map<string, Pointer>();
     for await (const event of this.eventSource.streamSignetEvents(
       this.signerContractAddress
     )) {
@@ -108,6 +117,7 @@ export class SignetRequestFeed {
           callerAddress: notification.callerAddress,
           requestsPath: notification.requestsPath,
           requestId: requestIdHex(post.requestId),
+          blockTimestamp: eventBlockTimestamp(event),
         };
       } catch (error) {
         console.warn(
@@ -115,10 +125,8 @@ export class SignetRequestFeed {
         );
         continue;
       }
-      pointers.set(
-        `${pointer.callerAddress}:${pointer.requestsPath.join(',')}:${pointer.requestId}`,
-        pointer
-      );
+      const key = `${pointer.callerAddress}:${pointer.requestsPath.join(',')}:${pointer.requestId}`;
+      if (!pointers.has(key)) pointers.set(key, pointer);
     }
     return [...pointers.values()].sort((a, b) => {
       const byCaller =
@@ -178,6 +186,7 @@ export class SignetRequestFeed {
         callerAddress: pointer.callerAddress,
         requestId: pointer.requestId,
         request,
+        blockTimestamp: pointer.blockTimestamp,
       });
     }
     return out;
