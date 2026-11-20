@@ -5,10 +5,12 @@ import {
   MIDNIGHT_RESPOND_BIDIRECTIONAL_PATH,
   MPCDestination,
   MPCSignatureAlgorithm,
-  TRON_CAIP2_ID,
 } from '@sig-net/midnight';
 
 export const LATEST_MPC_KEY_VERSION = 1n;
+
+const ETHEREUM_EXECUTION_DEST = 'eip155:1';
+const TRON_EXECUTION_DEST = 'tron:mainnet';
 
 const RESPONSE_KEY_PATH = (() => {
   const path = new Uint8Array(32);
@@ -71,7 +73,7 @@ export function midnightRequestRejection(
     return `unsupported key_version ${record.keyVersion}: the latest is ${LATEST_MPC_KEY_VERSION}`;
   }
   const isTron = isTronSignBidirectionalEvent(record);
-  if (isTron !== (caip2Id === TRON_CAIP2_ID)) {
+  if (caip2Id !== (isTron ? TRON_EXECUTION_DEST : ETHEREUM_EXECUTION_DEST)) {
     return `execution_dest ${caip2Id} does not name ${isTron ? 'Tron' : 'Ethereum'}, the chain family the record's tx_params assemble for`;
   }
   return undefined;

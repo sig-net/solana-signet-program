@@ -117,6 +117,15 @@ for (const [family, txParamType, dest] of FAMILIES) {
     );
   });
 
+  test(`a ${family} record whose execution_dest is another network of its family is refused`, () => {
+    const testnet = dest === TRON_CAIP2_ID ? 'tron:nile' : 'eip155:11155111';
+    assert.match(
+      midnightRequestRejection(record(txParamType, testnet), READ_ADDRESS) ??
+        '',
+      /does not name/
+    );
+  });
+
   for (const [name, overrides, reason] of REFUSALS) {
     test(`a ${family} record with ${name} is refused`, () => {
       assert.match(

@@ -45,7 +45,7 @@ export interface SigningRequest {
   evmParams?: EvmGasParams;
   /** Calldata fields (selector + words). */
   calldata: CalldataFields;
-  /** CAIP-2 chain identifier, e.g. "eip155:11155111". */
+  /** CAIP-2 chain identifier, e.g. "eip155:1". */
   caip2Id: string;
   /** MPC key version. */
   keyVersion: number;
