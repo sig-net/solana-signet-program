@@ -43,7 +43,7 @@ const envSchema = z
     MIDNIGHT_INDEXER_WS_URL: z.string().optional(),
     MIDNIGHT_NODE_URL: z.string().url().optional(),
     MIDNIGHT_PROOF_SERVER_URL: z.string().url().optional(),
-    MIDNIGHT_SIGNET_CONTRACT_ADDRESS: z.string().optional(),
+    MIDNIGHT_SIGNER_CONTRACT_ADDRESS: z.string().optional(),
     MIDNIGHT_RESPONDER_CONTRACT_ADDRESS: z.string().optional(),
     MIDNIGHT_WALLET_SEED: z.string().optional(),
     // The output cache simulation: its TCP port and object prefix.
@@ -93,8 +93,8 @@ function validateEnv(): EnvConfig {
       MIDNIGHT_INDEXER_WS_URL: process.env.MIDNIGHT_INDEXER_WS_URL,
       MIDNIGHT_NODE_URL: process.env.MIDNIGHT_NODE_URL,
       MIDNIGHT_PROOF_SERVER_URL: process.env.MIDNIGHT_PROOF_SERVER_URL,
-      MIDNIGHT_SIGNET_CONTRACT_ADDRESS:
-        process.env.MIDNIGHT_SIGNET_CONTRACT_ADDRESS,
+      MIDNIGHT_SIGNER_CONTRACT_ADDRESS:
+        process.env.MIDNIGHT_SIGNER_CONTRACT_ADDRESS,
       MIDNIGHT_RESPONDER_CONTRACT_ADDRESS:
         process.env.MIDNIGHT_RESPONDER_CONTRACT_ADDRESS,
       MIDNIGHT_WALLET_SEED: process.env.MIDNIGHT_WALLET_SEED,

@@ -1,12 +1,12 @@
 /**
  * MidnightMonitor - Generic signet monitor for any Midnight contract.
  *
- * Configured with the signet contract address, whose emitted notification
+ * Configured with the signet signer address, whose emitted notification
  * events name the requester contracts, and the signet responder address,
  * which every response is posted to.
  *
  * Flow:
- * 1. Poll the signet contract's notification events (SignetRequestFeed)
+ * 1. Poll the signet signer's notification events (SignetRequestFeed)
  * 2. Enumerate each notified caller's request map and serve every
  *    SignBidirectionalEvent not served before
  * 3. Build ABI calldata + RLP transaction off-chain
@@ -101,16 +101,16 @@ export interface MidnightMonitorConfig {
   nodeUrl: string;
   proofServerUrl: string;
   /**
-   * Address of the deployed signet contract: the responder polls its events
+   * Address of the deployed signet signer: the responder polls its events
    * to discover requests.
    */
-  signetContractAddress: string;
+  signerContractAddress: string;
   /** Address of the deployed signet responder, which responses are posted to. */
   responderContractAddress: string;
   /**
    * Where every attested output's exact bytes go before its attestation is
    * posted: the fakenet's twin of the MPC's output cache, keyed by this
-   * monitor's network id and signet contract address, as the MPC keys it.
+   * monitor's network id and signet signer address, as the MPC keys it.
    */
   outputCache: OutputCacheStore;
   mpcRootKey: string;
@@ -192,7 +192,7 @@ export class MidnightMonitor {
     // The indexer serves both roles: the event stream for discovery and, via
     // the provider, the state source for the caller-ledger reads.
     this.feed = new SignetRequestFeed({
-      signetContractAddress: this.config.signetContractAddress,
+      signerContractAddress: this.config.signerContractAddress,
       source: this.publicDataProvider,
       eventSource: signetEventSourceFromIndexer({
         queryUrl: this.config.indexerUrl,
@@ -200,7 +200,7 @@ export class MidnightMonitor {
     });
 
     console.log(
-      `MidnightMonitor: polling signet contract events at ${this.config.signetContractAddress}`
+      `MidnightMonitor: polling signet signer events at ${this.config.signerContractAddress}`
     );
     console.log(
       `MidnightMonitor: posting responses to the signet responder at ${this.config.responderContractAddress}`
@@ -216,7 +216,7 @@ export class MidnightMonitor {
     console.log('MidnightMonitor: Starting polling...');
     console.log(`  Indexer: ${this.config.indexerUrl}`);
     console.log(
-      `  Signet contract (notification events): ${this.config.signetContractAddress}`
+      `  Signet signer (notification events): ${this.config.signerContractAddress}`
     );
     console.log(
       `  Signet responder (responses): ${this.config.responderContractAddress}`
@@ -607,7 +607,7 @@ export class MidnightMonitor {
     this.config.outputCache.ensureOutput(
       {
         networkId: this.config.networkId,
-        signetContractAddress: this.config.signetContractAddress,
+        signerContractAddress: this.config.signerContractAddress,
       },
       requestId,
       serializedOutput
@@ -684,14 +684,14 @@ export class MidnightMonitor {
     outputCache: OutputCacheStore
   ): MidnightMonitor | null {
     const indexerUrl = config.midnightIndexerUrl;
-    const signetContractAddress = config.midnightSignetContractAddress;
+    const signerContractAddress = config.midnightSignerContractAddress;
     const responderContractAddress = config.midnightResponderContractAddress;
-    if (!indexerUrl || !signetContractAddress || !responderContractAddress) {
+    if (!indexerUrl || !signerContractAddress || !responderContractAddress) {
       // A half-set Midnight config is almost certainly a mistake, so name
       // what is missing instead of silently never starting the leg.
       const missing = Object.entries({
         MIDNIGHT_INDEXER_URL: indexerUrl,
-        MIDNIGHT_SIGNET_CONTRACT_ADDRESS: signetContractAddress,
+        MIDNIGHT_SIGNER_CONTRACT_ADDRESS: signerContractAddress,
         MIDNIGHT_RESPONDER_CONTRACT_ADDRESS: responderContractAddress,
       })
         .filter(([, value]) => !value)
@@ -700,7 +700,7 @@ export class MidnightMonitor {
         console.warn(
           `MidnightMonitor: ${missing.join(', ')} missing. The Midnight leg ` +
             'will NOT start: it needs MIDNIGHT_INDEXER_URL, ' +
-            'MIDNIGHT_SIGNET_CONTRACT_ADDRESS and ' +
+            'MIDNIGHT_SIGNER_CONTRACT_ADDRESS and ' +
             'MIDNIGHT_RESPONDER_CONTRACT_ADDRESS.'
         );
       }
@@ -714,7 +714,7 @@ export class MidnightMonitor {
         config.midnightIndexerWsUrl || indexerUrl.replace('http', 'ws'),
       nodeUrl: config.midnightNodeUrl || 'http://localhost:9944',
       proofServerUrl: config.midnightProofServerUrl || 'http://localhost:6300',
-      signetContractAddress,
+      signerContractAddress,
       responderContractAddress,
       outputCache,
       mpcRootKey: config.mpcRootKey,

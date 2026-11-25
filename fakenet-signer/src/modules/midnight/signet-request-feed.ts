@@ -1,4 +1,4 @@
-// The responder's request discovery: poll the central signet contract's
+// The responder's request discovery: poll the central signet signer's
 // emitted SignBidirectionalEvent notifications and read each declared
 // request from the named caller contract's own request map. A notification
 // says only where to look (caller address, requests path, request id): every
@@ -39,29 +39,29 @@ export interface ResolvedSignetRequest {
 
 /** Everything a {@link SignetRequestFeed} needs. */
 export interface SignetRequestFeedConfig {
-  /** Address of the central signet contract whose notification events to poll. */
-  readonly signetContractAddress: string;
+  /** Address of the central signet signer whose notification events to poll. */
+  readonly signerContractAddress: string;
   /**
    * Source of raw contract state for the requester ledgers the feed
    * enumerates. A full `indexerPublicDataProvider` is assignable.
    */
   readonly source: SignetPublicStateSource;
   /**
-   * Source of the signet contract's emitted events (discovery), such as
+   * Source of the signet signer's emitted events (discovery), such as
    * `signetEventSourceFromIndexer`.
    */
   readonly eventSource: SignetEventSource;
 }
 
 /**
- * The event-polling request feed. Reads the signet contract's emitted
+ * The event-polling request feed. Reads the signet signer's emitted
  * notifications and looks each declared request id up in the pointed-at
  * caller's own request map, yielding each found request once. Dedupes by
  * request id across its lifetime: call {@link forget} to re-arm a request
  * whose downstream processing failed.
  */
 export class SignetRequestFeed {
-  private readonly signetContractAddress: string;
+  private readonly signerContractAddress: string;
   private readonly source: SignetPublicStateSource;
   private readonly eventSource: SignetEventSource;
 
@@ -70,10 +70,10 @@ export class SignetRequestFeed {
   private readonly yielded = new Set<RequestIdHex>();
 
   /**
-   * @param config - The signet contract, state and event sources.
+   * @param config - The signet signer, state and event sources.
    */
   constructor(config: SignetRequestFeedConfig) {
-    this.signetContractAddress = config.signetContractAddress;
+    this.signerContractAddress = config.signerContractAddress;
     this.source = config.source;
     this.eventSource = config.eventSource;
   }
@@ -94,7 +94,7 @@ export class SignetRequestFeed {
       { callerAddress: string; requestsPath: number[]; requestId: RequestIdHex }
     >();
     for await (const event of this.eventSource.streamSignetEvents(
-      this.signetContractAddress
+      this.signerContractAddress
     )) {
       if (!isSignetEventNamed(event, SignetEventName.SignBidirectionalEvent))
         continue;
