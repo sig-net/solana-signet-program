@@ -13,7 +13,7 @@ const BASE: ServerConfig = {
   bitcoinNetwork: 'regtest',
 };
 const INDEXER = 'http://indexer.invalid/api/v4/graphql';
-const SIGNET = 'aa'.repeat(32);
+const SIGNER = 'aa'.repeat(32);
 const RESPONDER = 'bb'.repeat(32);
 
 // The Midnight leg needs the indexer, the signet signer (request
@@ -29,7 +29,7 @@ const CASES: {
     name: 'all three set',
     midnight: {
       midnightIndexerUrl: INDEXER,
-      midnightSignerContractAddress: SIGNET,
+      midnightSignerContractAddress: SIGNER,
       midnightResponderContractAddress: RESPONDER,
     },
     starts: true,
@@ -39,7 +39,7 @@ const CASES: {
     name: 'the responder missing',
     midnight: {
       midnightIndexerUrl: INDEXER,
-      midnightSignerContractAddress: SIGNET,
+      midnightSignerContractAddress: SIGNER,
     },
     starts: false,
     warning: /^MidnightMonitor: MIDNIGHT_RESPONDER_CONTRACT_ADDRESS missing/,
@@ -71,7 +71,7 @@ for (const row of CASES) {
     }
     if (monitor !== null) {
       // Discovery reads the signet signer and responses go to the responder.
-      assert.equal(monitor['config'].signerContractAddress, SIGNET);
+      assert.equal(monitor['config'].signerContractAddress, SIGNER);
       assert.equal(monitor['config'].responderContractAddress, RESPONDER);
     }
   });
