@@ -37,6 +37,8 @@ export interface ServerConfig {
   outputCachePort?: number;
   /** Object prefix of the output cache simulation (default `v1/fakenet`). */
   outputCachePrefix?: string;
+  tronRpcUrl?: string;
+  tronApiKey?: string;
 }
 
 export const serverConfigSchema = z
@@ -82,6 +84,8 @@ export const serverConfigSchema = z
     midnightWalletSeed: z.string().optional(),
     outputCachePort: z.number().int().positive().optional(),
     outputCachePrefix: z.string().optional(),
+    tronRpcUrl: z.string().url().optional(),
+    tronApiKey: z.string().min(1).optional(),
   })
   .superRefine((config, ctx) => {
     if (!config.disableSolana) {
@@ -99,6 +103,13 @@ export const serverConfigSchema = z
           message: 'Program ID is required',
         });
       }
+    }
+    if (config.tronApiKey && !config.tronRpcUrl) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['tronApiKey'],
+        message: 'The Tron API key requires the Tron RPC URL',
+      });
     }
   });
 

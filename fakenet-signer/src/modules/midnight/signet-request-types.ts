@@ -42,11 +42,10 @@ export interface SigningRequest {
   predecessor: string;
   /** Request ID: the map key the record is filed under, recomputed by the SDK over the record (calculateRequestId). */
   requestId: Uint8Array;
-  /** EVM gas/tx parameters. */
-  evmParams: EvmGasParams;
+  evmParams?: EvmGasParams;
   /** Calldata fields (selector + words). */
   calldata: CalldataFields;
-  /** CAIP-2 chain identifier, e.g. "eip155:11155111". */
+  /** CAIP-2 chain identifier, e.g. "eip155:1". */
   caip2Id: string;
   /** MPC key version. */
   keyVersion: number;

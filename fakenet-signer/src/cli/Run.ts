@@ -25,6 +25,8 @@ async function main() {
     midnightWalletSeed: envConfig.MIDNIGHT_WALLET_SEED,
     outputCachePort: envConfig.OUTPUT_CACHE_PORT,
     outputCachePrefix: envConfig.OUTPUT_CACHE_PREFIX,
+    tronRpcUrl: envConfig.TRON_RPC_URL,
+    tronApiKey: envConfig.TRON_API_KEY,
   };
 
   const server = new ChainSignatureServer(config);
